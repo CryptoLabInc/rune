@@ -23,8 +23,8 @@ Alice is the team administrator and needs to deploy:
 
 ```bash
 # Alice clones full Rune repository (not this plugin)
-git clone https://github.com/CryptoLabInc/rune.git
-cd rune
+git clone https://github.com/CryptoLabInc/rune-admin.git
+cd rune-admin
 
 # Deploy to Oracle Cloud Infrastructure
 cd deployment/oci
@@ -65,7 +65,7 @@ terraform apply
 ```bash
 # Alice installs the lightweight plugin
 cd ~/workspace
-/plugin install github.com/CryptoLabInc/rune-plugin
+/plugin install github.com/CryptoLabInc/rune
 
 # Configure with her credentials
 /rune configure
@@ -103,7 +103,7 @@ I've set up our team's organizational memory system. Here are your credentials:
 - API Key: envector_xyz789
 
 **Setup Instructions**:
-1. Run: /plugin install github.com/CryptoLabInc/rune-plugin
+1. Run: /plugin install github.com/CryptoLabInc/rune
 2. Run: /rune configure
 3. Enter the credentials above
 
@@ -116,7 +116,7 @@ Alice
 
 ```bash
 # Bob receives email and installs
-/plugin install github.com/CryptoLabInc/rune-plugin
+/plugin install github.com/CryptoLabInc/rune
 
 # Configure
 /rune configure
@@ -156,7 +156,7 @@ Source: Captured from Alice's session at 10:23 AM"
 Alice sends Carol the same credentials email. Carol installs and configures:
 
 ```bash
-/plugin install github.com/CryptoLabInc/rune-plugin
+/plugin install github.com/CryptoLabInc/rune
 /rune configure
 # Enters same credentials
 ```
