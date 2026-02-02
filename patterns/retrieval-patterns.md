@@ -455,4 +455,4 @@ This document contains comprehensive question patterns that indicate when users 
 
 ---
 
-**Related**: See [patterns/capture-triggers.md](patterns/capture-triggers.md) for context capture patterns.
+**Related**: See [capture-triggers.md](capture-triggers.md) for context capture patterns.
