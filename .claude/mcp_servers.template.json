@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "rune-vault": {
+      "command": "python3",
+      "args": [
+        "PLUGIN_DIR/mcp/vault/vault_mcp.py"
+      ],
+      "env": {
+        "VAULT_CONFIG": "~/.rune/config.json"
+      },
+      "description": "Rune-Vault MCP server for FHE key management and decryption"
+    },
+    "envector": {
+      "command": "python3",
+      "args": [
+        "PLUGIN_DIR/mcp/envector-mcp-server/srcs/server.py"
+      ],
+      "env": {
+        "ENVECTOR_CONFIG": "~/.rune/config.json"
+      },
+      "description": "enVector MCP server for encrypted vector operations"
+    }
+  }
+}

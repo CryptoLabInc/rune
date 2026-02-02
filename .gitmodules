@@ -1,0 +1,3 @@
+[submodule "mcp/envector-mcp-server"]
+	path = mcp/envector-mcp-server
+	url = git@github.com:CryptoLabInc/envector-mcp-server

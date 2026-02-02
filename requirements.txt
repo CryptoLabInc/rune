@@ -1,0 +1,33 @@
+# Rune Plugin Dependencies
+
+# FHE Encryption SDK
+pyenvector>=1.2.0
+
+# MCP Server Framework
+fastmcp>=2.2.0
+
+# System Monitoring
+psutil>=5.9.0
+
+# Metrics and Observability
+prometheus-client>=0.16.0
+
+# HTTP Client
+httpx>=0.24.0
+
+# JSON handling
+python-json-logger>=2.0.0
+
+# enVector MCP Server Dependencies
+pydantic[email]>=2.11.7
+python-dotenv>=1.2.1
+fastembed>=0.7.4
+langchain-text-splitters>=1.0.0
+pypdf>=6.4.1
+
+# Testing (optional)
+pytest>=7.0.0
+pytest-asyncio>=0.18.0
+
+# NumPy (required by pyenvector)
+numpy>=1.24.0

@@ -1,0 +1,200 @@
+{
+  "$schema": "https://claude.ai/schemas/plugin-v1.json",
+  "name": "rune",
+  "displayName": "Rune - Organizational Memory",
+  "version": "0.2.0",
+  "description": "FHE-encrypted organizational memory system for teams. Capture and retrieve institutional knowledge with zero-knowledge privacy.",
+  "author": {
+    "name": "CryptoLabInc",
+    "url": "https://github.com/CryptoLabInc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CryptoLabInc/rune.git"
+  },
+  "license": "MIT",
+  "type": "skill",
+  "entrypoint": "SKILL.md",
+  "install": {
+    "script": "scripts/install.sh",
+    "description": "Installs Python dependencies and sets up MCP servers",
+    "requiresConfirmation": true,
+    "postInstall": [
+      {
+        "script": "scripts/configure-claude-mcp.sh",
+        "description": "Configure Claude MCP servers",
+        "optional": false
+      },
+      {
+        "script": "scripts/start-mcp-servers.sh",
+        "description": "Start Rune MCP servers",
+        "optional": true
+      }
+    ]
+  },
+  "activation": {
+    "mode": "conditional",
+    "checkConfig": {
+      "path": "~/.rune/config.json",
+      "requiredFields": [
+        "vault.url",
+        "vault.token",
+        "envector.endpoint",
+        "envector.api_key",
+        "state"
+      ],
+      "activeWhen": {
+        "state": "active"
+      }
+    },
+    "onInstall": {
+      "prompt": "setup/check-prerequisites.md",
+      "required": false,
+      "allowSkip": true
+    }
+  },
+  "commands": [
+    {
+      "name": "/rune configure",
+      "description": "Configure Vault and enVector credentials",
+      "interactive": true
+    },
+    {
+      "name": "/rune status",
+      "description": "Check plugin activation status"
+    },
+    {
+      "name": "/rune remember",
+      "description": "Manually store organizational context",
+      "args": "<context>"
+    },
+    {
+      "name": "/rune recall",
+      "description": "Search organizational memory",
+      "args": "<query>"
+    },
+    {
+      "name": "/rune activate",
+      "description": "Activate plugin after infrastructure is ready",
+      "aliases": ["/rune wakeup"]
+    },
+    {
+      "name": "/rune reset",
+      "description": "Clear configuration and return to dormant state",
+      "confirm": true
+    }
+  ],
+  "permissions": {
+    "filesystem": {
+      "read": ["~/.rune/config.json", "~/.rune/logs/*"],
+      "write": ["~/.rune/config.json", "~/.rune/logs/*"],
+      "create": ["~/.rune/", "~/.rune/logs/"]
+    },
+    "network": {
+      "description": "Connect to Rune-Vault and enVector Cloud",
+      "hosts": [
+        "*.oci.envector.io",
+        "*.aws.envector.io",
+        "*.gcp.envector.io",
+        "*.envector.io",
+        "api.envector.io",
+        "localhost"
+      ]
+    },
+    "processes": {
+      "description": "Run MCP servers and agents",
+      "commands": [
+        "python3",
+        "bash"
+      ]
+    }
+  },
+  "mcpServers": {
+    "rune-vault": {
+      "description": "Rune-Vault MCP server for FHE key management",
+      "command": "python3",
+      "args": ["mcp/vault/vault_mcp.py"],
+      "env": {
+        "VAULT_CONFIG": "~/.rune/config.json"
+      }
+    },
+    "envector": {
+      "description": "enVector MCP server for encrypted vectors",
+      "command": "python3",
+      "args": ["mcp/envector-mcp-server/srcs/server.py"],
+      "env": {
+        "ENVECTOR_CONFIG": "~/.rune/config.json"
+      }
+    }
+  },
+  "states": {
+    "active": {
+      "displayName": "Active ✅",
+      "description": "Full organizational memory access enabled",
+      "capabilities": [
+        "automatic_context_capture",
+        "context_retrieval",
+        "team_sharing"
+      ]
+    },
+    "dormant": {
+      "displayName": "Dormant ⏸️",
+      "description": "Waiting for configuration",
+      "capabilities": [
+        "show_setup_instructions"
+      ]
+    }
+  },
+  "prerequisites": [
+    {
+      "name": "Rune-Vault Access",
+      "description": "Your team's Vault URL and authentication token",
+      "required": true,
+      "providedBy": "team_administrator",
+      "format": {
+        "url": "https://vault-TEAM.oci.envector.io",
+        "token": "evt_xxx"
+      }
+    },
+    {
+      "name": "enVector Cloud Credentials",
+      "description": "Cluster endpoint and API key from envector.io",
+      "required": true,
+      "providedBy": "envector_cloud",
+      "signupUrl": "https://envector.io",
+      "format": {
+        "endpoint": "https://cluster-xxx.envector.io",
+        "api_key": "envector_xxx"
+      }
+    }
+  ],
+  "security": {
+    "encryption": "FHE (Fully Homomorphic Encryption)",
+    "credentialStorage": "local",
+    "zeroKnowledge": true,
+    "dataProcessing": "All data encrypted before leaving client"
+  },
+  "categories": [
+    "team-collaboration",
+    "knowledge-management",
+    "security",
+    "encryption"
+  ],
+  "tags": [
+    "organizational-memory",
+    "fhe",
+    "encrypted-search",
+    "team-knowledge",
+    "context-memory"
+  ],
+  "documentation": {
+    "readme": "README.md",
+    "setup": "setup/check-prerequisites.md",
+    "fullProject": "https://github.com/CryptoLabInc/rune-admin"
+  },
+  "support": {
+    "issues": "https://github.com/CryptoLabInc/rune/issues",
+    "email": "zotanika@cryptolab.co.kr",
+    "docs": "https://github.com/CryptoLabInc/rune-admin/tree/main/docs"
+  }
+}
