@@ -404,4 +404,4 @@ This document contains comprehensive trigger phrases that indicate when signific
 
 ---
 
-**Related**: See [patterns/retrieval-patterns.md](patterns/retrieval-patterns.md) for context retrieval patterns.
+**Related**: See [retrieval-patterns.md](retrieval-patterns.md) for context retrieval patterns.
