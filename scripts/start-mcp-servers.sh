@@ -2,7 +2,8 @@
 set -e
 
 # Start Rune MCP Servers
-# This script starts the Vault MCP server in the background
+# This script starts the envector-mcp-server locally
+# Note: Vault MCP runs on a remote server deployed by team admin
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$HOME/.rune/logs"
@@ -43,38 +44,44 @@ fi
 
 source "$PLUGIN_DIR/.venv/bin/activate"
 
-# Check if Vault MCP is already running
-if pgrep -f "vault_mcp.py" > /dev/null; then
-    print_warn "Vault MCP server is already running"
-    echo "PID: $(pgrep -f vault_mcp.py)"
-else
-    print_info "Starting Vault MCP server..."
+# Check if envector-mcp-server exists
+if [ ! -f "$PLUGIN_DIR/mcp/envector-mcp-server/srcs/server.py" ]; then
+    print_error "envector-mcp-server not found. Please run: git submodule update --init"
+    exit 1
+fi
 
-    cd "$PLUGIN_DIR/mcp/vault"
-    nohup python3 vault_mcp.py > "$LOG_DIR/vault-mcp.log" 2>&1 &
-    VAULT_PID=$!
+# Check if envector-mcp-server is already running
+if pgrep -f "envector-mcp-server" > /dev/null; then
+    print_warn "enVector MCP server is already running"
+    echo "PID: $(pgrep -f envector-mcp-server)"
+else
+    print_info "Starting enVector MCP server..."
+
+    cd "$PLUGIN_DIR/mcp/envector-mcp-server"
+    nohup python3 srcs/server.py > "$LOG_DIR/envector-mcp.log" 2>&1 &
+    ENVECTOR_PID=$!
 
     # Wait a moment and check if it's still running
     sleep 2
-    if ps -p $VAULT_PID > /dev/null; then
-        print_info "Vault MCP server started (PID: $VAULT_PID)"
-        echo "  Log: $LOG_DIR/vault-mcp.log"
+    if ps -p $ENVECTOR_PID > /dev/null; then
+        print_info "enVector MCP server started (PID: $ENVECTOR_PID)"
+        echo "  Log: $LOG_DIR/envector-mcp.log"
     else
-        print_error "Vault MCP server failed to start"
-        echo "Check logs at: $LOG_DIR/vault-mcp.log"
+        print_error "enVector MCP server failed to start"
+        echo "Check logs at: $LOG_DIR/envector-mcp.log"
         exit 1
     fi
 fi
 
-# TODO: Start envector-mcp-server when available
-# For now, envector-mcp-server should be installed separately
-
-print_info "MCP servers are running"
+print_info "Local MCP server is running"
+echo ""
+echo "Note: Vault MCP runs on remote server (configured in ~/.rune/config.json)"
+echo "      Claude connects to it via SSE at your team's Vault URL"
 echo ""
 echo "To view logs:"
-echo "  tail -f $LOG_DIR/vault-mcp.log"
+echo "  tail -f $LOG_DIR/envector-mcp.log"
 echo ""
-echo "To stop servers:"
-echo "  pkill -f vault_mcp.py"
+echo "To stop server:"
+echo "  pkill -f envector-mcp-server"
 echo ""
 echo "Next: Restart Claude to connect to MCP servers"

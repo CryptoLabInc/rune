@@ -5,6 +5,35 @@ All notable changes to Rune Plugin will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-02-04
+
+### Changed - Security Architecture Fix
+
+**Critical Fix**: Enforced proper isolation between plugin and Vault.
+
+#### Removed
+- **Local Vault MCP**: Removed `mcp/vault/` directory from plugin
+  - Vault MCP server must run on a separate machine (deployed by team admin)
+  - SecKey (decryption key) should never exist on user machines
+  - This enforces the security model where agents cannot decrypt data locally
+
+#### Changed
+- **MCP Configuration**: Updated to connect to remote Vault via SSE
+  - `.claude/mcp_servers.template.json` - Now uses SSE connection to remote Vault
+  - `.github/claude-plugin.json` - Vault connection via `${VAULT_URL}/sse`
+- **start-mcp-servers.sh**: Now only starts envector-mcp-server locally
+  - Vault MCP is accessed remotely (no local startup needed)
+
+#### Architecture Clarification
+```
+Plugin (user machine)           Vault (admin-deployed VM)
+├── envector-mcp-server    ──►  └── vault_mcp.py (SecKey here only)
+│   (encryption only)               (decryption capability)
+└── No SecKey access
+```
+
+---
+
 ## [0.2.0] - 2026-02-02
 
 ### Added - Complete Plugin with MCP Servers
@@ -12,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 **Major Update**: Transformed from documentation-only plugin to full-featured plugin with infrastructure.
 
 #### Infrastructure
-- **MCP Servers**: Included Vault MCP server (`mcp/vault/vault_mcp.py`)
+- **MCP Servers**: Included envector-mcp-server for encrypted vector operations
 - **Agent Specifications**: Added Scribe and Retriever agent specs (`agents/`)
 - **Python Dependencies**: Added `requirements.txt` with pyenvector, fastmcp, psutil, prometheus-client
 - **Installation Scripts**:

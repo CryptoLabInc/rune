@@ -1,14 +1,9 @@
 {
   "mcpServers": {
     "rune-vault": {
-      "command": "python3",
-      "args": [
-        "PLUGIN_DIR/mcp/vault/vault_mcp.py"
-      ],
-      "env": {
-        "VAULT_CONFIG": "~/.rune/config.json"
-      },
-      "description": "Rune-Vault MCP server for FHE key management and decryption"
+      "type": "sse",
+      "url": "VAULT_URL/sse",
+      "description": "Remote Rune-Vault MCP server for FHE decryption (deployed by team admin)"
     },
     "envector": {
       "command": "python3",
