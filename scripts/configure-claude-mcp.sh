@@ -44,7 +44,7 @@ def deep_merge(base, overlay):
     return base
 
 if len(sys.argv) != 3:
-    print("Error: Expected 2 arguments (config_file, template_file)", file=sys.stderr)
+    print("Error: Expected exactly 2 file path arguments (config_file, template_file)", file=sys.stderr)
     sys.exit(1)
 
 config_file = sys.argv[1]
