@@ -30,7 +30,7 @@ sed "s|PLUGIN_DIR|$PLUGIN_DIR|g" "$PLUGIN_DIR/.claude/mcp_servers.template.json"
 
 # Merge with existing config using jq or Python fallback
 merge_json_with_python() {
-    python3 << PYEOF
+    python3 - "$CLAUDE_CONFIG" "$TEMP_CONFIG" << 'PYEOF'
 import json
 import sys
 
@@ -43,14 +43,21 @@ def deep_merge(base, overlay):
             base[key] = value
     return base
 
+if len(sys.argv) != 3:
+    print("Error: Expected exactly 2 arguments: base_config_path overlay_config_path", file=sys.stderr)
+    sys.exit(1)
+
+base_config_file = sys.argv[1]
+overlay_config_file = sys.argv[2]
+
 try:
-    with open("$CLAUDE_CONFIG", 'r') as f:
+    with open(base_config_file, 'r') as f:
         base = json.load(f)
 except (json.JSONDecodeError, FileNotFoundError):
     base = {}
 
 try:
-    with open("$TEMP_CONFIG", 'r') as f:
+    with open(overlay_config_file, 'r') as f:
         overlay = json.load(f)
 except (json.JSONDecodeError, FileNotFoundError):
     print("Error: Failed to read template config", file=sys.stderr)
@@ -58,7 +65,7 @@ except (json.JSONDecodeError, FileNotFoundError):
 
 merged = deep_merge(base, overlay)
 
-with open("$CLAUDE_CONFIG", 'w') as f:
+with open(base_config_file, 'w') as f:
     json.dump(merged, f, indent=2)
 
 print("✓ MCP servers configured successfully")
