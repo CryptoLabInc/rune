@@ -44,20 +44,20 @@ def deep_merge(base, overlay):
     return base
 
 if len(sys.argv) != 3:
-    print("Error: Expected exactly 2 file path arguments (config_file, template_file)", file=sys.stderr)
+    print("Error: Expected exactly 2 arguments: base_config_path overlay_config_path", file=sys.stderr)
     sys.exit(1)
 
-config_file = sys.argv[1]
-template_file = sys.argv[2]
+base_config_file = sys.argv[1]
+overlay_config_file = sys.argv[2]
 
 try:
-    with open(config_file, 'r') as f:
+    with open(base_config_file, 'r') as f:
         base = json.load(f)
 except (json.JSONDecodeError, FileNotFoundError):
     base = {}
 
 try:
-    with open(template_file, 'r') as f:
+    with open(overlay_config_file, 'r') as f:
         overlay = json.load(f)
 except (json.JSONDecodeError, FileNotFoundError):
     print("Error: Failed to read template config", file=sys.stderr)
@@ -65,7 +65,7 @@ except (json.JSONDecodeError, FileNotFoundError):
 
 merged = deep_merge(base, overlay)
 
-with open(config_file, 'w') as f:
+with open(base_config_file, 'w') as f:
     json.dump(merged, f, indent=2)
 
 print("✓ MCP servers configured successfully")
