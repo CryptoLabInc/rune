@@ -28,18 +28,56 @@ echo "Config file: $CLAUDE_CONFIG"
 TEMP_CONFIG=$(mktemp)
 sed "s|PLUGIN_DIR|$PLUGIN_DIR|g" "$PLUGIN_DIR/.claude/mcp_servers.template.json" > "$TEMP_CONFIG"
 
-# Merge with existing config (simple approach: add rune servers)
-# TODO: Proper JSON merging for production
+# Merge with existing config using jq or Python fallback
+merge_json_with_python() {
+    python3 << PYEOF
+import json
+import sys
+
+def deep_merge(base, overlay):
+    """Recursively merge overlay into base."""
+    for key, value in overlay.items():
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+try:
+    with open("$CLAUDE_CONFIG", 'r') as f:
+        base = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    base = {}
+
+try:
+    with open("$TEMP_CONFIG", 'r') as f:
+        overlay = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    print("Error: Failed to read template config", file=sys.stderr)
+    sys.exit(1)
+
+merged = deep_merge(base, overlay)
+
+with open("$CLAUDE_CONFIG", 'w') as f:
+    json.dump(merged, f, indent=2)
+
+print("✓ MCP servers configured successfully")
+PYEOF
+}
+
 if command -v jq &> /dev/null; then
     # Use jq if available
     jq -s '.[0] * .[1]' "$CLAUDE_CONFIG" "$TEMP_CONFIG" > "$CLAUDE_CONFIG.tmp"
     mv "$CLAUDE_CONFIG.tmp" "$CLAUDE_CONFIG"
     echo "✓ MCP servers configured successfully"
+elif command -v python3 &> /dev/null; then
+    # Fallback: use Python for JSON merging
+    merge_json_with_python
 else
-    # Fallback: just append (may create duplicate keys)
-    echo "Warning: jq not found. Using simple append."
-    cat "$TEMP_CONFIG" >> "$CLAUDE_CONFIG"
-    echo "✓ MCP configuration appended (you may need to manually clean up)"
+    echo "Error: Neither jq nor python3 found. Cannot merge JSON configuration."
+    echo "Please install jq (recommended) or python3."
+    rm "$TEMP_CONFIG"
+    exit 1
 fi
 
 rm "$TEMP_CONFIG"

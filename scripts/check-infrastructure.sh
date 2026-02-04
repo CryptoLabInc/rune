@@ -59,14 +59,16 @@ else
     print_warn "curl not found, skipping Vault connectivity check"
 fi
 
-# Check if MCP servers are running
-if pgrep -f "vault_mcp.py" > /dev/null; then
-    print_check "Vault MCP server is running (PID: $(pgrep -f vault_mcp.py))"
+# Check if local envector-mcp-server is running
+if pgrep -f "envector-mcp-server" > /dev/null; then
+    print_check "enVector MCP server is running (PID: $(pgrep -f envector-mcp-server))"
 else
-    print_warn "Vault MCP server is not running"
+    print_warn "enVector MCP server is not running locally"
     echo "  Start with: scripts/start-mcp-servers.sh"
     # Not failing here, as it can be started later
 fi
+
+# Note: Vault MCP runs on remote server (already checked via HTTP above)
 
 # Check if virtual environment exists
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
