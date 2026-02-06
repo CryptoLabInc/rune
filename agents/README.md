@@ -63,7 +63,7 @@ This directory contains agent specifications and implementation guides.
 
 2. Detect significant events
    ├─ Pattern matching
-   ├─ ML classification
+   ├─ Similarity based classification
    └─ Human review (optional)
 
 3. Extract context

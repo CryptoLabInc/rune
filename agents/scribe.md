@@ -162,7 +162,7 @@ CONTEXT_SIGNALS = [
 ]
 ```
 
-### Stage 2: ML Classification (Deep Analysis)
+### Stage 2: Similarity based classification (Deep Analysis)
 
 ```python
 # For medium-confidence matches
