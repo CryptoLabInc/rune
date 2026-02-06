@@ -22,18 +22,19 @@ This is the **complete plugin** with everything needed to run Rune locally:
 
 **Architecture**:
 ```
-Your Machine                    Cloud Infrastructure
-━━━━━━━━━━━━━                  ━━━━━━━━━━━━━━━━━━━━━
-Claude + Rune Plugin     →     Rune-Vault (team-shared)
-  ├─ Vault MCP Server    →       ↓ (decryption)
-  ├─ enVector MCP Server →     enVector Cloud (encrypted vectors)
-  ├─ Scribe Agent                 ↑ (encryption)
+Your Machine                    Cloud / Team Infrastructure
+━━━━━━━━━━━━━                  ━━━━━━━━━━━━━━━━━━━━━━━━━━
+Claude + Rune Plugin
+  ├─ enVector MCP Server ──→   enVector Cloud (encrypted vectors)
+  │    └─ remember tool  ──→   Rune-Vault (team-shared, SecKey holder)
+  ├─ Scribe Agent                   decrypts result ciphertext, returns top-k
   └─ Retriever Agent
 ```
 
 **Data Flow**:
-- **Capture**: Scribe → enVector MCP Server (encrypt) → enVector Cloud
-- **Retrieve**: Query → enVector Cloud → Vault MCP Server (decrypt via Rune-Vault) → Claude
+- **Capture**: Scribe → enVector MCP `insert` (encrypt with EncKey) → enVector Cloud
+- **Recall**: Retriever → enVector MCP `remember` → encrypted similarity search → Vault decrypts result ciphertext → metadata → Claude
+- Agent and MCP server never hold SecKey. Only Vault decrypts.
 
 ## Prerequisites
 
@@ -325,36 +326,44 @@ To deploy the full Rune infrastructure (Vault + MCP servers), see:
 ```mermaid
 flowchart TD
     Cloud[("enVector Cloud<br>(Encrypted Storage)")]
-    
-    subgraph Encryption [Encryption Layer]
-        MCP["envector-mcp-server<br>(Public Keys)"]
+
+    subgraph MCP [envector-mcp-server]
+        Search["search tool<br>(direct, decrypt=True)"]
+        Remember["remember tool<br>(Vault-secured pipeline)"]
     end
-    
-    subgraph Decryption [Decryption Layer]
-        Vault["Rune-Vault<br>(Secret Key)"]
+
+    subgraph Vault [Rune-Vault]
+        Decrypt["decrypt_scores()<br>(SecKey holder)"]
     end
-    
+
     subgraph Client [Client Agents]
         Agent["Claude / Gemini / Custom"]
     end
 
-    %% Flow
-    Agent -- "1. Encrypt / Search" --> MCP
-    MCP <-->|Encrypted Data| Cloud
-    
-    Agent -- "2. Decrypt Results" --> Vault
-    Vault -- "Plaintext" --> Agent
+    %% Capture flow
+    Agent -- "insert / search" --> Search
+    Search <-->|Encrypted Data| Cloud
+
+    %% Recall flow (3-step pipeline)
+    Agent -- "remember" --> Remember
+    Remember -- "1. search(decrypt=False)<br>encrypted similarity search" --> Cloud
+    Remember -- "2. decrypt result ciphertext" --> Decrypt
+    Decrypt -- "indices + similarity values" --> Remember
+    Remember -- "3. metadata" --> Agent
 
     %% Styles
     style Cloud fill:#eff,stroke:#333
-    style MCP fill:#eef,stroke:#333
-    style Vault fill:#fee,stroke:#333
+    style Search fill:#eef,stroke:#333
+    style Remember fill:#eef,stroke:#333
+    style Decrypt fill:#fee,stroke:#333
     style Agent fill:#efe,stroke:#333
 ```
 
-**Key Difference**: 
-- **Rune-Vault** holds the **Secret Key** and only performs decryption of search results. It never sees the raw vectors during ingestion.
-- **envector-mcp-server** uses **Public Keys** to encrypt data and perform searches. It can be scaled horizontally and doesn't hold the secret key.
+**Key Architecture**:
+- **Agent** calls MCP tools (`insert`, `search`, `remember`). Agent never contacts Vault directly.
+- **`remember` tool** orchestrates the 3-step pipeline: encrypted similarity search → Vault decryption → metadata retrieval.
+- **Rune-Vault** holds **SecKey** and decrypts the result ciphertext (encrypted similarity search output). It never sees raw vectors or metadata.
+- **envector-mcp-server** uses **Public Keys** (EncKey, EvalKey) for encryption and search. It can be scaled horizontally.
 
 ## Related Projects
 
