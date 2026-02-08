@@ -17,7 +17,7 @@ This is the **complete plugin** with everything needed to run Rune locally:
 - ✅ Configuration management
 
 **Requires External Infrastructure** (deploy separately):
-- ⚠️ Rune-Vault server (team-shared, deployed by admin) found at [https://github.com/CryptoLabInc/rune-admin](https://github.com/CryptoLabInc/rune-admin)
+- ⚠️ Rune-Vault server (team-shared, deployed by admin)
 - ⚠️ enVector Cloud account (sign up at [envector.io](https://envector.io))
 
 **Architecture**:
