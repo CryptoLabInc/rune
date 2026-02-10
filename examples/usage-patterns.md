@@ -424,29 +424,6 @@ Source: Captured from infra team 2 months ago"
 
 ---
 
-## Metrics and Insights
-
-Track organizational memory effectiveness:
-
-```
-Developer: "How many architectural decisions have we captured this quarter?"
-
-Claude: [Analyzes organizational memory metadata]
-
-Result:
-- Total decisions: 47
-- Categories:
-  - Architecture: 12
-  - Security: 8
-  - Performance: 7
-  - Process: 10
-  - Code patterns: 10
-
-Most active period: First 2 weeks of quarter (sprint planning)
-```
-
----
-
 ## Summary
 
 **Automatic Capture**: Let Claude identify significant context naturally
