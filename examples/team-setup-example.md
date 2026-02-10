@@ -217,22 +217,6 @@ If someone leaves the team:
 
 ---
 
-## Cost Analysis
-
-### Infrastructure (Monthly)
-- **Rune-Vault**: $50/month (single VM, team-shared)
-- **enVector Cloud**: $100/month (shared cluster, ~100GB encrypted data)
-- **Total**: $150/month for entire team
-
-### Time Saved
-- Onboarding time: 2 days → 30 minutes
-- Context searches: 10 min/day → instant
-- Repeated questions: 5/day → 0
-
-**ROI**: Positive within first week
-
----
-
 ## Troubleshooting
 
 ### Bob can't connect

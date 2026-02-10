@@ -26,15 +26,16 @@ Your Machine                    Cloud / Team Infrastructure
 ━━━━━━━━━━━━━                  ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Claude + Rune Plugin
   ├─ enVector MCP Server ──→   enVector Cloud (encrypted vectors)
-  │    └─ remember tool  ──→   Rune-Vault (team-shared, SecKey holder)
+  │    └─ remember tool  ──→   Rune-Vault (team-shared, secret key holder)
   ├─ Scribe Agent                   decrypts result ciphertext, returns top-k
   └─ Retriever Agent
 ```
 
 **Data Flow**:
 - **Capture**: Scribe → enVector MCP `insert` (encrypt with EncKey) → enVector Cloud
-- **Recall**: Retriever → enVector MCP `remember` → encrypted similarity search → Vault decrypts result ciphertext → metadata → Claude
-- Agent and MCP server never hold SecKey. Only Vault decrypts.
+- **Own data search**: enVector MCP `search` → encrypted similarity scoring on enVector Cloud → MCP server decrypts locally (secret key held by MCP server runtime)
+- **Shared memory recall**: enVector MCP `remember` → encrypted similarity scoring on enVector Cloud → Rune-Vault decrypts result ciphertext (secret key held exclusively by Vault) → retrieve metadata for top-k indices
+- The `remember` tool isolates secret key in Vault, preventing agent tampering attacks from decrypting shared vectors.
 
 ## Prerequisites
 
@@ -328,12 +329,12 @@ flowchart TD
     Cloud[("enVector Cloud<br>(Encrypted Storage)")]
 
     subgraph MCP [envector-mcp-server]
-        Search["search tool<br>(direct, decrypt=True)"]
-        Remember["remember tool<br>(Vault-secured pipeline)"]
+        Search["search tool<br>(local secret key, owner's data)"]
+        Remember["remember tool<br>(Vault-secured, shared team memory)"]
     end
 
     subgraph Vault [Rune-Vault]
-        Decrypt["decrypt_scores()<br>(SecKey holder)"]
+        Decrypt["decrypt_scores()<br>(secret key holder)"]
     end
 
     subgraph Client [Client Agents]
@@ -346,10 +347,10 @@ flowchart TD
 
     %% Recall flow (3-step pipeline)
     Agent -- "remember" --> Remember
-    Remember -- "1. search(decrypt=False)<br>encrypted similarity search" --> Cloud
-    Remember -- "2. decrypt result ciphertext" --> Decrypt
+    Remember -- "1. encrypted similarity scoring" --> Cloud
+    Remember -- "2. decrypt result ciphertext<br>(secret key never leaves Vault)" --> Decrypt
     Decrypt -- "indices + similarity values" --> Remember
-    Remember -- "3. metadata" --> Agent
+    Remember -- "3. retrieve metadata<br>for top-k indices" --> Agent
 
     %% Styles
     style Cloud fill:#eff,stroke:#333
@@ -361,8 +362,9 @@ flowchart TD
 
 **Key Architecture**:
 - **Agent** calls MCP tools (`insert`, `search`, `remember`). Agent never contacts Vault directly.
-- **`remember` tool** orchestrates the 3-step pipeline: encrypted similarity search → Vault decryption → metadata retrieval.
-- **Rune-Vault** holds **SecKey** and decrypts the result ciphertext (encrypted similarity search output). It never sees raw vectors or metadata.
+- **`search` tool** searches the operator's own encrypted data. The decryption key (secret key) is held locally by the MCP server runtime.
+- **`remember` tool** recalls from shared team memory. It orchestrates a 3-step pipeline: encrypted similarity scoring on enVector Cloud → Rune-Vault decrypts result ciphertext with secret key → retrieve metadata for top-k indices. This isolation prevents agent tampering attacks from indiscriminately decrypting shared vectors.
+- **Rune-Vault** holds **secret key** exclusively and decrypts the result ciphertext. It never sees raw vectors or metadata.
 - **envector-mcp-server** uses **Public Keys** (EncKey, EvalKey) for encryption and search. It can be scaled horizontally.
 
 ## Related Projects
