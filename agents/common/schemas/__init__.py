@@ -23,7 +23,7 @@ from .decision_record import (
     ReviewState,
     generate_record_id,
 )
-from .templates import render_payload_text, PAYLOAD_TEMPLATE
+from .templates import render_payload_text, render_display_text, PAYLOAD_TEMPLATE, PAYLOAD_HEADERS
 
 __all__ = [
     "DecisionRecord",
@@ -44,5 +44,7 @@ __all__ = [
     "ReviewState",
     "generate_record_id",
     "render_payload_text",
+    "render_display_text",
     "PAYLOAD_TEMPLATE",
+    "PAYLOAD_HEADERS",
 ]

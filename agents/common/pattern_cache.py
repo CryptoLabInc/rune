@@ -20,6 +20,7 @@ class PatternEntry:
     priority: str  # "high", "medium", "low"
     embedding: List[float]
     domain: Optional[str] = None
+    language: Optional[str] = None  # ISO 639-1: "en", "ko", "ja"
 
 
 class PatternCache:
@@ -83,7 +84,8 @@ class PatternCache:
                 category=p.get("category", "general"),
                 priority=p.get("priority", "medium"),
                 domain=p.get("domain"),
-                embedding=embeddings[i]
+                embedding=embeddings[i],
+                language=p.get("language"),
             )
             for i, p in enumerate(patterns)
         ]

@@ -81,23 +81,23 @@ Once configured with `/rune configure`:
 
 ### Example Usage
 
-**Automatic capture**:
+**Automatic capture (Scribe)** — the primary path, no commands needed:
 ```
 You: "We decided to use PostgreSQL because it has better JSON support than MySQL"
-Claude: [Automatically stores this decision in organizational memory]
+Claude: [Scribe automatically detects and stores this decision in organizational memory]
 ```
 
-**Manual storage**:
-```
-You: /rune remember "All API endpoints must use JWT authentication"
-Claude: ✓ Stored in organizational memory
-```
-
-**Retrieval**:
+**Automatic retrieval (Retriever)** — just ask naturally:
 ```
 You: "Why did we choose PostgreSQL?"
 Claude: According to organizational memory from 2 weeks ago:
 "We decided to use PostgreSQL because it has better JSON support than MySQL"
+```
+
+**Manual override** — only when automatic capture missed something:
+```
+You: /rune remember "All API endpoints must use JWT authentication"
+Claude: Stored in organizational memory
 ```
 
 ---

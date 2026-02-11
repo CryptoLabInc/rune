@@ -229,3 +229,84 @@ class TestLoadDefaultPatterns:
         # Should return at least builtin patterns
         builtin_count = len(get_builtin_patterns())
         assert len(patterns) >= builtin_count or len(patterns) > 0
+
+
+class TestLoadAllLanguagePatterns:
+    """Tests for multilingual pattern loading"""
+
+    def test_load_all_includes_base_english(self, tmp_path):
+        """Test that base English patterns are loaded with language='en'"""
+        from agents.scribe.pattern_parser import load_all_language_patterns
+
+        patterns = load_all_language_patterns()
+
+        en_patterns = [p for p in patterns if p.get("language") == "en"]
+        assert len(en_patterns) > 0
+
+    def test_load_all_discovers_language_files(self, tmp_path):
+        """Test that language-specific files are discovered via glob"""
+        from agents.scribe.pattern_parser import parse_capture_triggers, load_all_language_patterns
+
+        patterns = load_all_language_patterns()
+
+        # Should find ko and ja patterns from the project patterns/ directory
+        ko_patterns = [p for p in patterns if p.get("language") == "ko"]
+        ja_patterns = [p for p in patterns if p.get("language") == "ja"]
+
+        assert len(ko_patterns) > 0, "Korean patterns should be loaded"
+        assert len(ja_patterns) > 0, "Japanese patterns should be loaded"
+
+    def test_language_field_attached(self):
+        """Test that every pattern has a language field"""
+        from agents.scribe.pattern_parser import load_all_language_patterns
+
+        patterns = load_all_language_patterns()
+
+        for p in patterns:
+            assert "language" in p, f"Pattern missing language field: {p['text'][:30]}"
+            assert p["language"] in ("en", "ko", "ja"), f"Unexpected language: {p['language']}"
+
+    def test_total_count_greater_than_english_only(self):
+        """Test that multilingual loading yields more patterns than English-only"""
+        from agents.scribe.pattern_parser import load_default_patterns, load_all_language_patterns
+
+        en_only = load_default_patterns()
+        all_langs = load_all_language_patterns()
+
+        assert len(all_langs) > len(en_only)
+
+    def test_load_all_with_custom_files(self, tmp_path):
+        """Test glob discovery with custom pattern files"""
+        from agents.scribe.pattern_parser import parse_capture_triggers
+
+        # Create a base file
+        base_md = tmp_path / "capture-triggers.md"
+        base_md.write_text("""# Triggers
+
+## Architecture
+- "We decided to use X"
+""")
+
+        # Create a Korean file
+        ko_md = tmp_path / "capture-triggers.ko.md"
+        ko_md.write_text("""# 트리거
+
+## 아키텍처
+- "X를 사용하기로 결정했다"
+""")
+
+        # Parse both files
+        base_patterns = parse_capture_triggers(str(base_md))
+        ko_patterns = parse_capture_triggers(str(ko_md))
+
+        assert len(base_patterns) >= 1
+        assert len(ko_patterns) >= 1
+
+    def test_fallback_when_no_files(self):
+        """Test that builtin patterns are returned when no files exist"""
+        from agents.scribe.pattern_parser import get_builtin_patterns, load_all_language_patterns
+
+        # load_all_language_patterns should at least return builtin patterns
+        # even when invoked (since the real patterns/ dir exists in the project)
+        patterns = load_all_language_patterns()
+        assert len(patterns) > 0

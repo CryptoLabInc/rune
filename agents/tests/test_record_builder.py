@@ -188,6 +188,212 @@ class TestRecordBuilder:
         assert record.validate_evidence_certainty()
 
 
+class TestRecordBuilderMultilingual:
+    """Tests for multilingual (LLM extraction) path in RecordBuilder"""
+
+    @pytest.fixture
+    def mock_llm_extractor(self):
+        from unittest.mock import Mock
+        from agents.scribe.llm_extractor import LLMExtractor, ExtractedFields
+
+        extractor = Mock(spec=LLMExtractor)
+        extractor.is_available = True
+        extractor.extract.return_value = ExtractedFields(
+            title="Adopt PostgreSQL for database",
+            rationale="Better JSON support and team familiarity with PostgreSQL",
+            problem="Need a reliable database for financial transactions",
+            alternatives=["MySQL", "MongoDB"],
+            trade_offs=["More complex setup required"],
+            status_hint="accepted",
+            tags=["database", "postgresql"],
+        )
+        return extractor
+
+    @pytest.fixture
+    def builder_with_llm(self, mock_llm_extractor):
+        from agents.scribe.record_builder import RecordBuilder
+        from agents.common.schemas import Sensitivity
+
+        return RecordBuilder(
+            default_sensitivity=Sensitivity.INTERNAL,
+            llm_extractor=mock_llm_extractor,
+        )
+
+    @pytest.fixture
+    def korean_raw_event(self):
+        from agents.scribe.record_builder import RawEvent
+
+        return RawEvent(
+            text='PostgreSQL을 사용하기로 결정했습니다. "JSON 지원이 좋고 팀이 익숙하기 때문" 이라고 합의했습니다.',
+            user="U99999",
+            channel="architecture",
+            timestamp="1706799600.123456",
+            source="slack",
+            url="https://slack.com/archives/C123/p1706799600123456",
+        )
+
+    @pytest.fixture
+    def sample_detection(self):
+        from agents.scribe.detector import DetectionResult
+
+        return DetectionResult(
+            is_significant=True,
+            confidence=0.85,
+            matched_pattern="X를 사용하기로 결정했다",
+            category="architecture",
+            domain="architecture",
+            priority="high",
+        )
+
+    def test_llm_path_used_for_korean(self, builder_with_llm, korean_raw_event, sample_detection, mock_llm_extractor):
+        """Test that LLM extractor is called for Korean text"""
+        from agents.common.language import LanguageInfo
+
+        language = LanguageInfo(code="ko", confidence=0.95, script="Hangul")
+        record = builder_with_llm.build(korean_raw_event, sample_detection, language=language)
+
+        mock_llm_extractor.extract.assert_called_once()
+        assert record is not None
+        assert record.title == "Adopt PostgreSQL for database"
+
+    def test_llm_extracted_fields_used(self, builder_with_llm, korean_raw_event, sample_detection):
+        """Test that LLM-extracted fields are used in the record"""
+        from agents.common.language import LanguageInfo
+        from agents.common.schemas import Status
+
+        language = LanguageInfo(code="ko", confidence=0.95, script="Hangul")
+        record = builder_with_llm.build(korean_raw_event, sample_detection, language=language)
+
+        assert record.why.rationale_summary == "Better JSON support and team familiarity with PostgreSQL"
+        assert record.context.problem == "Need a reliable database for financial transactions"
+        assert "MySQL" in record.context.alternatives
+        assert "MongoDB" in record.context.alternatives
+        assert record.status == Status.ACCEPTED
+        assert "database" in record.tags
+
+    def test_english_path_unchanged_without_language(self, builder_with_llm, sample_detection, mock_llm_extractor):
+        """Test that English path is used when language is None"""
+        from agents.scribe.record_builder import RawEvent
+
+        event = RawEvent(
+            text='We decided to use PostgreSQL because "better JSON support"',
+            user="U12345",
+            channel="architecture",
+            timestamp="1706799600",
+            source="slack",
+        )
+
+        record = builder_with_llm.build(event, sample_detection)
+
+        # LLM extractor should NOT be called for English (language=None)
+        mock_llm_extractor.extract.assert_not_called()
+        assert record is not None
+
+    def test_english_path_when_language_is_english(self, builder_with_llm, sample_detection, mock_llm_extractor):
+        """Test that English path is used when language.is_english"""
+        from agents.scribe.record_builder import RawEvent
+        from agents.common.language import LanguageInfo
+
+        event = RawEvent(
+            text='We decided to use PostgreSQL because "better JSON support"',
+            user="U12345",
+            channel="architecture",
+            timestamp="1706799600",
+            source="slack",
+        )
+
+        language = LanguageInfo(code="en", confidence=0.99, script="Latin")
+        record = builder_with_llm.build(event, sample_detection, language=language)
+
+        mock_llm_extractor.extract.assert_not_called()
+        assert record is not None
+
+    def test_fallback_when_llm_unavailable(self, sample_detection):
+        """Test regex fallback when LLM extractor is not available"""
+        from agents.scribe.record_builder import RecordBuilder, RawEvent
+        from agents.common.schemas import Sensitivity
+        from agents.common.language import LanguageInfo
+        from unittest.mock import Mock
+        from agents.scribe.llm_extractor import LLMExtractor
+
+        extractor = Mock(spec=LLMExtractor)
+        extractor.is_available = False
+
+        builder = RecordBuilder(
+            default_sensitivity=Sensitivity.INTERNAL,
+            llm_extractor=extractor,
+        )
+
+        event = RawEvent(
+            text='PostgreSQL을 사용하기로 결정했습니다',
+            user="U99999",
+            channel="architecture",
+            timestamp="1706799600",
+            source="slack",
+        )
+
+        language = LanguageInfo(code="ko", confidence=0.95, script="Hangul")
+        record = builder.build(event, sample_detection, language=language)
+
+        # Should use regex fallback, not call LLM
+        extractor.extract.assert_not_called()
+        assert record is not None
+
+    def test_status_from_hint_accepted(self, builder_with_llm, korean_raw_event, sample_detection):
+        """Test status_hint='accepted' maps to ACCEPTED"""
+        from agents.common.language import LanguageInfo
+        from agents.common.schemas import Status
+
+        language = LanguageInfo(code="ko", confidence=0.95, script="Hangul")
+        record = builder_with_llm.build(korean_raw_event, sample_detection, language=language)
+
+        assert record.status == Status.ACCEPTED
+
+    def test_status_from_hint_proposed(self, sample_detection):
+        """Test status_hint='proposed' maps to PROPOSED"""
+        from agents.scribe.record_builder import RecordBuilder, RawEvent
+        from agents.common.schemas import Sensitivity, Status
+        from agents.common.language import LanguageInfo
+        from agents.scribe.llm_extractor import ExtractedFields
+        from unittest.mock import Mock
+
+        extractor = Mock()
+        extractor.is_available = True
+        extractor.extract.return_value = ExtractedFields(
+            title="Consider using Redis",
+            status_hint="proposed",
+        )
+
+        builder = RecordBuilder(
+            default_sensitivity=Sensitivity.INTERNAL,
+            llm_extractor=extractor,
+        )
+
+        event = RawEvent(
+            text='Redis를 고려해봐야 할 것 같습니다',
+            user="U99999",
+            channel="architecture",
+            timestamp="1706799600",
+            source="slack",
+        )
+
+        language = LanguageInfo(code="ko", confidence=0.95, script="Hangul")
+        record = builder.build(event, sample_detection, language=language)
+
+        assert record.status == Status.PROPOSED
+
+    def test_record_has_payload_text_for_korean(self, builder_with_llm, korean_raw_event, sample_detection):
+        """Test that payload.text is generated for Korean input"""
+        from agents.common.language import LanguageInfo
+
+        language = LanguageInfo(code="ko", confidence=0.95, script="Hangul")
+        record = builder_with_llm.build(korean_raw_event, sample_detection, language=language)
+
+        assert record.payload.text != ""
+        assert record.payload.format == "markdown"
+        assert "Decision Record" in record.payload.text
+
+
 class TestPayloadTextGeneration:
     """Tests for payload.text generation"""
 

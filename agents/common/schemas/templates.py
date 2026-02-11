@@ -212,3 +212,128 @@ Domain: {domain} | Certainty: {certainty}
 
 Why: {record.why.rationale_summary or '(no rationale)'}
 """
+
+
+# Localized headers for display rendering (not for payload.text / embedding)
+PAYLOAD_HEADERS = {
+    "en": {
+        "decision_record": "Decision Record",
+        "decision": "Decision",
+        "problem": "Problem",
+        "alternatives": "Alternatives Considered",
+        "rationale": "Why (Rationale)",
+        "certainty": "Certainty",
+        "trade_offs": "Trade-offs",
+        "assumptions": "Assumptions",
+        "risks": "Risks & Mitigations",
+        "evidence": "Evidence (Quotes)",
+        "links": "Links",
+        "tags": "Tags",
+    },
+    "ko": {
+        "decision_record": "결정 기록",
+        "decision": "결정 사항",
+        "problem": "문제",
+        "alternatives": "검토한 대안",
+        "rationale": "근거 (이유)",
+        "certainty": "확실성",
+        "trade_offs": "트레이드오프",
+        "assumptions": "가정",
+        "risks": "리스크 및 대응",
+        "evidence": "증거 (인용)",
+        "links": "링크",
+        "tags": "태그",
+    },
+    "ja": {
+        "decision_record": "決定記録",
+        "decision": "決定事項",
+        "problem": "問題",
+        "alternatives": "検討した代替案",
+        "rationale": "根拠（理由）",
+        "certainty": "確実性",
+        "trade_offs": "トレードオフ",
+        "assumptions": "仮定",
+        "risks": "リスクと対策",
+        "evidence": "証拠（引用）",
+        "links": "リンク",
+        "tags": "タグ",
+    },
+}
+
+
+def render_display_text(record: "DecisionRecord", language: str = "en") -> str:
+    """Render a DecisionRecord with localized headers for user display.
+
+    Unlike render_payload_text() (which is always English for embedding consistency),
+    this function uses localized section headers for human-readable presentation.
+
+    Args:
+        record: DecisionRecord to render
+        language: ISO 639-1 language code
+
+    Returns:
+        Localized markdown text for display
+    """
+    headers = PAYLOAD_HEADERS.get(language, PAYLOAD_HEADERS["en"])
+
+    domain = record.domain.value if hasattr(record.domain, 'value') else str(record.domain)
+    sensitivity = record.sensitivity.value if hasattr(record.sensitivity, 'value') else str(record.sensitivity)
+    status = record.status.value if hasattr(record.status, 'value') else str(record.status)
+    certainty = record.why.certainty.value if hasattr(record.why.certainty, 'value') else str(record.why.certainty)
+
+    alternatives = _format_alternatives(
+        record.context.alternatives,
+        record.context.chosen
+    )
+    trade_offs = _format_trade_offs(record.context.trade_offs)
+    assumptions = _format_assumptions(record.context.assumptions)
+    risks = _format_risks(record.context.risks)
+    evidence_block = _format_evidence(record.evidence)
+    links = _format_links(record.links)
+    tags = _format_tags(record.tags)
+
+    rationale = record.why.rationale_summary or "(no rationale documented)"
+    if record.why.missing_info:
+        rationale += "\n\nMissing Information:\n" + "\n".join(f"- {m}" for m in record.why.missing_info)
+
+    text = f"""# {headers['decision_record']}: {record.title}
+ID: {record.id}
+Status: {status} | Sensitivity: {sensitivity} | Domain: {domain}
+When/Where: {record.decision.when or '(unknown)'} | {record.decision.where or '(unknown)'}
+
+## {headers['decision']}
+{record.decision.what}
+
+## {headers['problem']}
+{record.context.problem or '(not documented)'}
+
+## {headers['alternatives']}
+{alternatives}
+
+## {headers['rationale']}
+{rationale}
+{headers['certainty']}: {certainty}
+
+## {headers['trade_offs']}
+{trade_offs}
+
+## {headers['assumptions']}
+{assumptions}
+
+## {headers['risks']}
+{risks}
+
+## {headers['evidence']}
+{evidence_block}
+
+## {headers['links']}
+{links}
+
+## {headers['tags']}
+{tags}
+"""
+
+    while "\n\n\n" in text:
+        text = text.replace("\n\n\n", "\n\n")
+
+    return text.strip()

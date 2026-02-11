@@ -31,9 +31,11 @@ from ..common.config import load_config, RuneConfig, ensure_directories
 from ..common.embedding_service import EmbeddingService, get_embedding_service
 from ..common.envector_client import EnVectorClient
 from ..common.pattern_cache import PatternCache
-from .pattern_parser import load_default_patterns
+from ..common.language import detect_language
+from .pattern_parser import load_default_patterns, load_all_language_patterns
 from .detector import DecisionDetector
 from .record_builder import RecordBuilder, RawEvent
+from .llm_extractor import LLMExtractor
 from .review_queue import ReviewQueue, ReviewAnswers, ReviewAnswer
 from .handlers import SlackHandler, Message
 
@@ -70,9 +72,9 @@ async def lifespan(app: FastAPI):
         model=config.embedding.model
     )
 
-    # Load and embed patterns
+    # Load and embed patterns (including multilingual)
     print("[Scribe] Loading patterns...")
-    patterns = load_default_patterns()
+    patterns = load_all_language_patterns()
     print(f"[Scribe] Found {len(patterns)} patterns")
 
     pattern_cache = PatternCache(embedding_service)
@@ -86,8 +88,18 @@ async def lifespan(app: FastAPI):
     )
     print(f"[Scribe] Detector ready (threshold: {config.scribe.similarity_threshold})")
 
+    # Initialize LLM extractor for non-English text
+    llm_extractor = LLMExtractor(
+        anthropic_api_key=config.retriever.anthropic_api_key or None,
+        model=config.retriever.anthropic_model,
+    )
+    if llm_extractor.is_available:
+        print("[Scribe] LLM extractor ready for multilingual support")
+    else:
+        print("[Scribe] LLM extractor not available (non-English text will use regex fallback)")
+
     # Initialize record builder
-    record_builder = RecordBuilder()
+    record_builder = RecordBuilder(llm_extractor=llm_extractor)
 
     # Initialize review queue
     review_queue = ReviewQueue()
@@ -171,7 +183,8 @@ async def process_message(message: Message):
         url=message.url,
     )
 
-    record = record_builder.build(raw_event, result)
+    language = detect_language(message.text)
+    record = record_builder.build(raw_event, result, language=language)
 
     # Decide: auto-capture or review queue
     if detector.should_auto_capture(result):

@@ -33,7 +33,9 @@ from ..common.schemas import (
     generate_record_id,
 )
 from ..common.schemas.templates import render_payload_text
+from ..common.language import LanguageInfo
 from .detector import DetectionResult
+from .llm_extractor import LLMExtractor
 
 
 @dataclass
@@ -91,19 +93,26 @@ class RecordBuilder:
         (r'\b[0-9]{4}[-\s]?[0-9]{4}[-\s]?[0-9]{4}[-\s]?[0-9]{4}\b', '[CARD]'),  # Credit card
     ]
 
-    def __init__(self, default_sensitivity: Sensitivity = Sensitivity.INTERNAL):
+    def __init__(
+        self,
+        default_sensitivity: Sensitivity = Sensitivity.INTERNAL,
+        llm_extractor: Optional[LLMExtractor] = None,
+    ):
         """
         Initialize record builder.
 
         Args:
             default_sensitivity: Default sensitivity when unclear
+            llm_extractor: Optional LLM extractor for non-English text
         """
         self._default_sensitivity = default_sensitivity
+        self._llm_extractor = llm_extractor
 
     def build(
         self,
         raw_event: RawEvent,
-        detection: DetectionResult
+        detection: DetectionResult,
+        language: Optional[LanguageInfo] = None,
     ) -> DecisionRecord:
         """
         Build a Decision Record from raw event and detection result.
@@ -111,6 +120,7 @@ class RecordBuilder:
         Args:
             raw_event: Raw event data
             detection: Detection result from DecisionDetector
+            language: Optional detected language info
 
         Returns:
             Complete DecisionRecord with payload.text
@@ -118,18 +128,35 @@ class RecordBuilder:
         # Redact sensitive data
         clean_text, redaction_notes = self._redact_sensitive(raw_event.text)
 
-        # Extract components
-        title = self._extract_title(clean_text, detection)
-        decision_detail = self._extract_decision_detail(raw_event, clean_text)
-        context = self._extract_context(clean_text)
-        evidence = self._extract_evidence(raw_event, clean_text)
-        rationale = self._extract_rationale(clean_text)
-
-        # Determine certainty based on evidence
-        certainty, missing_info = self._determine_certainty(evidence, rationale)
-
-        # Determine status
-        status = self._determine_status(evidence, clean_text)
+        if (language and language.needs_llm_extraction
+                and self._llm_extractor and self._llm_extractor.is_available):
+            # ===== Non-English: LLM extraction =====
+            extracted = self._llm_extractor.extract(clean_text)
+            title = extracted.title or self._extract_title(clean_text, detection)
+            rationale = extracted.rationale
+            problem = extracted.problem
+            alternatives = extracted.alternatives
+            trade_offs = extracted.trade_offs
+            tags = extracted.tags
+            evidence = self._extract_evidence(raw_event, clean_text)
+            certainty, missing_info = self._determine_certainty(evidence, rationale)
+            status = self._status_from_hint(extracted.status_hint, evidence, clean_text)
+            decision_detail = self._extract_decision_detail(raw_event, clean_text)
+            context = Context(
+                problem=problem,
+                alternatives=alternatives[:5],
+                trade_offs=trade_offs[:5],
+            )
+        else:
+            # ===== English: existing regex (unchanged) =====
+            title = self._extract_title(clean_text, detection)
+            decision_detail = self._extract_decision_detail(raw_event, clean_text)
+            context = self._extract_context(clean_text)
+            evidence = self._extract_evidence(raw_event, clean_text)
+            rationale = self._extract_rationale(clean_text)
+            certainty, missing_info = self._determine_certainty(evidence, rationale)
+            status = self._determine_status(evidence, clean_text)
+            tags = None  # will be extracted below
 
         # Determine domain
         domain = self._parse_domain(detection.domain)
@@ -154,7 +181,7 @@ class RecordBuilder:
                 missing_info=missing_info,
             ),
             evidence=evidence,
-            tags=self._extract_tags(clean_text, detection),
+            tags=tags if tags is not None else self._extract_tags(clean_text, detection),
             quality=Quality(
                 scribe_confidence=detection.confidence,
                 review_state=ReviewState.UNREVIEWED,
@@ -368,6 +395,23 @@ class RecordBuilder:
 
         # Default to proposed (conservative)
         return Status.PROPOSED
+
+    def _status_from_hint(
+        self,
+        hint: str,
+        evidence: List[Evidence],
+        text: str,
+    ) -> Status:
+        """Determine status from LLM-provided hint with fallback to rules."""
+        hint_lower = hint.lower().strip()
+        if hint_lower == "accepted":
+            return Status.ACCEPTED
+        if hint_lower == "rejected":
+            return Status.PROPOSED  # Rejected proposals are still proposals, not superseded
+        if hint_lower == "proposed":
+            return Status.PROPOSED
+        # Fallback to regex-based detection
+        return self._determine_status(evidence, text)
 
     def _parse_domain(self, domain_str: Optional[str]) -> Domain:
         """Parse domain string to Domain enum"""

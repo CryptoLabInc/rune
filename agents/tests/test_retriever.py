@@ -290,6 +290,287 @@ class TestSynthesizer:
         assert len(result.related_queries) > 0
 
 
+class TestQueryProcessorMultilingual:
+    """Tests for multilingual query processing"""
+
+    @pytest.fixture
+    def processor_no_llm(self):
+        """QueryProcessor without LLM (regex fallback for all languages)"""
+        from agents.retriever.query_processor import QueryProcessor
+        return QueryProcessor()
+
+    @pytest.fixture
+    def mock_llm_processor(self):
+        """QueryProcessor with mocked LLM client"""
+        from agents.retriever.query_processor import QueryProcessor
+        import json
+
+        processor = QueryProcessor()
+
+        # Mock LLM client
+        mock_client = Mock()
+        mock_response = Mock()
+        mock_response.content = [Mock()]
+        mock_response.content[0].text = json.dumps({
+            "intent": "decision_rationale",
+            "english_query": "Why did we choose PostgreSQL?",
+            "entities": ["PostgreSQL"],
+            "keywords": ["choose", "database", "postgresql"],
+            "time_scope": "all_time",
+        })
+        mock_client.messages.create.return_value = mock_response
+        processor._llm_client = mock_client
+
+        return processor
+
+    def test_korean_query_detected_as_non_english(self, processor_no_llm):
+        """Test that Korean query gets language=ko in ParsedQuery"""
+        result = processor_no_llm.parse("왜 PostgreSQL을 선택했나요?")
+
+        assert result.language is not None
+        assert result.language.code == "ko"
+
+    def test_english_query_detected_as_english(self, processor_no_llm):
+        """Test that English query gets language=en"""
+        result = processor_no_llm.parse("Why did we choose PostgreSQL?")
+
+        assert result.language is not None
+        assert result.language.code == "en"
+
+    def test_korean_query_falls_back_to_regex_without_llm(self, processor_no_llm):
+        """Test that Korean query uses regex path when no LLM available"""
+        result = processor_no_llm.parse("왜 PostgreSQL을 선택했나요?")
+
+        # Should still return a valid ParsedQuery
+        assert result.original == "왜 PostgreSQL을 선택했나요?"
+        assert result.intent is not None
+
+    def test_korean_query_uses_llm_when_available(self, mock_llm_processor):
+        """Test that Korean query uses LLM for intent classification"""
+        from agents.retriever.query_processor import QueryIntent
+
+        result = mock_llm_processor.parse("왜 PostgreSQL을 선택했나요?")
+
+        # LLM should be called
+        mock_llm_processor._llm_client.messages.create.assert_called_once()
+
+        assert result.intent == QueryIntent.DECISION_RATIONALE
+        assert "PostgreSQL" in result.entities
+
+    def test_multilingual_expanded_queries(self, mock_llm_processor):
+        """Test that expanded_queries includes both original and English translation"""
+        result = mock_llm_processor.parse("왜 PostgreSQL을 선택했나요?")
+
+        # Should include original Korean query AND English translation
+        assert any("PostgreSQL을" in q for q in result.expanded_queries)
+        assert any("Why" in q or "choose" in q.lower() for q in result.expanded_queries)
+
+    def test_english_query_skips_llm(self, mock_llm_processor):
+        """Test that English query does NOT use LLM even when available"""
+        result = mock_llm_processor.parse("Why did we choose PostgreSQL?")
+
+        # LLM should NOT be called for English
+        mock_llm_processor._llm_client.messages.create.assert_not_called()
+
+    def test_llm_parse_failure_falls_back(self, mock_llm_processor):
+        """Test that LLM failure falls back to regex parsing"""
+        mock_llm_processor._llm_client.messages.create.side_effect = Exception("API error")
+
+        result = mock_llm_processor.parse("왜 PostgreSQL을 선택했나요?")
+
+        # Should still return a valid ParsedQuery (regex fallback)
+        assert result is not None
+        assert result.original == "왜 PostgreSQL을 선택했나요?"
+
+    def test_parsed_query_language_field(self, processor_no_llm):
+        """Test ParsedQuery.language field is populated"""
+        result = processor_no_llm.parse("Tell me about our database")
+
+        assert result.language is not None
+        assert result.language.code == "en"
+        assert result.language.is_english is True
+
+
+class TestSynthesizerMultilingual:
+    """Tests for multilingual synthesis"""
+
+    @pytest.fixture
+    def synthesizer_no_llm(self):
+        from agents.retriever.synthesizer import Synthesizer
+        return Synthesizer(anthropic_api_key=None)
+
+    @pytest.fixture
+    def sample_results(self):
+        from agents.retriever.searcher import SearchResult
+
+        return [
+            SearchResult(
+                record_id="dec_2024-01-01_arch_postgres",
+                title="Adopt PostgreSQL",
+                payload_text="# Decision Record: Adopt PostgreSQL\n\nWe chose PostgreSQL for better JSON support.",
+                domain="architecture",
+                certainty="supported",
+                status="accepted",
+                score=0.85,
+            ),
+        ]
+
+    def test_korean_fallback_template(self, synthesizer_no_llm, sample_results):
+        """Test that Korean queries get Korean fallback template"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+        from agents.common.language import LanguageInfo
+
+        query = ParsedQuery(
+            original="왜 PostgreSQL을 선택했나요?",
+            cleaned="왜 postgresql을 선택했나요?",
+            intent=QueryIntent.DECISION_RATIONALE,
+            language=LanguageInfo(code="ko", confidence=0.95, script="Hangul"),
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "검색 결과" in result.answer
+
+    def test_japanese_fallback_template(self, synthesizer_no_llm, sample_results):
+        """Test that Japanese queries get Japanese fallback template"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+        from agents.common.language import LanguageInfo
+
+        query = ParsedQuery(
+            original="なぜPostgreSQLを選んだのですか？",
+            cleaned="なぜpostgresqlを選んだのですか？",
+            intent=QueryIntent.DECISION_RATIONALE,
+            language=LanguageInfo(code="ja", confidence=0.90, script="Kana"),
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "検索結果" in result.answer
+
+    def test_english_fallback_template(self, synthesizer_no_llm, sample_results):
+        """Test that English queries get English fallback template"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+        from agents.common.language import LanguageInfo
+
+        query = ParsedQuery(
+            original="Why did we choose PostgreSQL?",
+            cleaned="why did we choose postgresql?",
+            intent=QueryIntent.DECISION_RATIONALE,
+            language=LanguageInfo(code="en", confidence=0.99, script="Latin"),
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "Search Results" in result.answer
+
+    def test_unknown_language_falls_back_to_english(self, synthesizer_no_llm, sample_results):
+        """Test that unknown language code uses English template"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+        from agents.common.language import LanguageInfo
+
+        query = ParsedQuery(
+            original="Warum haben wir PostgreSQL gewahlt?",
+            cleaned="warum haben wir postgresql gewahlt?",
+            intent=QueryIntent.GENERAL,
+            language=LanguageInfo(code="de", confidence=0.85, script="Latin"),
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "Search Results" in result.answer
+
+    def test_no_language_uses_english_template(self, synthesizer_no_llm, sample_results):
+        """Test that ParsedQuery without language field uses English"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+
+        query = ParsedQuery(
+            original="Why PostgreSQL?",
+            cleaned="why postgresql?",
+            intent=QueryIntent.GENERAL,
+            language=None,
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "Search Results" in result.answer
+
+
+class TestDisplayTextLocalization:
+    """Tests for render_display_text localization"""
+
+    @pytest.fixture
+    def sample_record(self):
+        from agents.common.schemas import (
+            DecisionRecord, DecisionDetail, Context, Why, Evidence,
+            SourceRef, Quality, Payload, Domain, Sensitivity, Status,
+            Certainty, ReviewState, SourceType
+        )
+
+        return DecisionRecord(
+            id="dec_2024-02-01_arch_postgres",
+            domain=Domain.ARCHITECTURE,
+            sensitivity=Sensitivity.INTERNAL,
+            status=Status.ACCEPTED,
+            title="Adopt PostgreSQL",
+            decision=DecisionDetail(
+                what="Use PostgreSQL as primary database",
+                who=["user:alice"],
+                where="slack:#architecture",
+                when="2024-02-01",
+            ),
+            context=Context(problem="Need reliable database"),
+            why=Why(
+                rationale_summary="Better JSON support",
+                certainty=Certainty.SUPPORTED,
+            ),
+            evidence=[],
+            tags=["database"],
+            quality=Quality(scribe_confidence=0.9),
+            payload=Payload(format="markdown", text=""),
+        )
+
+    def test_render_display_text_english(self, sample_record):
+        from agents.common.schemas.templates import render_display_text
+
+        text = render_display_text(sample_record, language="en")
+
+        assert "Decision Record" in text
+        assert "Alternatives Considered" in text
+
+    def test_render_display_text_korean(self, sample_record):
+        from agents.common.schemas.templates import render_display_text
+
+        text = render_display_text(sample_record, language="ko")
+
+        assert "결정 기록" in text
+        assert "검토한 대안" in text
+
+    def test_render_display_text_japanese(self, sample_record):
+        from agents.common.schemas.templates import render_display_text
+
+        text = render_display_text(sample_record, language="ja")
+
+        assert "決定記録" in text
+        assert "検討した代替案" in text
+
+    def test_render_display_text_unknown_lang_falls_back(self, sample_record):
+        from agents.common.schemas.templates import render_display_text
+
+        text = render_display_text(sample_record, language="fr")
+
+        # Should fall back to English
+        assert "Decision Record" in text
+
+    def test_render_payload_text_always_english(self, sample_record):
+        """Verify render_payload_text is always English (for embedding consistency)"""
+        from agents.common.schemas.templates import render_payload_text
+
+        text = render_payload_text(sample_record)
+
+        assert "Decision Record" in text
+        assert "Alternatives Considered" in text
+
+
 class TestFormatAnswerForDisplay:
     """Tests for answer formatting"""
 

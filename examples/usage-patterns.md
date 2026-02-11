@@ -49,7 +49,7 @@ Claude: [Records team process]
 
 ## Manual Context Storage
 
-Use `/rune remember` for explicit storage:
+Scribe captures most decisions automatically from conversation. Use `/rune remember` when Scribe missed something or you want to store context that isn't part of the current conversation:
 
 ### Security Policies
 
@@ -191,6 +191,8 @@ Would you like to reconsider this, or are you looking for specific PostgreSQL us
 ---
 
 ## Search Patterns
+
+Retriever handles these automatically when you ask naturally. Use `/rune recall` as an explicit override when you want to bypass Retriever's intent detection.
 
 ### By Topic
 
@@ -345,9 +347,11 @@ Claude: [Summarizes captured decisions from last 3 months]
 
 ### Context Not Being Captured
 
-**Issue**: You said something important but Claude didn't capture it.
+**Issue**: You said something important but Scribe's automatic detection didn't capture it.
 
-**Solution**: Use explicit `/rune remember`:
+**Why**: Scribe uses pattern matching and significance scoring (threshold 0.7) to decide what to capture. Some context may fall below the threshold if it lacks clear decision-language triggers like "we decided...", "we chose X over Y because...", etc.
+
+**Solution**: Use `/rune remember` as a manual override:
 ```
 /rune remember "Previous decision: [repeat the important context]"
 ```
@@ -372,7 +376,7 @@ Use: "Why did we choose PostgreSQL over MySQL for the user service?"
 
 **Issue**: Retrieved context is outdated.
 
-**Solution**: Update with new decision:
+**Solution**: State the updated decision in conversation (Scribe will capture it), or use `/rune remember` to force-store:
 ```
 /rune remember "Updated: [new information that supersedes old decision]"
 ```
@@ -426,14 +430,15 @@ Source: Captured from infra team 2 months ago"
 
 ## Summary
 
-**Automatic Capture**: Let Claude identify significant context naturally
-**Manual Storage**: Use `/rune remember` for explicit important information
-**Natural Retrieval**: Ask Claude about decisions using natural language
-**Team Collaboration**: All team members share same organizational memory
-**Security**: FHE encryption ensures zero-knowledge privacy
+**Automatic Capture (Scribe)**: Automatically identifies and captures significant decisions from conversation — the primary capture path.
+**Automatic Retrieval (Retriever)**: Automatically detects recall-intent queries in natural conversation — the primary retrieval path.
+**Manual Override (`/rune remember`)**: Force-store context that Scribe missed — use sparingly.
+**Manual Override (`/rune recall`)**: Explicitly search memory bypassing Retriever's intent detection — use when natural language doesn't trigger recall.
+**Team Collaboration**: All team members share same organizational memory.
+**Security**: FHE encryption ensures zero-knowledge privacy.
 
 The plugin works best when teams:
-1. Discuss decisions openly with Claude present
-2. Be specific about rationale and context
+1. Discuss decisions openly with Claude present (Scribe captures automatically)
+2. Be specific about rationale and context (improves Scribe's detection)
 3. Update decisions when they change
-4. Use natural language queries for retrieval
+4. Ask questions naturally (Retriever handles recall automatically)
