@@ -113,8 +113,8 @@
     "rune-vault": {
       "description": "Remote Rune-Vault MCP server for FHE decryption (deployed by team admin)",
       "type": "sse",
-      "url": "${VAULT_URL}/sse",
-      "note": "VAULT_URL is configured in ~/.rune/config.json and set during /rune configure"
+      "url": "${RUNEVAULT_ENDPOINT}/sse",
+      "note": "RUNEVAULT_ENDPOINT is configured in ~/.rune/config.json and set during /rune configure"
     },
     "envector": {
       "description": "enVector MCP server for encrypted vectors",

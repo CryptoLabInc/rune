@@ -154,10 +154,10 @@ def load_config() -> RuneConfig:
             print(f"[Config] Warning: Failed to load config file: {e}")
 
     # Environment variable overrides
-    if os.getenv("VAULT_URL"):
-        config.vault.url = os.getenv("VAULT_URL")
-    if os.getenv("VAULT_TOKEN"):
-        config.vault.token = os.getenv("VAULT_TOKEN")
+    if os.getenv("RUNEVAULT_ENDPOINT"):
+        config.vault.url = os.getenv("RUNEVAULT_ENDPOINT")
+    if os.getenv("RUNEVAULT_TOKEN"):
+        config.vault.token = os.getenv("RUNEVAULT_TOKEN")
 
     if os.getenv("ENVECTOR_ENDPOINT"):
         config.envector.endpoint = os.getenv("ENVECTOR_ENDPOINT")
