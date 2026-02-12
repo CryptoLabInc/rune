@@ -128,9 +128,9 @@ class RecordBuilder:
         # Redact sensitive data
         clean_text, redaction_notes = self._redact_sensitive(raw_event.text)
 
-        if (language and language.needs_llm_extraction
-                and self._llm_extractor and self._llm_extractor.is_available):
-            # ===== Non-English: LLM extraction =====
+        if self._llm_extractor and self._llm_extractor.is_available:
+            # ===== LLM extraction (preferred for all languages) =====
+            # Robust to typos, abbreviations, colloquialisms
             extracted = self._llm_extractor.extract(clean_text)
             title = extracted.title or self._extract_title(clean_text, detection)
             rationale = extracted.rationale
@@ -148,7 +148,7 @@ class RecordBuilder:
                 trade_offs=trade_offs[:5],
             )
         else:
-            # ===== English: existing regex (unchanged) =====
+            # ===== Fallback: regex extraction (when LLM unavailable) =====
             title = self._extract_title(clean_text, detection)
             decision_detail = self._extract_decision_detail(raw_event, clean_text)
             context = self._extract_context(clean_text)

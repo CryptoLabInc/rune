@@ -271,8 +271,8 @@ class TestRecordBuilderMultilingual:
         assert record.status == Status.ACCEPTED
         assert "database" in record.tags
 
-    def test_english_path_unchanged_without_language(self, builder_with_llm, sample_detection, mock_llm_extractor):
-        """Test that English path is used when language is None"""
+    def test_llm_used_for_english_when_available(self, builder_with_llm, sample_detection, mock_llm_extractor):
+        """Test that LLM is used for English when available (robust to typos)"""
         from agents.scribe.record_builder import RawEvent
 
         event = RawEvent(
@@ -285,12 +285,13 @@ class TestRecordBuilderMultilingual:
 
         record = builder_with_llm.build(event, sample_detection)
 
-        # LLM extractor should NOT be called for English (language=None)
-        mock_llm_extractor.extract.assert_not_called()
+        # LLM extractor SHOULD be called for English too (preferred for all languages)
+        mock_llm_extractor.extract.assert_called_once()
         assert record is not None
+        assert record.title == "Adopt PostgreSQL for database"
 
-    def test_english_path_when_language_is_english(self, builder_with_llm, sample_detection, mock_llm_extractor):
-        """Test that English path is used when language.is_english"""
+    def test_llm_used_for_all_languages(self, builder_with_llm, sample_detection, mock_llm_extractor):
+        """Test that LLM is used for all languages when available (language-agnostic)"""
         from agents.scribe.record_builder import RawEvent
         from agents.common.language import LanguageInfo
 
@@ -305,8 +306,10 @@ class TestRecordBuilderMultilingual:
         language = LanguageInfo(code="en", confidence=0.99, script="Latin")
         record = builder_with_llm.build(event, sample_detection, language=language)
 
-        mock_llm_extractor.extract.assert_not_called()
+        # LLM extractor SHOULD be called regardless of language
+        mock_llm_extractor.extract.assert_called_once()
         assert record is not None
+        assert record.title == "Adopt PostgreSQL for database"
 
     def test_fallback_when_llm_unavailable(self, sample_detection):
         """Test regex fallback when LLM extractor is not available"""
@@ -392,6 +395,28 @@ class TestRecordBuilderMultilingual:
         assert record.payload.text != ""
         assert record.payload.format == "markdown"
         assert "Decision Record" in record.payload.text
+
+    def test_llm_handles_typos_and_informal_english(self, builder_with_llm, sample_detection, mock_llm_extractor):
+        """Test that LLM extraction handles typos and informal language in English"""
+        from agents.scribe.record_builder import RawEvent
+        from agents.common.language import LanguageInfo
+
+        # Informal English with typos and abbreviations
+        event = RawEvent(
+            text='we decidd 2 use postgres bcuz "its got gr8 json support & team knows it"',
+            user="U12345",
+            channel="architecture",
+            timestamp="1706799600",
+            source="slack",
+        )
+
+        language = LanguageInfo(code="en", confidence=0.95, script="Latin")
+        record = builder_with_llm.build(event, sample_detection, language=language)
+
+        # LLM should handle typos/informal language gracefully
+        mock_llm_extractor.extract.assert_called_once()
+        assert record is not None
+        assert record.title == "Adopt PostgreSQL for database"
 
 
 class TestPayloadTextGeneration:
