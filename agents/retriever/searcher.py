@@ -184,9 +184,9 @@ class Searcher:
         time_scope: TimeScope
     ) -> List[SearchResult]:
         """Filter results by time scope"""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Define time ranges
         time_ranges = {

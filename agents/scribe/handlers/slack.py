@@ -59,11 +59,9 @@ class SlackHandler(BaseHandler):
 
         # Handle message events
         if event_type == "message":
+            if event.get("subtype") == "message_changed":
+                return self._parse_message_changed_event(event, raw_data)
             return self._parse_message_event(event, raw_data)
-
-        # Handle message changed events
-        if event_type == "message" and event.get("subtype") == "message_changed":
-            return self._parse_message_changed_event(event, raw_data)
 
         return None
 

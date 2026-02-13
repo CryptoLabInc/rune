@@ -159,8 +159,7 @@ class DecisionDetector:
 
         Auto-capture when:
         - Is significant AND
-        - Confidence >= high_confidence_threshold AND
-        - Pattern priority is "high"
+        - Confidence >= high_confidence_threshold
 
         Args:
             result: Detection result to evaluate
@@ -171,18 +170,7 @@ class DecisionDetector:
         if not result.is_significant:
             return False
 
-        if result.confidence < self._high_confidence_threshold:
-            return False
-
-        # High priority patterns can auto-capture
-        if result.priority == "high":
-            return True
-
-        # Very high confidence can auto-capture even medium priority
-        if result.confidence >= 0.9:
-            return True
-
-        return False
+        return result.confidence >= self._high_confidence_threshold
 
     def needs_review(self, result: DetectionResult) -> bool:
         """

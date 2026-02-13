@@ -11,7 +11,7 @@ Key Rules:
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
@@ -162,7 +162,7 @@ class RecordBuilder:
         domain = self._parse_domain(detection.domain)
 
         # Generate ID
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(timezone.utc)
         record_id = generate_record_id(timestamp, domain, title)
 
         # Build the record

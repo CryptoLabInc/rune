@@ -20,7 +20,7 @@ Pipeline:
 
 import json
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import Mock, MagicMock, patch
 from dataclasses import dataclass
 from typing import List, Optional
@@ -618,7 +618,7 @@ class TestTier3RecordBuilding:
             text=conv.text,
             user=conv.user,
             channel=conv.channel,
-            timestamp=str(datetime.utcnow().timestamp()),
+            timestamp=str(datetime.now(timezone.utc).timestamp()),
             source="slack",
         )
 
@@ -813,7 +813,7 @@ class TestFullPipelineFlow:
             text=conv.text,
             user=conv.user,
             channel=conv.channel,
-            timestamp=str(datetime.utcnow().timestamp()),
+            timestamp=str(datetime.now(timezone.utc).timestamp()),
             source="slack",
         )
         language = detect_language(conv.text)
@@ -953,7 +953,7 @@ class TestReviewQueueIntegration:
                 text=conv.text,
                 user=conv.user,
                 channel=conv.channel,
-                timestamp=str(datetime.utcnow().timestamp()),
+                timestamp=str(datetime.now(timezone.utc).timestamp()),
                 source="slack",
             )
             detection = DetectionResult(
@@ -995,7 +995,7 @@ class TestReviewQueueIntegration:
         conv = ALICE_CONVERSATIONS[0]  # PostgreSQL decision
         raw_event = RawEvent(
             text=conv.text, user=conv.user, channel=conv.channel,
-            timestamp=str(datetime.utcnow().timestamp()), source="slack",
+            timestamp=str(datetime.now(timezone.utc).timestamp()), source="slack",
         )
         detection = DetectionResult(
             is_significant=True, confidence=0.75,
@@ -1036,7 +1036,7 @@ class TestReviewQueueIntegration:
         conv = ALICE_CONVERSATIONS[-2]  # Pizza decision
         raw_event = RawEvent(
             text=conv.text, user=conv.user, channel=conv.channel,
-            timestamp=str(datetime.utcnow().timestamp()), source="slack",
+            timestamp=str(datetime.now(timezone.utc).timestamp()), source="slack",
         )
         detection = DetectionResult(
             is_significant=True, confidence=0.55,

@@ -179,6 +179,8 @@ def load_config() -> RuneConfig:
         config.scribe.slack_webhook_port = int(os.getenv("SCRIBE_PORT"))
     if os.getenv("SCRIBE_THRESHOLD"):
         config.scribe.similarity_threshold = float(os.getenv("SCRIBE_THRESHOLD"))
+    if os.getenv("SCRIBE_AUTO_THRESHOLD"):
+        config.scribe.auto_capture_threshold = float(os.getenv("SCRIBE_AUTO_THRESHOLD"))
     if os.getenv("SLACK_SIGNING_SECRET"):
         config.scribe.slack_signing_secret = os.getenv("SLACK_SIGNING_SECRET")
 
