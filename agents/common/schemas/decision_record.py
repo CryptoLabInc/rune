@@ -6,7 +6,7 @@ The embedding is generated from that text payload.
 "Why" cannot be written definitively without evidence.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -168,7 +168,7 @@ class DecisionRecord(BaseModel):
     sensitivity: Sensitivity = Field(default=Sensitivity.INTERNAL)
     status: Status = Field(default=Status.PROPOSED)
     superseded_by: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     title: str = Field(..., description="Short title for the decision")
     decision: DecisionDetail

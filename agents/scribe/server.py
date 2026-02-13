@@ -19,9 +19,12 @@ Pipeline:
 """
 
 import json
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import Optional
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger("rune.scribe")
 
 from fastapi import FastAPI, Request, HTTPException, Header, BackgroundTasks
 from fastapi.responses import JSONResponse
@@ -58,26 +61,26 @@ async def lifespan(app: FastAPI):
     global config, detector, tier2_filter, record_builder, envector_client, review_queue
     global slack_handler, embedding_service
 
-    print("[Scribe] Starting up...")
+    logger.info("Starting up...")
 
     # Ensure directories exist
     ensure_directories()
 
     # Load config
     config = load_config()
-    print(f"[Scribe] Loaded config (state: {config.state})")
+    logger.info("Loaded config (state: %s)", config.state)
 
     # Initialize embedding service
-    print("[Scribe] Initializing embedding service...")
+    logger.info("Initializing embedding service...")
     embedding_service = get_embedding_service(
         mode=config.embedding.mode,
         model=config.embedding.model
     )
 
     # Load and embed patterns (including multilingual)
-    print("[Scribe] Loading patterns...")
+    logger.info("Loading patterns...")
     patterns = load_all_language_patterns()
-    print(f"[Scribe] Found {len(patterns)} patterns")
+    logger.info("Found %d patterns", len(patterns))
 
     pattern_cache = PatternCache(embedding_service)
     pattern_cache.load_patterns(patterns)
@@ -88,7 +91,7 @@ async def lifespan(app: FastAPI):
         threshold=config.scribe.similarity_threshold,
         high_confidence_threshold=config.scribe.auto_capture_threshold
     )
-    print(f"[Scribe] Detector ready (threshold: {config.scribe.similarity_threshold})")
+    logger.info("Detector ready (threshold: %s)", config.scribe.similarity_threshold)
 
     # Initialize Tier 2 LLM filter (Haiku — cheap, fast)
     api_key = config.retriever.anthropic_api_key or None
@@ -98,12 +101,12 @@ async def lifespan(app: FastAPI):
             model=config.scribe.tier2_model,
         )
         if tier2_filter.is_available:
-            print(f"[Scribe] Tier 2 LLM filter ready ({config.scribe.tier2_model})")
+            logger.info("Tier 2 LLM filter ready (%s)", config.scribe.tier2_model)
         else:
-            print("[Scribe] Tier 2 LLM filter init failed (Tier 1 only)")
+            logger.warning("Tier 2 LLM filter init failed (Tier 1 only)")
     else:
         tier2_filter = None
-        print("[Scribe] Tier 2 LLM filter disabled" if not config.scribe.tier2_enabled else "[Scribe] Tier 2 skipped (no API key)")
+        logger.info("Tier 2 LLM filter disabled" if not config.scribe.tier2_enabled else "Tier 2 skipped (no API key)")
 
     # Initialize Tier 3 LLM extractor (Sonnet — for record building)
     llm_extractor = LLMExtractor(
@@ -111,9 +114,9 @@ async def lifespan(app: FastAPI):
         model=config.retriever.anthropic_model,
     )
     if llm_extractor.is_available:
-        print("[Scribe] Tier 3 LLM extractor ready (Sonnet)")
+        logger.info("Tier 3 LLM extractor ready (Sonnet)")
     else:
-        print("[Scribe] Tier 3 LLM extractor not available (regex fallback)")
+        logger.info("Tier 3 LLM extractor not available (regex fallback)")
 
     # Initialize record builder
     record_builder = RecordBuilder(llm_extractor=llm_extractor)
@@ -121,7 +124,7 @@ async def lifespan(app: FastAPI):
     # Initialize review queue
     review_queue = ReviewQueue()
     stats = review_queue.get_stats()
-    print(f"[Scribe] Review queue: {stats['pending']} pending")
+    logger.info("Review queue: %d pending", stats['pending'])
 
     # Initialize handlers
     slack_handler = SlackHandler(signing_secret=config.scribe.slack_signing_secret)
@@ -133,17 +136,17 @@ async def lifespan(app: FastAPI):
                 address=config.envector.endpoint,
                 access_token=config.envector.api_key or None,
             )
-            print(f"[Scribe] EnVector client ready ({config.envector.endpoint})")
+            logger.info("EnVector client ready (%s)", config.envector.endpoint)
         except Exception as e:
-            print(f"[Scribe] Warning: EnVector client failed: {e}")
+            logger.warning("EnVector client failed: %s", e)
             envector_client = None
 
-    print("[Scribe] Ready to receive events")
+    logger.info("Ready to receive events")
 
     yield
 
     # Cleanup
-    print("[Scribe] Shutting down...")
+    logger.info("Shutting down...")
 
 
 app = FastAPI(
@@ -183,7 +186,7 @@ async def process_message(message: Message):
     global detector, tier2_filter, record_builder, envector_client, review_queue, embedding_service
 
     if not detector or not record_builder:
-        print("[Scribe] Not initialized, skipping message")
+        logger.warning("Not initialized, skipping message")
         return
 
     # === Tier 1: Embedding similarity (local, free) ===
@@ -192,7 +195,7 @@ async def process_message(message: Message):
     if not result.is_significant:
         return  # Not significant, ignore
 
-    print(f"[Scribe] Tier 1 PASS (score: {result.confidence:.2f}, pattern: \"{result.matched_pattern[:50]}...\")")
+    logger.info("Tier 1 PASS (score: %.2f, pattern: \"%.50s...\")", result.confidence, result.matched_pattern)
 
     # === Tier 2: LLM policy filter (Haiku, cheap) ===
     if tier2_filter and tier2_filter.is_available:
@@ -203,16 +206,16 @@ async def process_message(message: Message):
         )
 
         if not filter_result.should_capture:
-            print(f"[Scribe] Tier 2 REJECT: {filter_result.reason}")
+            logger.info("Tier 2 REJECT: %s", filter_result.reason)
             return
 
-        print(f"[Scribe] Tier 2 PASS: {filter_result.reason}")
+        logger.info("Tier 2 PASS: %s", filter_result.reason)
 
         # Use Tier 2's domain hint if Tier 1's is generic
         if filter_result.domain != "general" and result.domain in (None, "general"):
             result.domain = filter_result.domain
     else:
-        print("[Scribe] Tier 2 skipped (filter unavailable)")
+        logger.info("Tier 2 skipped (filter unavailable)")
 
     # === Tier 3: LLM extraction + Decision Record building (Sonnet) ===
     raw_event = RawEvent(
@@ -228,14 +231,14 @@ async def process_message(message: Message):
     language = detect_language(message.text)
     record = record_builder.build(raw_event, result, language=language)
 
-    print(f"[Scribe] Tier 3 built record: {record.id} (certainty: {record.why.certainty.value})")
+    logger.info("Tier 3 built record: %s (certainty: %s)", record.id, record.why.certainty.value)
 
     # Decide: auto-capture or review queue
     if detector.should_auto_capture(result):
         await store_record(record)
     else:
         review_queue.add(record, result.confidence)
-        print(f"[Scribe] Added to review queue: {record.id}")
+        logger.info("Added to review queue: %s", record.id)
 
 
 async def store_record(record):
@@ -243,7 +246,7 @@ async def store_record(record):
     global envector_client, embedding_service, config
 
     if not envector_client or not embedding_service:
-        print(f"[Scribe] Cannot store (no enVector client): {record.id}")
+        logger.warning("Cannot store (no enVector client): %s", record.id)
         return
 
     try:
@@ -260,12 +263,12 @@ async def store_record(record):
         )
 
         if result.get("ok"):
-            print(f"[Scribe] Stored: {record.id}")
+            logger.info("Stored: %s", record.id)
         else:
-            print(f"[Scribe] Failed to store {record.id}: {result.get('error')}")
+            logger.error("Failed to store %s: %s", record.id, result.get('error'))
 
     except Exception as e:
-        print(f"[Scribe] Error storing {record.id}: {e}")
+        logger.error("Error storing %s: %s", record.id, e)
 
 
 # =============================================================================
@@ -445,7 +448,7 @@ async def get_stats():
 
     stats = {
         "service": "scribe",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     if review_queue:
@@ -474,7 +477,7 @@ def run_server():
     config = load_config()
     port = config.scribe.slack_webhook_port
 
-    print(f"[Scribe] Starting server on port {port}")
+    logger.info("Starting server on port %d", port)
     uvicorn.run(
         "agents.scribe.server:app",
         host="0.0.0.0",

@@ -260,7 +260,10 @@ class EnVectorClient:
         parsed = []
         raw_results = result.get("results", [])
 
-        # Handle nested structure
+        # Flatten nested results: index.search() returns [[r1, r2, ...]] per query
+        if isinstance(raw_results, list) and raw_results and isinstance(raw_results[0], list):
+            raw_results = raw_results[0]
+
         if isinstance(raw_results, list):
             for item in raw_results:
                 if isinstance(item, dict):

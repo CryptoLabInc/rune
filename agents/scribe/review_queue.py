@@ -12,7 +12,7 @@ Q4. (Optional) Is this the final decision? (proposed/accepted/superseded/reverte
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field, asdict
@@ -171,7 +171,7 @@ class ReviewQueue:
             record_id=record.id,
             record_json=record_dict,
             detection_confidence=detection_confidence,
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             questions=self.QUESTIONS.copy(),
             status="pending",
         )
