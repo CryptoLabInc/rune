@@ -65,12 +65,12 @@
     },
     {
       "name": "/rune remember",
-      "description": "Manually store organizational context",
+      "description": "Manually store context that Scribe's automatic capture missed",
       "args": "<context>"
     },
     {
       "name": "/rune recall",
-      "description": "Search organizational memory",
+      "description": "Explicitly search memory (override for Retriever's automatic detection)",
       "args": "<query>"
     },
     {
@@ -113,8 +113,8 @@
     "rune-vault": {
       "description": "Remote Rune-Vault MCP server for FHE decryption (deployed by team admin)",
       "type": "sse",
-      "url": "${VAULT_URL}/sse",
-      "note": "VAULT_URL is configured in ~/.rune/config.json and set during /rune configure"
+      "url": "${RUNEVAULT_ENDPOINT}/sse",
+      "note": "RUNEVAULT_ENDPOINT is configured in ~/.rune/config.json and set during /rune configure"
     },
     "envector": {
       "description": "enVector MCP server for encrypted vectors",
@@ -190,6 +190,9 @@
     "setup": "setup/check-prerequisites.md",
     "fullProject": "https://github.com/CryptoLabInc/rune-admin"
   },
+  "privacy_policies": [
+    "https://github.com/CryptoLabInc/rune/blob/main/README.md#privacy-policy"
+  ],
   "support": {
     "issues": "https://github.com/CryptoLabInc/rune/issues",
     "email": "zotanika@cryptolab.co.kr",

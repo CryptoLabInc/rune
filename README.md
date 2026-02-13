@@ -67,7 +67,7 @@ Before installing this plugin, you MUST have:
 5. You're prompted to configure credentials
 
 **Requirements**:
-- Python 3.8+
+- Python 3.12
 - 500MB disk space
 - Internet connection
 
@@ -246,13 +246,13 @@ Validate infrastructure and switch to Active state
 ```
 
 ### `/rune remember <context>`
-Manually store organizational context (Active state only)
+Manually store context that Scribe's automatic capture missed (Active state only)
 ```
 /rune remember "We chose PostgreSQL for better JSON support"
 ```
 
 ### `/rune recall <query>`
-Search organizational memory (Active state only)
+Explicitly search organizational memory — override for Retriever's automatic detection (Active state only)
 ```
 /rune recall "Why PostgreSQL?"
 ```
@@ -271,19 +271,21 @@ Claude will automatically capture significant decisions and context:
 - Code patterns
 - Team agreements
 
-### Manual Context Storage
+### Context Retrieval
+Just ask Claude naturally — Retriever detects recall-intent queries automatically:
 ```
-/rune remember "We chose PostgreSQL for better JSON support"
+"What database decisions did we make?"
 ```
 
-### Context Retrieval
+Or use the explicit command as an override:
 ```
 /rune recall "Why did we choose PostgreSQL?"
 ```
 
-Or just ask Claude naturally:
+### Manual Context Storage
+If Scribe missed something, use `/rune remember` to force-store:
 ```
-"What database decisions did we make?"
+/rune remember "We chose PostgreSQL for better JSON support"
 ```
 
 ## Security
@@ -292,6 +294,30 @@ Or just ask Claude naturally:
 - 🔑 **Local credentials**: Tokens stored only in `~/.rune/config.json`
 - 🛡️ **No cloud access**: enVector Cloud never sees plaintext
 - 👥 **Team sharing**: Same Vault = shared organizational memory
+
+## Privacy Policy
+
+### Data We Collect
+- **Credentials location**: Vault URL, Vault token, enVector endpoint, and API key stored locally in `~/.rune/config.json`.
+- **Vector data**: Encrypted vector embeddings derived from organizational context are stored on enVector Cloud. The plaintext content is never transmitted or stored on any remote server.
+
+### How We Process Data
+- All data is encrypted client-side using **Fully Homomorphic Encryption (FHE)** before leaving your machine.
+- enVector Cloud performs similarity scoring on **encrypted data only** — the server never accesses plaintext vectors, queries, or metadata.
+- Rune-Vault decrypts only the similarity **score ciphertext** (not the original data) to select top-k results.
+
+### Data Storage
+- **Local**: Configuration and credentials are stored in `~/.rune/config.json` on your machine.
+- **Cloud**: Only FHE-encrypted vectors and encrypted metadata are stored on enVector Cloud. No plaintext data is stored remotely.
+
+### Third-Party Sharing
+- Rune does **not** share any data with third parties.
+- In team deployments, the Rune-Vault server is operated by your **team administrator** and holds the shared secret key for decrypting score ciphertexts. The Vault never has access to raw vectors or metadata.
+
+### Your Rights
+- **Data deletion**: You can delete your encrypted vectors by removing the corresponding enVector index via the MCP tools or enVector Cloud dashboard.
+- **Configuration reset**: Run `/rune reset` or delete `~/.rune/config.json` to remove all local credentials and return to dormant state.
+- **Full removal**: Uninstall the plugin and delete `~/.rune/` to remove all local data.
 
 ## Troubleshooting
 

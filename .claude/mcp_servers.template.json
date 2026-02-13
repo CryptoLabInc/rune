@@ -2,7 +2,7 @@
   "mcpServers": {
     "rune-vault": {
       "type": "sse",
-      "url": "VAULT_URL/sse",
+      "url": "RUNEVAULT_ENDPOINT/sse",
       "description": "Remote Rune-Vault MCP server for FHE decryption (deployed by team admin)"
     },
     "envector": {

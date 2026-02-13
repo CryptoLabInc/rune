@@ -37,3 +37,6 @@ fastapi>=0.100.0
 uvicorn>=0.22.0
 anthropic>=0.40.0
 slack-sdk>=3.0.0
+
+# Language Detection
+langdetect>=1.0.9

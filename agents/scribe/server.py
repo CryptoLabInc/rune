@@ -31,16 +31,20 @@ from ..common.config import load_config, RuneConfig, ensure_directories
 from ..common.embedding_service import EmbeddingService, get_embedding_service
 from ..common.envector_client import EnVectorClient
 from ..common.pattern_cache import PatternCache
-from .pattern_parser import load_default_patterns
+from ..common.language import detect_language
+from .pattern_parser import load_default_patterns, load_all_language_patterns
 from .detector import DecisionDetector
 from .record_builder import RecordBuilder, RawEvent
+from .llm_extractor import LLMExtractor
 from .review_queue import ReviewQueue, ReviewAnswers, ReviewAnswer
+from .tier2_filter import Tier2Filter
 from .handlers import SlackHandler, Message
 
 
 # Global state
 config: Optional[RuneConfig] = None
 detector: Optional[DecisionDetector] = None
+tier2_filter: Optional[Tier2Filter] = None
 record_builder: Optional[RecordBuilder] = None
 envector_client: Optional[EnVectorClient] = None
 review_queue: Optional[ReviewQueue] = None
@@ -51,7 +55,7 @@ embedding_service: Optional[EmbeddingService] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize components on startup"""
-    global config, detector, record_builder, envector_client, review_queue
+    global config, detector, tier2_filter, record_builder, envector_client, review_queue
     global slack_handler, embedding_service
 
     print("[Scribe] Starting up...")
@@ -70,9 +74,9 @@ async def lifespan(app: FastAPI):
         model=config.embedding.model
     )
 
-    # Load and embed patterns
+    # Load and embed patterns (including multilingual)
     print("[Scribe] Loading patterns...")
-    patterns = load_default_patterns()
+    patterns = load_all_language_patterns()
     print(f"[Scribe] Found {len(patterns)} patterns")
 
     pattern_cache = PatternCache(embedding_service)
@@ -86,8 +90,33 @@ async def lifespan(app: FastAPI):
     )
     print(f"[Scribe] Detector ready (threshold: {config.scribe.similarity_threshold})")
 
+    # Initialize Tier 2 LLM filter (Haiku — cheap, fast)
+    api_key = config.retriever.anthropic_api_key or None
+    if config.scribe.tier2_enabled and api_key:
+        tier2_filter = Tier2Filter(
+            anthropic_api_key=api_key,
+            model=config.scribe.tier2_model,
+        )
+        if tier2_filter.is_available:
+            print(f"[Scribe] Tier 2 LLM filter ready ({config.scribe.tier2_model})")
+        else:
+            print("[Scribe] Tier 2 LLM filter init failed (Tier 1 only)")
+    else:
+        tier2_filter = None
+        print("[Scribe] Tier 2 LLM filter disabled" if not config.scribe.tier2_enabled else "[Scribe] Tier 2 skipped (no API key)")
+
+    # Initialize Tier 3 LLM extractor (Sonnet — for record building)
+    llm_extractor = LLMExtractor(
+        anthropic_api_key=api_key,
+        model=config.retriever.anthropic_model,
+    )
+    if llm_extractor.is_available:
+        print("[Scribe] Tier 3 LLM extractor ready (Sonnet)")
+    else:
+        print("[Scribe] Tier 3 LLM extractor not available (regex fallback)")
+
     # Initialize record builder
-    record_builder = RecordBuilder()
+    record_builder = RecordBuilder(llm_extractor=llm_extractor)
 
     # Initialize review queue
     review_queue = ReviewQueue()
@@ -144,23 +173,48 @@ class ReviewSubmission(BaseModel):
 # =============================================================================
 
 async def process_message(message: Message):
-    """Process a message in the background"""
-    global detector, record_builder, envector_client, review_queue, embedding_service
+    """
+    Process a message through the 3-tier capture pipeline.
+
+    Tier 1: Embedding similarity (local, zero tokens) — wide net
+    Tier 2: LLM policy filter (Haiku, ~200 tokens) — false positive removal
+    Tier 3: LLM extraction (Sonnet, ~500 tokens) — Decision Record building
+    """
+    global detector, tier2_filter, record_builder, envector_client, review_queue, embedding_service
 
     if not detector or not record_builder:
         print("[Scribe] Not initialized, skipping message")
         return
 
-    # Detect significance
+    # === Tier 1: Embedding similarity (local, free) ===
     result = detector.detect(message.text)
 
     if not result.is_significant:
         return  # Not significant, ignore
 
-    print(f"[Scribe] Detected decision (confidence: {result.confidence:.2f})")
-    print(f"[Scribe]   Pattern: {result.matched_pattern}")
+    print(f"[Scribe] Tier 1 PASS (score: {result.confidence:.2f}, pattern: \"{result.matched_pattern[:50]}...\")")
 
-    # Build Decision Record
+    # === Tier 2: LLM policy filter (Haiku, cheap) ===
+    if tier2_filter and tier2_filter.is_available:
+        filter_result = tier2_filter.evaluate(
+            text=message.text,
+            tier1_score=result.confidence,
+            tier1_pattern=result.matched_pattern or "",
+        )
+
+        if not filter_result.should_capture:
+            print(f"[Scribe] Tier 2 REJECT: {filter_result.reason}")
+            return
+
+        print(f"[Scribe] Tier 2 PASS: {filter_result.reason}")
+
+        # Use Tier 2's domain hint if Tier 1's is generic
+        if filter_result.domain != "general" and result.domain in (None, "general"):
+            result.domain = filter_result.domain
+    else:
+        print("[Scribe] Tier 2 skipped (filter unavailable)")
+
+    # === Tier 3: LLM extraction + Decision Record building (Sonnet) ===
     raw_event = RawEvent(
         text=message.text,
         user=message.user,
@@ -171,14 +225,15 @@ async def process_message(message: Message):
         url=message.url,
     )
 
-    record = record_builder.build(raw_event, result)
+    language = detect_language(message.text)
+    record = record_builder.build(raw_event, result, language=language)
+
+    print(f"[Scribe] Tier 3 built record: {record.id} (certainty: {record.why.certainty.value})")
 
     # Decide: auto-capture or review queue
     if detector.should_auto_capture(result):
-        # High confidence: store directly
         await store_record(record)
     else:
-        # Lower confidence: add to review queue
         review_queue.add(record, result.confidence)
         print(f"[Scribe] Added to review queue: {record.id}")
 
@@ -224,7 +279,10 @@ async def health():
         "status": "healthy",
         "service": "scribe",
         "initialized": detector is not None,
-        "patterns_loaded": detector._cache.pattern_count if detector else 0,
+        "pipeline": "3-tier" if (tier2_filter and tier2_filter.is_available) else "1-tier",
+        "tier1_patterns": detector._cache.pattern_count if detector else 0,
+        "tier2_available": tier2_filter.is_available if tier2_filter else False,
+        "tier3_available": record_builder._llm_extractor.is_available if record_builder and record_builder._llm_extractor else False,
         "pending_reviews": review_queue.get_stats()["pending"] if review_queue else 0,
     }
 
@@ -394,10 +452,12 @@ async def get_stats():
         stats["review_queue"] = review_queue.get_stats()
 
     if detector:
-        stats["detector"] = {
-            "threshold": detector.threshold,
-            "high_confidence_threshold": detector.high_confidence_threshold,
-            "patterns_loaded": detector._cache.pattern_count,
+        stats["pipeline"] = {
+            "tier1_threshold": detector.threshold,
+            "tier1_patterns": detector._cache.pattern_count,
+            "tier2_enabled": tier2_filter.is_available if tier2_filter else False,
+            "tier3_enabled": record_builder._llm_extractor.is_available if record_builder and record_builder._llm_extractor else False,
+            "auto_capture_threshold": detector.high_confidence_threshold,
         }
 
     return stats

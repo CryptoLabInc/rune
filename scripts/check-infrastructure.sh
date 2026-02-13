@@ -33,26 +33,26 @@ fi
 print_check "Configuration file found"
 
 # Extract Vault URL from config (basic check, assumes JSON is valid)
-VAULT_URL=$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.rune/config.json" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+RUNEVAULT_ENDPOINT=$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.rune/config.json" | head -1 | sed 's/.*"\(.*\)".*/\1/')
 
-if [ -z "$VAULT_URL" ]; then
+if [ -z "$RUNEVAULT_ENDPOINT" ]; then
     print_fail "Vault URL not found in configuration"
     exit 1
 fi
 
-print_check "Vault URL: $VAULT_URL"
+print_check "Vault URL: $RUNEVAULT_ENDPOINT"
 
 # Check if Vault is accessible
 echo "Checking Vault connectivity..."
 if command -v curl &> /dev/null; then
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$VAULT_URL/health" 2>/dev/null)
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$RUNEVAULT_ENDPOINT/health" 2>/dev/null)
 
     if [ "$HTTP_CODE" = "200" ]; then
         print_check "Vault is accessible (HTTP $HTTP_CODE)"
     else
         print_fail "Vault is not accessible (HTTP $HTTP_CODE)"
         echo "  Make sure Rune-Vault is deployed and running"
-        echo "  URL: $VAULT_URL"
+        echo "  URL: $RUNEVAULT_ENDPOINT"
         exit 1
     fi
 else

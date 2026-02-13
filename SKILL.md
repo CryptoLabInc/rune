@@ -106,7 +106,12 @@ Recommendations:
 ```
 
 ### `/rune remember <context>`
-**Purpose**: Manually store important organizational context
+**Purpose**: Manually store organizational context when Scribe's automatic capture missed it or the user wants to force-store specific information.
+
+**When to use**: Scribe automatically captures significant decisions from conversation (see Automatic Behavior below). This command is an **override** for cases where:
+- Scribe didn't detect the context as significant
+- The user wants to store something that isn't part of the current conversation
+- Bulk-importing existing documentation
 
 **Behavior**:
 - If dormant: Prompt user to configure first
@@ -118,7 +123,12 @@ Recommendations:
 ```
 
 ### `/rune recall <query>`
-**Purpose**: Search organizational memory
+**Purpose**: Explicitly search organizational memory. Retriever already handles this automatically when users ask questions about past decisions in natural conversation.
+
+**When to use**: Retriever automatically detects recall-intent queries (see Automatic Behavior below). This command is an **explicit override** for cases where:
+- The user wants to force a memory search without Retriever's intent detection
+- Debugging whether specific context was stored
+- The user prefers direct command syntax
 
 **Behavior**:
 - If dormant: Prompt user to configure first
@@ -128,6 +138,8 @@ Recommendations:
 ```
 /rune recall "Why PostgreSQL?"
 ```
+
+**Note**: In most cases, simply asking Claude naturally ("Why did we choose PostgreSQL?") triggers Retriever automatically — no command needed.
 
 ### `/rune activate` (or `/rune wakeup`)
 **Purpose**: Attempt to activate plugin after infrastructure is ready

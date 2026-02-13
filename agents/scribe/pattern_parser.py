@@ -239,6 +239,42 @@ def load_default_patterns() -> List[Dict]:
     return parse_capture_triggers(str(default_path))
 
 
+def load_all_language_patterns() -> List[Dict]:
+    """Load patterns from all language-specific capture-triggers files.
+
+    Discovers capture-triggers.*.md files in the patterns/ directory
+    and merges them with the base English patterns.
+
+    Returns:
+        List of pattern dicts, each with an optional 'language' key
+    """
+    current_dir = Path(__file__).parent
+    patterns_dir = current_dir.parent.parent / "patterns"
+    all_patterns = []
+
+    # English base patterns
+    base = patterns_dir / "capture-triggers.md"
+    if base.exists():
+        base_patterns = parse_capture_triggers(str(base))
+        for p in base_patterns:
+            p["language"] = "en"
+        all_patterns.extend(base_patterns)
+
+    # Language-specific patterns (capture-triggers.ko.md, capture-triggers.ja.md, ...)
+    for lang_file in sorted(patterns_dir.glob("capture-triggers.*.md")):
+        lang_code = lang_file.stem.split(".")[-1]
+        try:
+            lang_patterns = parse_capture_triggers(str(lang_file))
+            for p in lang_patterns:
+                p["language"] = lang_code
+            all_patterns.extend(lang_patterns)
+            print(f"[PatternParser] Loaded {len(lang_patterns)} patterns for '{lang_code}'")
+        except Exception as e:
+            print(f"[PatternParser] Warning: Failed to load {lang_file}: {e}")
+
+    return all_patterns or get_builtin_patterns()
+
+
 def get_builtin_patterns() -> List[Dict]:
     """
     Return built-in fallback patterns when file is not available.

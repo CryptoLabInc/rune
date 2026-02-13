@@ -3,12 +3,16 @@ Query Processor
 
 Parses and analyzes user queries to understand intent and extract entities.
 Uses patterns from retrieval-patterns.md for intent classification.
+Supports multilingual queries via LLM-based intent classification + translation.
 """
 
+import json
 import re
 from typing import List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
+
+from ..common.language import LanguageInfo, detect_language
 
 
 class QueryIntent(str, Enum):
@@ -42,6 +46,7 @@ class ParsedQuery:
     entities: List[str] = field(default_factory=list)
     keywords: List[str] = field(default_factory=list)
     expanded_queries: List[str] = field(default_factory=list)
+    language: Optional[LanguageInfo] = None
 
 
 class QueryProcessor:
@@ -126,9 +131,45 @@ class QueryProcessor:
         "as", "until", "while", "although", "though", "even", "just", "also",
     }
 
-    def __init__(self):
-        """Initialize query processor"""
-        pass
+    # LLM prompt for multilingual query parsing
+    QUERY_PARSE_PROMPT = """Analyze this user query and extract structured information.
+The query may be in any language. Translate all outputs to English.
+
+Respond with a valid JSON object:
+{{
+    "intent": one of ["decision_rationale", "feature_history", "pattern_lookup", "technical_context", "security_compliance", "historical_context", "attribution", "general"],
+    "english_query": "the query translated to English",
+    "entities": ["list", "of", "named", "entities"],
+    "keywords": ["important", "keywords", "in", "english"],
+    "time_scope": one of ["last_week", "last_month", "last_quarter", "last_year", "all_time"]
+}}
+
+Query: {query}
+
+JSON:"""
+
+    def __init__(
+        self,
+        anthropic_api_key: Optional[str] = None,
+        model: str = "claude-sonnet-4-20250514",
+    ):
+        """Initialize query processor.
+
+        Args:
+            anthropic_api_key: Optional API key for LLM-based multilingual parsing
+            model: Anthropic model to use
+        """
+        self._llm_client = None
+        self._model = model
+
+        if anthropic_api_key:
+            try:
+                import anthropic
+                self._llm_client = anthropic.Anthropic(api_key=anthropic_api_key)
+            except ImportError:
+                pass
+            except Exception:
+                pass
 
     def parse(self, query: str) -> ParsedQuery:
         """
@@ -140,6 +181,17 @@ class QueryProcessor:
         Returns:
             ParsedQuery with intent, entities, and expansions
         """
+        language = detect_language(query)
+
+        if language.is_english or not self._llm_client:
+            # English path: existing regex (unchanged)
+            return self._parse_english(query, language)
+        else:
+            # Non-English path: LLM classification + translation
+            return self._parse_multilingual(query, language)
+
+    def _parse_english(self, query: str, language: Optional[LanguageInfo] = None) -> ParsedQuery:
+        """Parse English query using regex patterns (original logic)."""
         # Clean query
         cleaned = self._clean_query(query)
 
@@ -166,7 +218,74 @@ class QueryProcessor:
             entities=entities,
             keywords=keywords,
             expanded_queries=expanded,
+            language=language,
         )
+
+    def _parse_multilingual(self, query: str, language: LanguageInfo) -> ParsedQuery:
+        """Parse non-English query using LLM for intent classification + translation."""
+        try:
+            prompt = self.QUERY_PARSE_PROMPT.format(query=query)
+            response = self._llm_client.messages.create(
+                model=self._model,
+                max_tokens=256,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            raw = response.content[0].text.strip()
+            result = self._parse_llm_query_response(raw)
+
+            # Map intent string to enum
+            intent_map = {v.value: v for v in QueryIntent}
+            intent = intent_map.get(result.get("intent", ""), QueryIntent.GENERAL)
+
+            # Map time_scope string to enum
+            scope_map = {v.value: v for v in TimeScope}
+            time_scope = scope_map.get(result.get("time_scope", ""), TimeScope.ALL_TIME)
+
+            english_query = result.get("english_query", query)
+
+            # expanded_queries: original + English translation (both searched)
+            expanded = [query, english_query]
+            # Add intent-based expansions on the English translation
+            english_expansions = self._generate_expansions(
+                english_query.lower(), intent, result.get("entities", [])
+            )
+            for exp in english_expansions:
+                if exp not in expanded:
+                    expanded.append(exp)
+
+            return ParsedQuery(
+                original=query,
+                cleaned=query,
+                intent=intent,
+                time_scope=time_scope,
+                entities=result.get("entities", []),
+                keywords=result.get("keywords", []),
+                expanded_queries=expanded[:7],
+                language=language,
+            )
+        except Exception as e:
+            print(f"[QueryProcessor] LLM parsing failed: {e}")
+            # Fallback to regex parsing
+            return self._parse_english(query, language)
+
+    def _parse_llm_query_response(self, raw: str) -> dict:
+        """Parse LLM JSON response for query analysis."""
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            raw = "\n".join(lines)
+
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start >= 0 and end > start:
+                try:
+                    return json.loads(raw[start:end])
+                except json.JSONDecodeError:
+                    return {}
+            return {}
 
     def _clean_query(self, query: str) -> str:
         """Clean and normalize query text"""

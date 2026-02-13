@@ -30,6 +30,8 @@ class SynthesizedAnswer:
 # Synthesis prompt template
 SYNTHESIS_PROMPT = """You are an AI assistant that answers questions based on organizational decision records.
 
+{language_instruction}
+
 Your task is to synthesize an answer from the search results below. Follow these rules strictly:
 
 1. ONLY use information from the provided records. Do NOT make up information.
@@ -55,8 +57,9 @@ Instructions:
 Your Answer:"""
 
 
-# Fallback format when LLM is not available
-FALLBACK_TEMPLATE = """## Search Results for: "{query}"
+# Fallback templates per language
+FALLBACK_TEMPLATES = {
+    "en": """## Search Results for: "{query}"
 
 Found {count} relevant record(s):
 
@@ -65,7 +68,31 @@ Found {count} relevant record(s):
 ---
 **Note**: This is a direct listing without LLM synthesis.
 Configure ANTHROPIC_API_KEY for natural language answers.
-"""
+""",
+    "ko": """## "{query}" 검색 결과
+
+{count}개의 관련 레코드를 찾았습니다:
+
+{formatted_results}
+
+---
+**참고**: LLM 합성 없이 직접 목록을 표시합니다.
+자연어 답변을 위해 ANTHROPIC_API_KEY를 설정하세요.
+""",
+    "ja": """## "{query}" の検索結果
+
+{count}件の関連レコードが見つかりました:
+
+{formatted_results}
+
+---
+**注意**: LLM合成なしの直接リスティングです。
+自然言語での回答にはANTHROPIC_API_KEYを設定してください。
+""",
+}
+
+# Keep original for backward compatibility
+FALLBACK_TEMPLATE = FALLBACK_TEMPLATES["en"]
 
 
 class Synthesizer:
@@ -149,10 +176,21 @@ class Synthesizer:
         # Format records for prompt
         records_text = self._format_records_for_prompt(results)
 
+        # Determine language instruction
+        if query.language and not query.language.is_english:
+            language_instruction = (
+                f"IMPORTANT: The user asked in {query.language.code}. "
+                f"Respond in the SAME language ({query.language.code}). "
+                f"The source records may be in English — translate relevant parts."
+            )
+        else:
+            language_instruction = "Respond in English."
+
         # Build prompt
         prompt = SYNTHESIS_PROMPT.format(
             query=query.original,
-            records=records_text
+            records=records_text,
+            language_instruction=language_instruction,
         )
 
         # Call LLM
@@ -221,7 +259,11 @@ class Synthesizer:
 {r.payload_text[:500]}{"..." if len(r.payload_text) > 500 else ""}
 """)
 
-        answer = FALLBACK_TEMPLATE.format(
+        # Select language-specific fallback template
+        lang_code = query.language.code if query.language else "en"
+        template = FALLBACK_TEMPLATES.get(lang_code, FALLBACK_TEMPLATES["en"])
+
+        answer = template.format(
             query=query.original,
             count=len(results),
             formatted_results="\n".join(formatted_results)
