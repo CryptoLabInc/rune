@@ -431,6 +431,16 @@ class RecordBuilder:
             "data": Domain.DATA,
             "hr": Domain.HR,
             "marketing": Domain.MARKETING,
+            "incident": Domain.INCIDENT,
+            "debugging": Domain.DEBUGGING,
+            "qa": Domain.QA,
+            "legal": Domain.LEGAL,
+            "finance": Domain.FINANCE,
+            "sales": Domain.SALES,
+            "customer_success": Domain.CUSTOMER_SUCCESS,
+            "customer_escalation": Domain.CUSTOMER_SUCCESS,
+            "research": Domain.RESEARCH,
+            "risk": Domain.RISK,
         }
 
         for key, value in domain_map.items():

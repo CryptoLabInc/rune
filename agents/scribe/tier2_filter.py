@@ -13,23 +13,33 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-FILTER_POLICY = """You judge whether a workplace message contains a significant organizational decision, learning, or policy that should be permanently recorded.
+FILTER_POLICY = """You judge whether a workplace message contains significant organizational knowledge that should be permanently recorded.
 
 CAPTURE if the message contains:
 - A concrete decision with reasoning (technology choice, architecture, process change)
 - A policy or standard being established or changed
 - A trade-off analysis or rejection of an alternative
-- A lesson learned from an incident or failure
+- A lesson learned from an incident, failure, or debugging session
 - A commitment or agreement that affects the team
+- Incident postmortem findings, root cause analysis, or corrective actions
+- Debugging breakthroughs: root cause identified, fix applied, workaround found
+- Bug triage outcomes: severity, ownership, or fix strategy decided
+- QA findings that change test strategy or acceptance criteria
+- Legal/compliance decisions or regulatory interpretations
+- Budget allocations, pricing changes, or cost optimization decisions
+- Sales intelligence: deal outcomes, competitive insights, customer requirements
+- Customer escalation resolutions or churn analysis insights
+- Research findings, experiment results, or proof-of-concept conclusions
+- Risk assessments with mitigation strategies
 
 DO NOT CAPTURE:
 - Casual conversation, greetings, or social chat
 - Questions without answers or decisions
-- Status updates without decisions ("still working on X")
+- Status updates without decisions or insights ("still working on X")
 - Vague opinions without commitment ("maybe we should...")
-- Operational messages (deployments, alerts) without decisions
+- Routine alerts/deployments with no decision or learning attached
 
-Respond with JSON only: {"capture": true/false, "reason": "one sentence", "domain": "architecture|security|product|ops|design|data|general"}"""
+Respond with JSON only: {"capture": true/false, "reason": "one sentence", "domain": "architecture|security|product|exec|ops|design|data|hr|marketing|incident|debugging|qa|legal|finance|sales|customer_success|research|risk|general"}"""
 
 
 @dataclass

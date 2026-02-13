@@ -27,6 +27,15 @@ class Domain(str, Enum):
     DATA = "data"
     HR = "hr"
     MARKETING = "marketing"
+    INCIDENT = "incident"
+    DEBUGGING = "debugging"
+    QA = "qa"
+    LEGAL = "legal"
+    FINANCE = "finance"
+    SALES = "sales"
+    CUSTOMER_SUCCESS = "customer_success"
+    RESEARCH = "research"
+    RISK = "risk"
     GENERAL = "general"
 
 
