@@ -67,7 +67,7 @@ Before installing this plugin, you MUST have:
 5. You're prompted to configure credentials
 
 **Requirements**:
-- Python 3.8+
+- Python 3.12
 - 500MB disk space
 - Internet connection
 

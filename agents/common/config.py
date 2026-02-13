@@ -50,8 +50,10 @@ class EmbeddingConfig:
 class ScribeConfig:
     """Scribe agent configuration"""
     slack_webhook_port: int = 8080
-    similarity_threshold: float = 0.7
+    similarity_threshold: float = 0.5  # Tier 1: wider net (Tier 2 LLM handles precision)
     auto_capture_threshold: float = 0.8
+    tier2_enabled: bool = True  # Tier 2: Haiku-based policy filter
+    tier2_model: str = "claude-haiku-4-5-20251001"
     patterns_path: str = str(PATTERNS_DIR / "capture-triggers.md")
     slack_signing_secret: str = ""
 
@@ -109,8 +111,10 @@ def _parse_scribe_config(data: dict) -> ScribeConfig:
     scribe_data = data.get("scribe", {})
     return ScribeConfig(
         slack_webhook_port=scribe_data.get("slack_webhook_port", 8080),
-        similarity_threshold=scribe_data.get("similarity_threshold", 0.7),
+        similarity_threshold=scribe_data.get("similarity_threshold", 0.5),
         auto_capture_threshold=scribe_data.get("auto_capture_threshold", 0.8),
+        tier2_enabled=scribe_data.get("tier2_enabled", True),
+        tier2_model=scribe_data.get("tier2_model", "claude-haiku-4-5-20251001"),
         patterns_path=scribe_data.get("patterns_path", str(PATTERNS_DIR / "capture-triggers.md")),
         slack_signing_secret=scribe_data.get("slack_signing_secret", ""),
     )
@@ -211,6 +215,8 @@ def save_config(config: RuneConfig) -> None:
             "slack_webhook_port": config.scribe.slack_webhook_port,
             "similarity_threshold": config.scribe.similarity_threshold,
             "auto_capture_threshold": config.scribe.auto_capture_threshold,
+            "tier2_enabled": config.scribe.tier2_enabled,
+            "tier2_model": config.scribe.tier2_model,
             "patterns_path": config.scribe.patterns_path,
             "slack_signing_secret": config.scribe.slack_signing_secret,
         },
