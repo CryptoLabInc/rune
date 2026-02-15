@@ -233,23 +233,19 @@ Claude: "Alice captured these database-related decisions:
 
 ### Project-Specific Context
 
-Switch between different project contexts:
+To separate organizational memory by project, the team admin sets the index name on the Vault server:
 
-```
-# Configure for Project Alpha
-/rune configure
-# Collection: "project-alpha-context"
+```bash
+# Admin sets on Vault server for Project Alpha:
+VAULT_INDEX_NAME="project-alpha-context"
+# All team members connecting to this Vault automatically use the alpha index
 
-# Work on Project Alpha...
-# All context stored in alpha collection
-
-# Switch to Project Beta
-/rune configure
-# Collection: "project-beta-context"
-
-# Work on Project Beta...
+# For Project Beta, admin deploys a separate Vault:
+VAULT_INDEX_NAME="project-beta-context"
 # Separate context, no cross-contamination
 ```
+
+Alternatively, edit `~/.rune/config.json` directly to change the `envector.collection` field.
 
 ### Confidential Information
 

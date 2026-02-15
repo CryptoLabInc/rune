@@ -2,7 +2,7 @@
 set -e
 
 # Start Rune MCP Servers
-# This script starts the envector-mcp-server locally
+# This script starts the enVector MCP server locally
 # Note: Vault MCP runs on a remote server deployed by team admin
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,21 +44,21 @@ fi
 
 source "$PLUGIN_DIR/.venv/bin/activate"
 
-# Check if envector-mcp-server exists
-if [ ! -f "$PLUGIN_DIR/mcp/envector-mcp-server/srcs/server.py" ]; then
-    print_error "envector-mcp-server not found. Please run: git submodule update --init"
+# Check if MCP server exists
+if [ ! -f "$PLUGIN_DIR/mcp/server/server.py" ]; then
+    print_error "MCP server not found at mcp/server/server.py. Please reinstall."
     exit 1
 fi
 
-# Check if envector-mcp-server is already running
-if pgrep -f "envector-mcp-server" > /dev/null; then
+# Check if MCP server is already running
+if pgrep -f "mcp/server/server.py" > /dev/null; then
     print_warn "enVector MCP server is already running"
-    echo "PID: $(pgrep -f envector-mcp-server)"
+    echo "PID: $(pgrep -f 'mcp/server/server.py')"
 else
     print_info "Starting enVector MCP server..."
 
-    cd "$PLUGIN_DIR/mcp/envector-mcp-server"
-    nohup python3 srcs/server.py > "$LOG_DIR/envector-mcp.log" 2>&1 &
+    cd "$PLUGIN_DIR"
+    PYTHONPATH="$PLUGIN_DIR/mcp" nohup "$PLUGIN_DIR/.venv/bin/python3" mcp/server/server.py > "$LOG_DIR/envector-mcp.log" 2>&1 &
     ENVECTOR_PID=$!
 
     # Wait a moment and check if it's still running
@@ -82,6 +82,6 @@ echo "To view logs:"
 echo "  tail -f $LOG_DIR/envector-mcp.log"
 echo ""
 echo "To stop server:"
-echo "  pkill -f envector-mcp-server"
+echo "  pkill -f 'mcp/server/server.py'"
 echo ""
 echo "Next: Restart Claude to connect to MCP servers"

@@ -245,8 +245,8 @@ def review_queue():
   ],
   
   "embedding": {
-    "model": "text-embedding-3-large",
-    "vector": [...],  // 1536-dim
+    "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "vector": [...],  // 384-dim
     "encrypted": true
   },
   

@@ -15,14 +15,14 @@
    - YES → Continue to step 2
 
 2. **Config Validation**: Does config contain all required fields?
-   - `vault.url` and `vault.token`
+   - `vault.endpoint` and `vault.token`
    - `envector.endpoint` and `envector.api_key`
    - `state` is set to `"active"`
    - NO → **Go to Dormant State**
    - YES → Continue to step 3
 
 3. **Infrastructure Validation** (LIGHTWEIGHT CHECK):
-   - Is there a `~/.rune/logs/vault-mcp.log` file?
+   - Is there a `~/.rune/logs/envector-mcp.log` file?
    - Is it recent (modified within last 24 hours)?
    - NO → **Go to Dormant State** (infrastructure likely not running)
    - YES → **Go to Active State**
@@ -59,10 +59,10 @@ If in Active state but operations fail:
 **Purpose**: Configure plugin credentials
 
 **Steps**:
-1. Ask user for Vault URL (format: `https://vault-TEAM.oci.envector.io`)
-2. Ask user for Vault Token (format: `evt_xxx`)
-3. Ask user for enVector Endpoint (format: `https://cluster-xxx.envector.io`)
-4. Ask user for enVector API Key (format: `envector_xxx`)
+1. Ask user for Vault Endpoint (the Vault gRPC endpoint provided by your team admin)
+2. Ask user for Vault Token (authentication token provided by your team admin)
+3. Ask user for enVector Endpoint (e.g., `runestone-xxx.clusters.envector.io`)
+4. Ask user for enVector API Key
 5. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
    - If validation fails: Create config with `state: "dormant"`, warn user
    - If validation passes: Continue to step 6
@@ -80,7 +80,7 @@ If in Active state but operations fail:
 2. Show current state (Active/Dormant)
 3. Run infrastructure checks:
    - Config file: ✓/✗
-   - Vault URL configured: ✓/✗
+   - Vault Endpoint configured: ✓/✗
    - enVector endpoint configured: ✓/✗
    - MCP server logs recent: ✓/✗
    - Virtual environment: ✓/✗
@@ -93,8 +93,8 @@ State: Active ✅ (or Dormant ⏸️)
 
 Configuration:
   ✓ Config file: ~/.rune/config.json
-  ✓ Vault URL: https://vault-team.oci.envector.io
-  ✓ enVector: https://cluster-xxx.envector.io
+  ✓ Vault Endpoint: configured
+  ✓ enVector: configured
 
 Infrastructure:
   ✓ Python venv: /path/to/.venv
@@ -244,7 +244,7 @@ When users ask questions about past decisions, automatically search organization
 - File permissions: 600 (user-only access)
 
 **Team Sharing**:
-- Same Vault URL + Token = shared organizational memory
+- Same Vault Endpoint + Token = shared organizational memory
 - Team admin controls access via Vault authentication
 - Revoke access by rotating Vault tokens
 

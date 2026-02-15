@@ -1,7 +1,7 @@
 """
 Embedding Service
 
-Wraps the existing EmbeddingAdapter from envector-mcp-server.
+Wraps the existing EmbeddingAdapter from mcp/adapter.
 Provides on-device embedding generation using fastembed.
 """
 
@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import List, Optional
 import numpy as np
 
-# Add envector-mcp-server to path
-MCP_SERVER_PATH = Path(__file__).parent.parent.parent / "mcp" / "envector-mcp-server" / "srcs"
-if str(MCP_SERVER_PATH) not in sys.path:
-    sys.path.insert(0, str(MCP_SERVER_PATH))
+# Add mcp/ to path so `from adapter import ...` works
+MCP_ROOT = Path(__file__).parent.parent.parent / "mcp"
+if str(MCP_ROOT) not in sys.path:
+    sys.path.insert(0, str(MCP_ROOT))
 
 
 class EmbeddingService:

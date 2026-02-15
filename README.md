@@ -9,7 +9,7 @@ Rune is a `/plugin` installable system that provides FHE-encrypted organizationa
 This is the **complete plugin** with everything needed to run Rune locally:
 
 **Includes**:
-- ✅ MCP servers (Vault + enVector client)
+- ✅ MCP server (enVector client with Vault integration)
 - ✅ Python dependencies (pyenvector, fastmcp, etc.)
 - ✅ Installation scripts (automated setup)
 - ✅ Agent specifications (Scribe, Retriever)
@@ -42,12 +42,12 @@ Claude + Rune Plugin
 Before installing this plugin, you MUST have:
 
 ### 1. Rune-Vault Access (from your team admin)
-- **Vault URL**: `https://vault-YOURTEAM.oci.envector.io`
-- **Vault Token**: `evt_YOURTEAM_xxx`
+- **Vault Endpoint**: Your Vault gRPC endpoint (e.g., `vault-host:50051`)
+- **Vault Token**: Authentication token provided by your admin
 
 ### 2. enVector Cloud Credentials
-- **Cluster Endpoint**: `https://cluster-xxx.envector.io`
-- **API Key**: `envector_xxx`
+- **Cluster Endpoint**: Your enVector endpoint (e.g., `runestone-xxx.clusters.envector.io`)
+- **API Key**: Your enVector API key
 
 **Don't have these?** Contact your team administrator or see the [full Rune deployment guide](https://github.com/CryptoLabInc/rune-admin).
 
@@ -78,11 +78,8 @@ Before installing this plugin, you MUST have:
 git clone https://github.com/CryptoLabInc/rune.git
 cd rune
 
-# Run installation script
-./scripts/install.sh
-
-# Configure Claude MCP servers
-./scripts/configure-claude-mcp.sh
+# Run installation script (delegates to scripts/ internally)
+./install.sh
 
 # Configure credentials
 # (or use /rune configure in Claude)
@@ -101,9 +98,8 @@ cd rune
 Expected output:
 ```
 ✓ Configuration file found
-✓ Vault URL: https://vault-team.oci.envector.io
-✓ Vault is accessible (HTTP 200)
-✓ Vault MCP server is running (PID: 12345)
+✓ Vault Endpoint: configured
+✓ enVector MCP server is running
 ✓ Python virtual environment found
 ✓ Infrastructure checks passed ✓
 ```
@@ -120,7 +116,7 @@ After installation, you have two options:
 ```
 
 Plugin will:
-1. Ask for Vault URL, Token
+1. Ask for Vault Endpoint, Token
 2. Ask for enVector endpoint, API key
 3. Validate infrastructure availability
 4. Set state to Active (if infrastructure ready) or Dormant (if not)
@@ -139,7 +135,7 @@ Then activate:
 
 ### Starting MCP Servers
 
-After configuration, start the local MCP servers:
+After configuration, start the local MCP server:
 
 ```bash
 cd rune
@@ -147,10 +143,11 @@ cd rune
 ```
 
 This starts:
-- **Vault MCP server**: Connects to Rune-Vault for decryption
-- **enVector MCP server**: Connects to enVector Cloud for encryption/storage
+- **enVector MCP server**: Connects to enVector Cloud for encryption/storage, and to Rune-Vault for decryption of shared team memory
 
-Logs: `~/.rune/logs/vault-mcp.log`
+> Note: Vault MCP runs on a remote server deployed by the team admin, not locally.
+
+Logs: `~/.rune/logs/envector-mcp.log`
 
 ### Configuration File
 
@@ -159,13 +156,13 @@ Manually edit `~/.rune/config.json` if needed:
 ```json
 {
   "vault": {
-    "url": "https://vault-YOURTEAM.oci.envector.io",
-    "token": "evt_YOURTEAM_xxx"
+    "url": "your-vault-host:50051",
+    "token": "your-vault-token"
   },
   "envector": {
-    "endpoint": "https://cluster-xxx.envector.io",
-    "api_key": "envector_xxx",
-    "collection": "YOURTEAM-context"
+    "endpoint": "runestone-xxx.clusters.envector.io",
+    "api_key": "your-api-key",
+    "collection": "rune-context"
   },
   "state": "active"
 }
@@ -228,7 +225,7 @@ State: Active ✅
 
 Configuration:
   ✓ Config file: ~/.rune/config.json
-  ✓ Vault URL: https://vault-team.oci.envector.io
+  ✓ Vault Endpoint: configured
 
 Infrastructure:
   ✓ Python venv: /path/to/.venv
@@ -298,7 +295,7 @@ If Scribe missed something, use `/rune remember` to force-store:
 ## Privacy Policy
 
 ### Data We Collect
-- **Credentials location**: Vault URL, Vault token, enVector endpoint, and API key stored locally in `~/.rune/config.json`.
+- **Credentials location**: Vault Endpoint, Vault token, enVector endpoint, and API key stored locally in `~/.rune/config.json`.
 - **Vector data**: Encrypted vector embeddings derived from organizational context are stored on enVector Cloud. The plaintext content is never transmitted or stored on any remote server.
 
 ### How We Process Data

@@ -1,14 +1,12 @@
 {
   "vault": {
-    "url": "https://vault-YOURTEAM.oci.envector.io",
-    "token": "evt_YOURTEAM_xxx",
-    "description": "Rune-Vault manages FHE decryption keys for your team"
+    "endpoint": "VAULT_GRPC_ENDPOINT",
+    "token": "VAULT_TOKEN"
   },
   "envector": {
-    "endpoint": "https://cluster-xxx.envector.io",
-    "api_key": "envector_xxx",
-    "collection": "YOURTEAM-context",
-    "description": "enVector Cloud stores encrypted vectors"
+    "endpoint": "ENVECTOR_ENDPOINT",
+    "api_key": "ENVECTOR_API_KEY",
+    "collection": "rune-context"
   },
   "state": "dormant",
   "metadata": {

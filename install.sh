@@ -1,10 +1,15 @@
 #!/bin/bash
 set -e
 
-# Rune Plugin Installer (Agent-Agnostic)
-# Works with Claude, Gemini, Codex, and any MCP-compatible AI agent
+# Rune Plugin Installer v0.3.0
+# Orchestrates scripts/ to produce the same end-state as /plugin install
+#
+# Usage:
+#   ./install.sh              # Interactive installation
+#   ./install.sh --uninstall  # Remove Rune completely
 
-VERSION="0.1.0"
+VERSION="0.3.0"
+RUNE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Colors
 RED='\033[0;31m'
@@ -35,96 +40,139 @@ print_step() {
     echo -e "\n${BLUE}▸${NC} $1\n"
 }
 
-check_python() {
-    if ! command -v python3.12 &> /dev/null; then
-        print_error "Python 3.12 is not installed"
-        echo "Rune requires Python 3.12 for pyenvector compatibility"
-        echo ""
-        echo "Installation:"
-        echo "  - macOS: brew install python@3.12"
-        echo "  - Linux: sudo apt install python3.12 python3.12-venv"
+# ============================================================================
+# Uninstall
+# ============================================================================
+if [ "$1" = "--uninstall" ]; then
+    if [ -f "$RUNE_ROOT/scripts/uninstall.sh" ]; then
+        exec bash "$RUNE_ROOT/scripts/uninstall.sh"
+    else
+        print_error "scripts/uninstall.sh not found"
         exit 1
     fi
+fi
 
-    PYTHON_VERSION=$(python3.12 --version | cut -d' ' -f2)
-    print_info "Python $PYTHON_VERSION detected"
-}
+# ============================================================================
+# Main Installation
+# ============================================================================
+print_header "Rune Plugin Installer v${VERSION}"
 
-setup_mcp_server() {
-    print_step "Setting up envector-mcp-server..."
+echo "FHE-encrypted organizational memory for teams"
+echo ""
 
-    cd mcp/envector-mcp-server
+# ----------------------------------------------------------------------------
+# Step 1: Delegate to scripts/install.sh (venv + deps + ~/.rune/ directory)
+# ----------------------------------------------------------------------------
+print_step "Step 1/4: Setting up Python environment and dependencies..."
 
-    # Create virtual environment with Python 3.12
-    if [ ! -d ".venv" ]; then
-        print_info "Creating Python 3.12 virtual environment..."
-        python3.12 -m venv .venv
-    else
-        print_info "Virtual environment already exists"
+if [ ! -f "$RUNE_ROOT/scripts/install.sh" ]; then
+    print_error "scripts/install.sh not found. Is this the Rune plugin directory?"
+    exit 1
+fi
+
+bash "$RUNE_ROOT/scripts/install.sh"
+print_info "Python environment ready"
+
+# ----------------------------------------------------------------------------
+# Step 2: Collect credentials (interactive) and create ~/.rune/config.json
+# ----------------------------------------------------------------------------
+print_step "Step 2/4: Configure team credentials..."
+
+CONFIG_FILE="$HOME/.rune/config.json"
+mkdir -p "$HOME/.rune"
+chmod 700 "$HOME/.rune"
+
+# Check for existing config
+if [ -f "$CONFIG_FILE" ]; then
+    print_warn "Existing configuration found at $CONFIG_FILE"
+    read -p "Overwrite? (y/n): " OVERWRITE
+    if [ "$OVERWRITE" != "y" ]; then
+        print_info "Keeping existing configuration"
+        # Read existing values for .env generation
+        ENVECTOR_ADDRESS=$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('envector',{}).get('endpoint',''))" 2>/dev/null || echo "")
+        ENVECTOR_API_KEY=$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('envector',{}).get('api_key',''))" 2>/dev/null || echo "")
+        RUNEVAULT_ENDPOINT=$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('vault',{}).get('url',''))" 2>/dev/null || echo "")
+        RUNEVAULT_TOKEN=$(python3 -c "import json; c=json.load(open('$CONFIG_FILE')); print(c.get('vault',{}).get('token',''))" 2>/dev/null || echo "")
     fi
+fi
 
-    # Activate venv
-    source .venv/bin/activate
-
-    # Install dependencies
-    print_info "Installing dependencies (pyenvector from CryptoLab PyPI)..."
-    pip install --quiet --upgrade pip
-
-    # Install pyenvector from CryptoLab PyPI
-    print_info "Installing pyenvector 1.2.2..."
-    pip install --quiet \
-        pyenvector==1.2.2 \
-        --index-url https://pypi.org/simple \
-        --extra-index-url https://pypi.cryptolab.co.kr/simple
-
-    # Install other dependencies
-    print_info "Installing FastMCP and other packages..."
-    pip install --quiet -r requirements.txt
-
-    print_info "Dependencies installed successfully!"
-
-    cd ../..
-}
-
-configure_credentials() {
-    print_step "Configuring team credentials..."
-
-    MCP_DIR="mcp/envector-mcp-server"
-    ENV_FILE="$MCP_DIR/.env"
-
-    # Check if .env already exists
-    if [ -f "$ENV_FILE" ]; then
-        print_warn ".env file already exists"
-        read -p "Overwrite? (y/n): " OVERWRITE
-        if [ "$OVERWRITE" != "y" ]; then
-            print_info "Keeping existing configuration"
-            return
-        fi
-    fi
-
+if [ ! -f "$CONFIG_FILE" ] || [ "$OVERWRITE" = "y" ]; then
     echo "Enter team credentials (provided by your admin):"
     echo ""
 
-    # enVector Cloud
-    read -p "enVector Cloud Address (e.g., cluster-xxx.envector.io:443): " ENVECTOR_ADDRESS
-    read -p "enVector API Key: " ENVECTOR_API_KEY
+    # enVector Cloud (required)
+    read -p "  enVector Cloud Address (e.g., cluster-xxx.envector.io): " ENVECTOR_ADDRESS
+    if [ -z "$ENVECTOR_ADDRESS" ]; then
+        print_error "enVector Address is required"
+        exit 1
+    fi
+
+    read -p "  enVector API Key: " ENVECTOR_API_KEY
+    if [ -z "$ENVECTOR_API_KEY" ]; then
+        print_error "enVector API Key is required"
+        exit 1
+    fi
 
     # Rune-Vault (optional)
     echo ""
-    read -p "Rune-Vault Endpoint (optional, press Enter to skip): " RUNEVAULT_ENDPOINT
+    echo "  Rune-Vault credentials (optional — skip to configure later via /rune configure):"
+    read -p "  Rune-Vault URL (press Enter to skip): " RUNEVAULT_ENDPOINT
+    RUNEVAULT_TOKEN=""
     if [ -n "$RUNEVAULT_ENDPOINT" ]; then
-        read -p "Rune-Vault Token: " RUNEVAULT_TOKEN
+        read -p "  Rune-Vault Token: " RUNEVAULT_TOKEN
     fi
 
-    # Generate .env file
-    cat > "$ENV_FILE" <<EOF
+    # Determine initial state
+    INITIAL_STATE="dormant"
+
+    # Generate ~/.rune/config.json
+    python3 -c "
+import json
+from datetime import datetime
+
+config = {
+    'vault': {
+        'url': '$RUNEVAULT_ENDPOINT',
+        'token': '$RUNEVAULT_TOKEN'
+    },
+    'envector': {
+        'endpoint': '$ENVECTOR_ADDRESS',
+        'api_key': '$ENVECTOR_API_KEY',
+        'collection': 'rune-context'
+    },
+    'state': '$INITIAL_STATE',
+    'metadata': {
+        'configVersion': '1.0',
+        'lastUpdated': datetime.now().isoformat(),
+        'installedFrom': '$RUNE_ROOT'
+    }
+}
+
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+"
+    chmod 600 "$CONFIG_FILE"
+    print_info "Configuration saved to $CONFIG_FILE"
+
+    if [ -z "$RUNEVAULT_ENDPOINT" ]; then
+        print_warn "Vault not configured — plugin starts in dormant state"
+        echo "    Configure later with: /rune configure"
+    fi
+fi
+
+# ----------------------------------------------------------------------------
+# Step 3: Generate mcp/.env (server runtime config)
+# ----------------------------------------------------------------------------
+print_step "Step 3/4: Generating MCP server configuration..."
+
+MCP_ENV_FILE="$RUNE_ROOT/mcp/.env"
+
+cat > "$MCP_ENV_FILE" <<EOF
+# Generated by install.sh v${VERSION}
 # MCP Server Configuration
-MCP_SERVER_MODE="http"
-MCP_SERVER_HOST="127.0.0.1"
-MCP_SERVER_PORT="8000"
 MCP_SERVER_NAME="envector_mcp_server"
 
-# enVector Cloud (Team-shared)
+# enVector Cloud
 ENVECTOR_ADDRESS="$ENVECTOR_ADDRESS"
 ENVECTOR_API_KEY="$ENVECTOR_API_KEY"
 
@@ -133,232 +181,97 @@ ENVECTOR_KEY_ID="mcp_key"
 ENVECTOR_KEY_PATH="./keys"
 ENVECTOR_EVAL_MODE="rmp"
 ENVECTOR_ENCRYPTED_QUERY="false"
-ENVECTOR_AUTO_KEY_SETUP="true"
+ENVECTOR_AUTO_KEY_SETUP="false"
 
-# Rune-Vault Integration (Optional)
+# Rune-Vault Integration
 RUNEVAULT_ENDPOINT="$RUNEVAULT_ENDPOINT"
 RUNEVAULT_TOKEN="$RUNEVAULT_TOKEN"
 
 # Embedding Configuration
 EMBEDDING_MODE="femb"
-EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EOF
 
-    print_info "Credentials configured in $ENV_FILE"
-}
+print_info "MCP server .env generated"
 
-setup_agent_integration() {
-    print_step "Choose your AI agent integration..."
+# ----------------------------------------------------------------------------
+# Step 4: Register as Claude Code plugin
+# ----------------------------------------------------------------------------
+print_step "Step 4/4: Registering with Claude Code..."
 
-    echo "Rune works with multiple AI agents:"
-    echo "1) Claude (MCP native support)"
-    echo "2) Gemini / Codex / Other (HTTP endpoint)"
-    echo "3) Skip (configure manually later)"
-    echo ""
-    read -p "Select (1, 2, or 3): " AGENT_CHOICE
+MARKETPLACE_DIR="$(cd "$RUNE_ROOT/.." && pwd)"
+MARKETPLACE_NAME="rune-local"
+PLUGIN_KEY="rune@${MARKETPLACE_NAME}"
 
-    case "$AGENT_CHOICE" in
-        1)
-            setup_claude_mcp
-            ;;
-        2)
-            show_http_setup
-            ;;
-        3)
-            print_info "Skipping agent setup (configure manually)"
-            ;;
-        *)
-            print_warn "Invalid selection, skipping agent setup"
-            ;;
-    esac
-}
+# Find claude CLI
+CLAUDE_BIN=""
+if command -v claude &>/dev/null; then
+    CLAUDE_BIN="claude"
+elif [ -x "$HOME/.local/bin/claude" ]; then
+    CLAUDE_BIN="$HOME/.local/bin/claude"
+fi
 
-setup_claude_mcp() {
-    print_step "Configuring Claude MCP..."
+if [ -n "$CLAUDE_BIN" ]; then
+    # Verify marketplace.json exists at parent directory
+    if [ ! -f "$MARKETPLACE_DIR/.claude-plugin/marketplace.json" ]; then
+        print_warn "marketplace.json not found at $MARKETPLACE_DIR/.claude-plugin/"
+        print_warn "Skipping plugin registration. Install manually:"
+        echo "    claude plugin marketplace add $MARKETPLACE_DIR"
+        echo "    claude plugin install $PLUGIN_KEY --scope user"
+    else
+        # 4a. Add marketplace (remove first if already added, for idempotency)
+        if "$CLAUDE_BIN" plugin marketplace list 2>/dev/null | grep -q "$MARKETPLACE_NAME"; then
+            "$CLAUDE_BIN" plugin marketplace remove "$MARKETPLACE_NAME" 2>/dev/null || true
+        fi
+        "$CLAUDE_BIN" plugin marketplace add "$MARKETPLACE_DIR" 2>&1 && \
+            print_info "Marketplace '${MARKETPLACE_NAME}' added" || \
+            print_warn "Failed to add marketplace (may already exist)"
 
-    CLAUDE_CONFIG="$HOME/.claude/mcp_settings.json"
-    RUNE_ROOT="$(pwd)"
-
-    # Check if Claude config exists
-    if [ ! -f "$CLAUDE_CONFIG" ]; then
-        print_warn "Claude MCP config not found at $CLAUDE_CONFIG"
-        print_info "Creating new config..."
-        mkdir -p "$HOME/.claude"
-        echo '{"mcpServers":{}}' > "$CLAUDE_CONFIG"
+        # 4b. Install plugin (idempotent — reinstalls if already present)
+        "$CLAUDE_BIN" plugin install "$PLUGIN_KEY" --scope user 2>&1 && \
+            print_info "Plugin '${PLUGIN_KEY}' installed" || \
+            print_error "Failed to install plugin"
     fi
-
-    # Add envector-mcp-server to Claude config
-    print_info "Adding envector-mcp-server to Claude MCP settings..."
-
-    # Use Python to update JSON
-    python3.12 -c "
-import json
-
-config_path = '$CLAUDE_CONFIG'
-rune_root = '$RUNE_ROOT'
-
-with open(config_path, 'r') as f:
-    config = json.load(f)
-
-if 'mcpServers' not in config:
-    config['mcpServers'] = {}
-
-config['mcpServers']['envector-mcp-server'] = {
-    'command': f'{rune_root}/mcp/envector-mcp-server/.venv/bin/python',
-    'args': [f'{rune_root}/mcp/envector-mcp-server/srcs/server.py'],
-    'env': {
-        'PYTHONPATH': f'{rune_root}/mcp/envector-mcp-server'
-    }
-}
-
-with open(config_path, 'w') as f:
-    json.dump(config, f, indent=2)
-
-print('✓ Claude MCP configuration updated')
-"
-
-    print_info "Claude will auto-start MCP server on next launch"
-}
-
-show_http_setup() {
-    print_header "HTTP Endpoint Setup"
-
-    RUNE_ROOT="$(pwd)"
-
-    echo "Rune MCP server runs as HTTP endpoint for non-Claude agents."
-    echo ""
-    echo "1️⃣  Start the MCP server:"
-    echo "   cd $RUNE_ROOT/mcp/envector-mcp-server"
-    echo "   source .venv/bin/activate"
-    echo "   python srcs/server.py --mode http --host 127.0.0.1 --port 8000"
-    echo ""
-    echo "2️⃣  Server will be available at:"
-    echo "   http://127.0.0.1:8000"
-    echo ""
-    echo "3️⃣  Configure your AI agent to use MCP endpoint:"
-    echo ""
-    echo "   For Gemini:"
-    echo "   - Use Google AI SDK with custom tools"
-    echo "   - Point to http://127.0.0.1:8000/mcp/v1/tools"
-    echo ""
-    echo "   For OpenAI Codex:"
-    echo "   - Use OpenAI function calling"
-    echo "   - Proxy MCP tools via http://127.0.0.1:8000/mcp/v1/tools"
-    echo ""
-    echo "   For Custom Agents:"
-    echo "   - OpenAPI spec: http://127.0.0.1:8000/openapi.json"
-    echo "   - MCP protocol: https://modelcontextprotocol.io"
-    echo ""
-
-    print_info "HTTP setup guide shown above"
-}
-
-create_startup_scripts() {
-    print_step "Creating startup scripts..."
-
-    RUNE_ROOT="$(pwd)"
-
-    # Create start script
-    cat > "start-mcp-server.sh" <<'EOF'
-#!/bin/bash
-# Start Rune MCP Server (HTTP mode for all agents)
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/mcp/envector-mcp-server"
-
-echo "Starting Rune MCP Server..."
-echo "Endpoint: http://127.0.0.1:8000"
-echo "Press Ctrl+C to stop"
-echo ""
-
-source .venv/bin/activate
-python srcs/server.py --mode http --host 127.0.0.1 --port 8000
-EOF
-
-    chmod +x "start-mcp-server.sh"
-    print_info "Created start-mcp-server.sh"
-
-    # Create test script
-    cat > "test-connection.sh" <<'EOF'
-#!/bin/bash
-# Test Rune MCP Server connection
-
-echo "Testing Rune MCP Server..."
-echo ""
-
-# Check if server is running
-if curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
-    echo "✓ Server is running"
-    echo ""
-    echo "Available tools:"
-    curl -s http://127.0.0.1:8000/mcp/v1/tools | python3 -m json.tool
 else
-    echo "✗ Server is not running"
-    echo ""
-    echo "Start with: ./start-mcp-server.sh"
-fi
-EOF
-
-    chmod +x "test-connection.sh"
-    print_info "Created test-connection.sh"
-}
-
-show_next_steps() {
-    print_header "Installation Complete! 🎉"
-
-    echo "Rune is ready to use with any AI agent."
-    echo ""
-    echo "Quick Start:"
-    echo ""
-    echo "1️⃣  For Claude users:"
-    echo "   - Restart Claude Code CLI"
-    echo "   - MCP server auto-starts"
-    echo "   - Try: 'Create a test index'"
-    echo ""
-    echo "2️⃣  For Gemini/Codex/Other agents:"
-    echo "   - Run: ./start-mcp-server.sh"
-    echo "   - Server runs at http://127.0.0.1:8000"
-    echo "   - Configure your agent to use MCP endpoint"
-    echo ""
-    echo "3️⃣  Test installation:"
-    echo "   ./test-connection.sh"
-    echo ""
-    echo "📚 Documentation:"
-    echo "   - MCP Server: mcp/envector-mcp-server/README.md"
-    echo "   - E2E Tests: ../rune-e2e-test/README.md"
-    echo "   - Agent Integration: AGENT_INTEGRATION.md"
-    echo ""
-}
-
-# Main installation flow
-print_header "Rune Plugin Installer v${VERSION}"
-
-echo "Agent-agnostic organizational memory system"
-echo "Works with: Claude, Gemini, Codex, and any MCP-compatible agent"
-echo ""
-
-print_step "Prerequisites check..."
-check_python
-
-print_step "Installation steps:"
-echo "1. Setup envector-mcp-server"
-echo "2. Configure team credentials"
-echo "3. Choose AI agent integration"
-echo "4. Create startup scripts"
-echo ""
-read -p "Continue? (y/n): " CONTINUE
-
-if [ "$CONTINUE" != "y" ]; then
-    echo "Installation cancelled."
-    exit 0
+    print_warn "Claude Code CLI not found. Install the plugin manually after installing Claude Code:"
+    echo "    claude plugin marketplace add $MARKETPLACE_DIR"
+    echo "    claude plugin install $PLUGIN_KEY --scope user"
 fi
 
-# Run installation
-setup_mcp_server
-configure_credentials
-setup_agent_integration
-create_startup_scripts
+# 4c. Register MCP in Claude Desktop (for Desktop app users)
+if [ -f "$RUNE_ROOT/scripts/configure-claude-mcp.sh" ]; then
+    bash "$RUNE_ROOT/scripts/configure-claude-mcp.sh"
+fi
 
-show_next_steps
+# ============================================================================
+# Summary
+# ============================================================================
+print_header "Installation Complete!"
 
-print_info "Installation complete! 🚀"
+echo "  Config    : $CONFIG_FILE"
+echo "  Venv      : $RUNE_ROOT/.venv"
+echo "  MCP .env  : $MCP_ENV_FILE"
+echo "  Plugin    : $PLUGIN_KEY"
+echo ""
+
+if [ -z "$RUNEVAULT_ENDPOINT" ]; then
+    echo "  State: Dormant (Vault not configured)"
+    echo ""
+    echo "  Next steps:"
+    echo "    1. Restart Claude Code to load the plugin"
+    echo "    2. Use /rune:configure to set Vault credentials"
+    echo "    3. Use /rune:activate to enable"
+else
+    echo "  State: Dormant (run /rune:activate to enable)"
+    echo ""
+    echo "  Next steps:"
+    echo "    1. Restart Claude Code to load the plugin"
+    echo "    2. Use /rune:activate"
+fi
+
+echo ""
+echo "  To uninstall:"
+echo "    ./install.sh --uninstall"
+echo ""
+
+print_info "Setup complete! Restart Claude Code to use the Rune plugin."

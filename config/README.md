@@ -14,13 +14,13 @@ The Rune plugin stores configuration in:
 ```json
 {
   "vault": {
-    "url": "https://vault-YOURTEAM.oci.envector.io",
-    "token": "evt_YOURTEAM_xxx"
+    "endpoint": "your-vault-host:50051",
+    "token": "your-vault-token"
   },
   "envector": {
-    "endpoint": "https://cluster-xxx.envector.io",
-    "api_key": "envector_xxx",
-    "collection": "sealed-hive-context"
+    "endpoint": "runestone-xxx.clusters.envector.io",
+    "api_key": "your-api-key",
+    "collection": "rune-context"
   },
   "state": "active"
 }
@@ -28,30 +28,34 @@ The Rune plugin stores configuration in:
 
 ## Fields
 
-### `vault.url` (required)
-Your team's Rune-Vault URL. Format: `https://vault-TEAM.{oci|aws|gcp}.envector.io`
+### `vault.endpoint` (required for shared memory)
+Your team's Rune-Vault gRPC endpoint. This is the host:port where the Vault gRPC server is running.
 
-**Example**: `https://vault-acme.oci.envector.io`
+**Example**: `vault-host:50051`
 
-### `vault.token` (required)
-Authentication token for Vault access. Format: `evt_xxx`
+### `vault.token` (required for shared memory)
+Authentication token for Vault access. Provided by your team administrator.
 
-**Example**: `evt_acme_abc123def456`
+**Example**: `your-vault-token`
 
 **Security**: Keep this secure. Anyone with this token can access your team's organizational memory.
 
 ### `envector.endpoint` (required)
-Your enVector Cloud cluster endpoint. Format: `https://cluster-xxx.envector.io`
+Your enVector Cloud gRPC endpoint address.
 
-**Example**: `https://cluster-us-west-2.envector.io`
+**Example**: `runestone-xxx.clusters.envector.io`
 
 ### `envector.api_key` (required)
-API key for enVector Cloud authentication. Format: `envector_xxx`
+API key for enVector Cloud authentication.
 
-**Example**: `envector_abc123def456`
+**Example**: `your-envector-api-key`
 
 ### `envector.collection` (optional)
-Collection name for storing vectors. Default: `"sealed-hive-context"`
+Collection name for organizing vectors. Default: `"rune-context"`
+
+This maps to an `index_name` in the enVector SDK. When using MCP tools directly (`insert`, `search`, `remember`), use this value as the `index_name` parameter.
+
+> **Note**: For team shared memory via the `remember` tool, the team index name is managed by the Vault admin and distributed automatically. The `collection` field is primarily used by Scribe/Retriever agents for their own operations.
 
 You may want to use different collections for:
 - Different projects: `"project-alpha-context"`
@@ -62,6 +66,33 @@ You may want to use different collections for:
 Plugin activation state. Values:
 - `"active"` - Full functionality enabled
 - `"dormant"` - Waiting for configuration
+
+### Optional Sections
+
+The config file also supports optional sections for agent configuration:
+
+```json
+{
+  "embedding": {
+    "mode": "femb",
+    "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+  },
+  "scribe": {
+    "slack_webhook_port": 8080,
+    "similarity_threshold": 0.5,
+    "auto_capture_threshold": 0.8,
+    "tier2_enabled": true,
+    "tier2_model": "claude-haiku-4-5-20251001"
+  },
+  "retriever": {
+    "topk": 10,
+    "confidence_threshold": 0.5,
+    "anthropic_model": "claude-sonnet-4-20250514"
+  }
+}
+```
+
+All optional sections have sensible defaults. See `agents/common/config.py` for the full schema.
 
 ## Manual Configuration
 
@@ -84,7 +115,7 @@ If you prefer to configure manually instead of using `/rune configure`:
    ```
 
 4. **Replace placeholders**:
-   - `vault.url`: Your team's Vault URL
+   - `vault.endpoint`: Your team's Vault gRPC endpoint
    - `vault.token`: Your Vault authentication token
    - `envector.endpoint`: Your enVector cluster endpoint
    - `envector.api_key`: Your enVector API key
@@ -105,13 +136,18 @@ If you prefer to configure manually instead of using `/rune configure`:
 You can also use environment variables instead of a config file:
 
 ```bash
-export RUNE_VAULT_URL="https://vault-acme.oci.envector.io"
-export RUNE_VAULT_TOKEN="evt_acme_xxx"
-export ENVECTOR_ENDPOINT="https://cluster-xxx.envector.io"
-export ENVECTOR_API_KEY="envector_xxx"
+# Vault (for shared team memory)
+export RUNEVAULT_ENDPOINT="your-vault-host:50051"
+export RUNEVAULT_TOKEN="your-vault-token"
+
+# enVector Cloud
+export ENVECTOR_ENDPOINT="runestone-xxx.clusters.envector.io"
+export ENVECTOR_API_KEY="your-api-key"
 ```
 
 The plugin will check environment variables if `~/.rune/config.json` doesn't exist.
+
+> **Note**: The MCP server (`server.py`) uses `ENVECTOR_ADDRESS` for the endpoint, while the agent config (`config.py`) uses `ENVECTOR_ENDPOINT`. Both are supported -- set both if running agents and MCP server separately.
 
 ## Team Configuration
 
@@ -120,11 +156,11 @@ The plugin will check environment variables if `~/.rune/config.json` doesn't exi
 When onboarding team members, provide them with:
 
 1. **Vault credentials** (same for all team members):
-   - Vault URL
+   - Vault gRPC endpoint
    - Vault Token
 
 2. **enVector credentials** (can be shared or individual):
-   - Cluster endpoint
+   - Cluster endpoint (e.g., `runestone-xxx.clusters.envector.io`)
    - API key
 
 3. **Optional: Pre-configured file**:
@@ -133,13 +169,13 @@ When onboarding team members, provide them with:
    cat > alice-config.json << EOF
    {
      "vault": {
-       "url": "https://vault-acme.oci.envector.io",
-       "token": "evt_acme_xxx"
+       "url": "vault-host:50051",
+       "token": "your-vault-token"
      },
      "envector": {
-       "endpoint": "https://cluster-us-west-2.envector.io",
-       "api_key": "envector_xxx",
-       "collection": "sealed-hive-context"
+       "endpoint": "cluster.envector.io:443",
+       "api_key": "your-api-key",
+       "collection": "rune-context"
      },
      "state": "active"
    }
@@ -200,7 +236,7 @@ cp ~/.rune/config.json ~/.rune/config.backup.json
 ## Troubleshooting
 
 ### "Cannot connect to Vault"
-1. Check Vault URL is correct
+1. Check Vault Endpoint is correct
 2. Verify Vault is running: `curl <vault-url>/health`
 3. Check network connectivity
 4. Verify token is valid

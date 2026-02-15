@@ -80,18 +80,15 @@ Feature requests should include:
    cd rune
    ```
 
-2. **Link to Claude**
+2. **Install locally**
    ```bash
-   # For Claude Code
-   ln -s $(pwd) ~/.claude/skills/rune-dev
-
-   # For Claude Desktop
-   ln -s $(pwd) ~/Library/Application\ Support/Claude/skills/rune-dev
+   ./install.sh
    ```
+   This sets up the venv, dependencies, and registers MCP servers in Claude Code/Desktop.
 
 3. **Test changes**
-   - Restart Claude
-   - Test plugin functionality
+   - Restart Claude Code
+   - Test plugin functionality with `/rune:status`
    - Verify documentation accuracy
 
 ## Documentation
@@ -228,34 +225,50 @@ Typical response time: 2-5 business days
 
 ```
 rune/
-├── README.md              # Project overview
-├── SKILL.md               # Claude skill definition
-├── LICENSE                # MIT License
-├── CONTRIBUTING.md        # This file
-├── .github/
-│   └── claude-plugin.json # Plugin metadata
-├── setup/
-│   └── check-prerequisites.md
+├── README.md                # Project overview
+├── SKILL.md                 # Claude skill definition
+├── AGENT_INTEGRATION.md     # Multi-agent setup guide
+├── CONTRIBUTING.md          # This file
+├── LICENSE                  # MIT License
+├── install.sh               # Interactive installer (orchestrator)
+├── requirements.txt         # Python dependencies
+├── .mcp.json                # MCP server config for Claude plugin system
+├── .claude-plugin/
+│   └── plugin.json          # Plugin metadata
+├── mcp/
+│   ├── server/
+│   │   └── server.py        # MCP server (stdio transport)
+│   ├── adapter/             # enVector SDK + Vault adapters
+│   └── tests/               # MCP server tests
+├── agents/
+│   ├── common/              # Shared config, schemas, embedding service
+│   ├── scribe/              # Scribe agent (context capture)
+│   ├── retriever/           # Retriever agent (context recall)
+│   └── tests/               # Agent tests
+├── patterns/                # Capture trigger patterns (200+)
+├── commands/                # Claude skill command definitions
+├── scripts/                 # Install, configure, start scripts
 ├── config/
-│   ├── config.template.json
-│   └── README.md
-└── examples/
-    ├── team-setup-example.md
-    └── usage-patterns.md
+│   ├── config.template.json # Config file template
+│   └── README.md            # Configuration guide
+└── examples/                # Usage examples
 ```
 
 ### Key Files
 
 - **SKILL.md**: Core plugin logic that Claude reads
 - **README.md**: User-facing documentation
-- **.github/claude-plugin.json**: Plugin metadata for `/plugin` command
+- **.claude-plugin/plugin.json**: Plugin metadata
+- **.mcp.json**: MCP server registration for Claude plugin system
+- **mcp/server/server.py**: The MCP server (stdio transport)
+- **agents/common/config.py**: Configuration schema with all fields
 - **config/**: Configuration templates and docs
 
 ## Release Process
 
 Maintainers only:
 
-1. Update version in `.github/claude-plugin.json`
+1. Update version in `.claude-plugin/plugin.json`
 2. Update CHANGELOG.md
 3. Create git tag: `git tag v0.1.0`
 4. Push tag: `git push origin v0.1.0`

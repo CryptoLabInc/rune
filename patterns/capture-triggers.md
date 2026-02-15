@@ -353,6 +353,173 @@ This document contains comprehensive trigger phrases that indicate when signific
 
 ---
 
+## Incident Response & Postmortem
+
+### Postmortem Findings
+- "The root cause was identified as..."
+- "Postmortem conclusion: the outage was caused by..."
+- "Contributing factors included..."
+- "The incident timeline shows..."
+- "Blast radius was limited to..."
+- "The failure mode was..."
+- "Recovery took X hours because..."
+
+### Action Items & Prevention
+- "To prevent recurrence, we will..."
+- "The corrective action is..."
+- "We are adding circuit breakers for..."
+- "Runbook updated to include..."
+- "Alert threshold changed from X to Y"
+- "Failover procedure now requires..."
+
+---
+
+## Debugging & Troubleshooting
+
+### Root Cause Discovery
+- "Debugging revealed that the issue was..."
+- "The root cause turned out to be..."
+- "After investigation, we found that..."
+- "The bug was caused by..."
+- "Memory leak traced to..."
+- "Race condition identified in..."
+- "The regression was introduced in commit..."
+
+### Fix & Resolution
+- "The fix involves..."
+- "Hotfix deployed: changed X to Y because..."
+- "Workaround applied until proper fix..."
+- "The patch resolves the issue by..."
+- "Bisected to commit X which introduced..."
+
+---
+
+## QA & Testing
+
+### Test Coverage Decisions
+- "Test coverage gap found in..."
+- "Adding integration tests for..."
+- "The testing strategy for this feature is..."
+- "We need regression tests because..."
+- "End-to-end test suite now covers..."
+
+### Bug Triage
+- "Bug triaged as P0 because..."
+- "This defect is classified as..."
+- "Known issue: will fix in next sprint because..."
+- "Release blocked by this bug because..."
+- "QA sign-off requires..."
+
+---
+
+## Legal & Regulatory
+
+### Legal Decisions
+- "Legal review concluded that..."
+- "Contract terms require us to..."
+- "IP considerations mean we cannot..."
+- "License compliance requires..."
+- "Terms of service updated to reflect..."
+- "Legal counsel advised that..."
+
+### Regulatory Compliance
+- "Regulatory filing deadline requires..."
+- "Data retention policy changed to..."
+- "Privacy impact assessment shows..."
+- "Cross-border data transfer requires..."
+- "Audit findings require remediation of..."
+
+---
+
+## Finance & Budget
+
+### Budget Decisions
+- "Budget allocated for..."
+- "Cost analysis shows that..."
+- "ROI projection indicates..."
+- "We're cutting spend on X to fund Y"
+- "Cloud cost optimization: switching from X to Y saves..."
+
+### Pricing & Revenue
+- "Pricing model changed from X to Y because..."
+- "Revenue impact of this decision is..."
+- "Unit economics show that..."
+- "Margin analysis reveals..."
+- "Break-even point is..."
+
+---
+
+## Sales & Partnerships
+
+### Deal Intelligence
+- "Deal lost to competitor because..."
+- "Win factor was..."
+- "Enterprise prospect requires..."
+- "Sales objection pattern: customers keep asking for..."
+- "Competitive intelligence: rival launched..."
+
+### Partnership Decisions
+- "Partnership with X approved because..."
+- "Integration partnership requires..."
+- "Channel strategy shifting to..."
+- "Reseller agreement terms include..."
+
+---
+
+## Customer Success & Escalation
+
+### Escalation Resolution
+- "Customer escalation resolved by..."
+- "SLA breach root cause was..."
+- "Churn risk identified: customer unhappy with..."
+- "Retention strategy for this account is..."
+- "NPS feedback indicates..."
+
+### Customer Health
+- "Customer health score dropped because..."
+- "Onboarding friction point identified at..."
+- "Feature request from top customer..."
+- "Support ticket pattern shows..."
+- "Customer success playbook updated to..."
+
+---
+
+## Research & R&D
+
+### Research Findings
+- "A/B test results show..."
+- "Experiment concluded that..."
+- "Hypothesis validated: X leads to Y"
+- "Proof of concept demonstrated that..."
+- "Research spike findings:"
+- "Statistical significance achieved for..."
+
+### Innovation Decisions
+- "Technology evaluation: X outperforms Y in..."
+- "Prototype results indicate..."
+- "We are investing in R&D for..."
+- "Patent consideration for..."
+
+---
+
+## Risk Assessment
+
+### Risk Identification
+- "Risk identified: single point of failure in..."
+- "Vendor dependency risk: we rely entirely on..."
+- "Supply chain risk assessment shows..."
+- "Business continuity plan requires..."
+- "Concentration risk in..."
+
+### Mitigation Plans
+- "Mitigation plan: add redundancy by..."
+- "Contingency plan if X fails is..."
+- "Risk accepted with documentation because..."
+- "Insurance coverage updated for..."
+- "Disaster recovery RTO/RPO set to..."
+
+---
+
 ## Usage Guidelines
 
 ### High-Priority Triggers (Always Capture)

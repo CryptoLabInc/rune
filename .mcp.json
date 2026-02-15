@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "envector": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/.venv/bin/python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server/server.py", "--mode", "stdio"],
+      "env": {
+        "ENVECTOR_CONFIG": "~/.rune/config.json",
+        "ENVECTOR_AUTO_KEY_SETUP": "false",
+        "PYTHONPATH": "${CLAUDE_PLUGIN_ROOT}/mcp"
+      }
+    }
+  }
+}

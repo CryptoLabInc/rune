@@ -59,9 +59,9 @@ else
     print_warn "curl not found, skipping Vault connectivity check"
 fi
 
-# Check if local envector-mcp-server is running
-if pgrep -f "envector-mcp-server" > /dev/null; then
-    print_check "enVector MCP server is running (PID: $(pgrep -f envector-mcp-server))"
+# Check if local MCP server is running
+if pgrep -f "mcp/server/server.py" > /dev/null; then
+    print_check "enVector MCP server is running (PID: $(pgrep -f 'mcp/server/server.py'))"
 else
     print_warn "enVector MCP server is not running locally"
     echo "  Start with: scripts/start-mcp-servers.sh"

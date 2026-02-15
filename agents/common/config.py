@@ -21,13 +21,13 @@ REVIEW_QUEUE_PATH = CONFIG_DIR / "review_queue.json"
 # Project paths (relative to this file)
 PROJECT_ROOT = Path(__file__).parent.parent.parent  # rune/
 PATTERNS_DIR = PROJECT_ROOT / "patterns"
-MCP_SERVER_DIR = PROJECT_ROOT / "mcp" / "envector-mcp-server" / "srcs"
+MCP_SERVER_DIR = PROJECT_ROOT / "mcp" / "server"
 
 
 @dataclass
 class VaultConfig:
     """Rune-Vault configuration"""
-    url: str = ""
+    endpoint: str = ""
     token: str = ""
 
 
@@ -82,7 +82,7 @@ def _parse_vault_config(data: dict) -> VaultConfig:
     """Parse vault section from config dict"""
     vault_data = data.get("vault", {})
     return VaultConfig(
-        url=vault_data.get("url", ""),
+        endpoint=vault_data.get("endpoint") or vault_data.get("url", ""),
         token=vault_data.get("token", ""),
     )
 
@@ -159,7 +159,7 @@ def load_config() -> RuneConfig:
 
     # Environment variable overrides
     if os.getenv("RUNEVAULT_ENDPOINT"):
-        config.vault.url = os.getenv("RUNEVAULT_ENDPOINT")
+        config.vault.endpoint = os.getenv("RUNEVAULT_ENDPOINT")
     if os.getenv("RUNEVAULT_TOKEN"):
         config.vault.token = os.getenv("RUNEVAULT_TOKEN")
 
@@ -201,7 +201,7 @@ def save_config(config: RuneConfig) -> None:
 
     data = {
         "vault": {
-            "url": config.vault.url,
+            "endpoint": config.vault.endpoint,
             "token": config.vault.token,
         },
         "envector": {

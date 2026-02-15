@@ -6,9 +6,11 @@ Rune works with all major AI agents via native MCP (Model Context Protocol) supp
 
 | Agent | Integration | Setup |
 |-------|-------------|-------|
-| **Claude** | MCP Native | ⭐ Easy |
-| **Gemini** | MCP Native | ⭐ Easy |
-| **OpenAI GPT** | MCP Native | ⭐ Easy |
+| **Claude** | MCP Native (stdio) | ⭐ Easy |
+| **Gemini** | MCP Native (stdio) | ⭐ Easy |
+| **OpenAI GPT** | MCP Native (stdio) | ⭐ Easy |
+
+> **Note**: The MCP server uses **stdio transport only**. HTTP/SSE mode is not supported.
 
 ---
 
@@ -19,10 +21,9 @@ Rune works with all major AI agents via native MCP (Model Context Protocol) supp
 ```bash
 cd rune
 ./install.sh
-# Select: 1) Claude (MCP native support)
 ```
 
-This automatically adds `envector-mcp-server` to `~/.claude/mcp_settings.json`.
+This automatically registers the `envector` MCP server in Claude Code/Desktop.
 
 ### Manual Setup
 
@@ -30,11 +31,13 @@ Edit `~/.claude/mcp_settings.json`:
 ```json
 {
   "mcpServers": {
-    "envector-mcp-server": {
-      "command": "/path/to/rune/mcp/envector-mcp-server/.venv/bin/python",
-      "args": ["/path/to/rune/mcp/envector-mcp-server/srcs/server.py"],
+    "envector": {
+      "command": "/path/to/rune/.venv/bin/python3",
+      "args": ["/path/to/rune/mcp/server/server.py", "--mode", "stdio"],
       "env": {
-        "PYTHONPATH": "/path/to/rune/mcp/envector-mcp-server"
+        "ENVECTOR_CONFIG": "~/.rune/config.json",
+        "ENVECTOR_AUTO_KEY_SETUP": "false",
+        "PYTHONPATH": "/path/to/rune/mcp"
       }
     }
   }
@@ -64,9 +67,9 @@ genai.configure(api_key="your-api-key")
 
 async def main():
     server_params = StdioServerParameters(
-        command="python",
-        args=["/path/to/rune/mcp/envector-mcp-server/srcs/server.py"],
-        env={"PYTHONPATH": "/path/to/rune/mcp/envector-mcp-server"}
+        command="/path/to/rune/.venv/bin/python3",
+        args=["/path/to/rune/mcp/server/server.py"],
+        env={"PYTHONPATH": "/path/to/rune/mcp"}
     )
 
     async with stdio_client(server_params) as (read, write):
@@ -96,11 +99,11 @@ Edit `~/.gemini/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "envector-mcp-server": {
-      "command": "python",
-      "args": ["/path/to/rune/mcp/envector-mcp-server/srcs/server.py"],
+    "envector": {
+      "command": "/path/to/rune/.venv/bin/python3",
+      "args": ["/path/to/rune/mcp/server/server.py"],
       "env": {
-        "PYTHONPATH": "/path/to/rune/mcp/envector-mcp-server"
+        "PYTHONPATH": "/path/to/rune/mcp"
       }
     }
   }
@@ -119,37 +122,7 @@ gemini chat
 
 **Update 2025**: OpenAI has [native MCP support](https://venturebeat.com/programming-development/openai-updates-its-new-responses-api-rapidly-with-mcp-support-gpt-4o-native-image-gen-and-more-enterprise-features) via Responses API.
 
-### Option 1: Responses API (Recommended)
-
-```bash
-pip install openai
-```
-
-```python
-from openai import OpenAI
-
-client = OpenAI(api_key="your-api-key")
-
-response = client.chat.completions.create(
-    model="gpt-4o",
-    messages=[
-        {"role": "user", "content": "Create an index called team-decisions"}
-    ],
-    tools=[
-        {
-            "type": "mcp_server",
-            "mcp_server": {
-                "url": "http://127.0.0.1:8000",
-                "transport": "http_sse"
-            }
-        }
-    ]
-)
-
-print(response.choices[0].message.content)
-```
-
-### Option 2: OpenAI Agents SDK
+### Option 1: OpenAI Agents SDK (Recommended)
 
 ```bash
 pip install openai-agents
@@ -160,9 +133,9 @@ from openai_agents import Agent
 from openai_agents.mcp import MCPServerStdio
 
 mcp_server = MCPServerStdio(
-    command="python",
-    args=["/path/to/rune/mcp/envector-mcp-server/srcs/server.py"],
-    env={"PYTHONPATH": "/path/to/rune/mcp/envector-mcp-server"}
+    command="/path/to/rune/.venv/bin/python3",
+    args=["/path/to/rune/mcp/server/server.py"],
+    env={"PYTHONPATH": "/path/to/rune/mcp"}
 )
 
 agent = Agent(
@@ -174,58 +147,51 @@ response = agent.run("Create an index called team-decisions")
 print(response.final_output)
 ```
 
-### Option 3: ChatGPT Developer Mode
+### Option 2: Responses API (stdio via MCP SDK)
 
-1. ChatGPT Plus/Pro account
-2. Enable Developer Mode
-3. Add MCP server:
-   ```json
-   {
-     "mcp_servers": {
-       "rune": {
-         "url": "http://127.0.0.1:8000",
-         "transport": "http_sse"
-       }
-     }
-   }
-   ```
+```bash
+pip install openai mcp
+```
+
+```python
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+# Connect to Rune MCP server via stdio
+server_params = StdioServerParameters(
+    command="/path/to/rune/.venv/bin/python3",
+    args=["/path/to/rune/mcp/server/server.py"],
+    env={"PYTHONPATH": "/path/to/rune/mcp"}
+)
+
+# Use with OpenAI function calling by listing MCP tools
+async with stdio_client(server_params) as (read, write):
+    async with ClientSession(read, write) as session:
+        tools = await session.list_tools()
+        # Convert MCP tools to OpenAI function format and call as needed
+```
 
 ---
 
 ## Multi-Agent Collaboration
 
-Multiple agents can share the same Rune instance:
+Multiple agents can share the same Rune infrastructure via stdio:
 
-```bash
-# Start MCP server once
-./start-mcp-server.sh
-
-# Claude, Gemini, GPT all connect to http://127.0.0.1:8000
-# → Shared enVector Cloud index
-# → Shared Rune-Vault secret key
+```
+# Each agent launches its own MCP server process (stdio)
+# All connect to the same enVector Cloud index + Rune-Vault
 ```
 
 **Architecture**:
 ```
-Claude ──┐
-         ├──→ Rune MCP Server ──→ enVector Cloud (encrypted)
-Gemini ──┤                    └──→ Rune-Vault (secret key)
-GPT ─────┘
+Claude ──→ MCP Server (stdio) ──┐
+                                ├──→ enVector Cloud (encrypted)
+Gemini ──→ MCP Server (stdio) ──┤       └──→ Rune-Vault (secret key)
+                                │
+GPT ─────→ MCP Server (stdio) ──┘
 ```
 
----
-
-## Security
-
-### Local Deployment (Recommended)
-```bash
---host 127.0.0.1  # Localhost only
-```
-
-### Production Deployment
-- **Authentication**: API keys or OAuth
-- **HTTPS**: Reverse proxy (nginx, Caddy)
-- **Firewall**: Team network only
+Each agent spawns its own MCP server process. Shared state is maintained via enVector Cloud (encrypted vectors) and Rune-Vault (decryption keys).
 
 ---
 
@@ -233,20 +199,29 @@ GPT ─────┘
 
 ### MCP server won't start
 ```bash
-cd rune/mcp/envector-mcp-server
+cd rune
 source .venv/bin/activate
-python srcs/server.py --mode http --verbose
+python mcp/server/server.py --help
 ```
 
 ### Missing environment variables
 ```bash
-cat rune/mcp/envector-mcp-server/.env
+cat ~/.rune/config.json
 
-# Required:
-ENVECTOR_ADDRESS="cluster.envector.io:443"
-ENVECTOR_API_KEY="your-api-key"
-RUNEVAULT_ENDPOINT="https://vault-url"
-RUNEVAULT_TOKEN="your-token"
+# Or set environment variables directly:
+export ENVECTOR_ADDRESS="runestone-xxx.clusters.envector.io"
+export ENVECTOR_API_KEY="your-api-key"
+export RUNEVAULT_ENDPOINT="vault-yourteam.oci.envector.io:50051"
+export RUNEVAULT_TOKEN="your-token"
+# Optional: explicit gRPC target override (auto-derived from RUNEVAULT_ENDPOINT if omitted)
+# export RUNEVAULT_GRPC_TARGET="vault-host:50051"
+```
+
+### Verify MCP tools are available
+
+In Claude Code, after plugin installation:
+```
+/rune:status
 ```
 
 ---

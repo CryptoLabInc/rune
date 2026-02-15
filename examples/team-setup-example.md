@@ -41,7 +41,7 @@ terraform init
 terraform apply
 
 # Note the outputs:
-# vault_url = "https://vault-acme.oci.envector.io"
+# vault_endpoint = "vault-acme.oci.envector.io:50051"
 # vault_token = "evt_acme_abc123def456"
 ```
 
@@ -71,7 +71,7 @@ cd ~/workspace
 /rune configure
 
 # Enter:
-# Vault URL: https://vault-acme.oci.envector.io
+# Vault Endpoint: vault-acme.oci.envector.io:50051
 # Vault Token: evt_acme_abc123def456
 # enVector Endpoint: https://cluster-us-west-2.envector.io
 # enVector API Key: envector_xyz789
@@ -230,7 +230,7 @@ Alice checks:
 2. Bob's token is correct
 3. Firewall allows Bob's IP
 
-Issue: Bob had typo in Vault URL
+Issue: Bob had typo in Vault Endpoint
 Fix: Bob runs /rune configure with correct URL
 ```
 
@@ -248,21 +248,21 @@ Fix: Alice verifies token, Carol runs /rune configure
 
 ## Advanced: Multiple Projects
 
-### Separate Collections
+### Separate Indexes
 
-Alice sets up separate collections for different projects:
+To separate organizational memory by project, the admin sets the team index name on the Vault server:
 
 ```bash
-# Project Alpha (confidential)
-/rune configure
-# Collection: "project-alpha-context"
+# Project Alpha — admin sets on Vault server:
+VAULT_INDEX_NAME="project-alpha-context"
+# All team members connecting to this Vault automatically use this index
 
-# Project Beta (public)
-/rune configure
-# Collection: "project-beta-context"
+# Project Beta — admin deploys a separate Vault instance:
+VAULT_INDEX_NAME="project-beta-context"
+# Team members connect to this Vault for Beta context
 ```
 
-Team members can switch between collections by reconfiguring.
+Alternatively, team members can edit `~/.rune/config.json` directly to change the `envector.collection` field, though using Vault-managed index names ensures consistency across the team.
 
 ---
 

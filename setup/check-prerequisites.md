@@ -6,10 +6,10 @@ Welcome! Before activating the Rune plugin, please ensure you have the following
 
 Your team administrator should have provided you with:
 
-### 1. Vault URL
-**Format**: `https://vault-YOURTEAM.oci.envector.io`
+### 1. Vault Endpoint
+**Format**: `vault-YOURTEAM.oci.envector.io:50051`
 
-**Example**: `https://vault-acme.oci.envector.io`
+**Example**: `vault-acme.oci.envector.io:50051`
 
 This is your team's shared encryption key vault. All team members connect to the same Vault to share organizational memory.
 
@@ -53,7 +53,7 @@ Great! Run `/rune configure` to set up your credentials and activate the plugin.
 
 #### Missing Vault credentials?
 **Contact your team administrator** who deployed the Rune-Vault infrastructure. They should provide:
-- Vault URL
+- Vault Endpoint
 - Vault Token
 
 If your team hasn't deployed Rune-Vault yet, see the [full Rune deployment guide](https://github.com/CryptoLabInc/rune-admin).
@@ -115,7 +115,7 @@ Claude: Stored in organizational memory
 - Only your team's Vault can decrypt
 
 ### Who has access?
-- **Team members**: Anyone with your Vault URL + Token
+- **Team members**: Anyone with your Vault Endpoint + Token
 - **Cloud provider**: No access (zero-knowledge encryption)
 - **Admin control**: Revoke access by rotating Vault tokens
 
