@@ -1,0 +1,24 @@
+{
+  "name": "rune",
+  "description": "FHE-encrypted organizational memory for teams. Capture and retrieve institutional knowledge with zero-knowledge privacy.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Sunchul Jung",
+    "email": "zotanika@cryptolab.co.kr"
+  },
+  "commands": "./commands/",
+  "agents": [
+    "./agents/scribe.md",
+    "./agents/retriever.md"
+  ],
+  "mcpServers": {
+    "envector": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap-mcp.sh",
+      "env": {
+        "ENVECTOR_CONFIG": "${HOME}/.rune/config.json",
+        "ENVECTOR_AUTO_KEY_SETUP": "false"
+      },
+      "description": "enVector MCP server for encrypted vector operations"
+    }
+  }
+}

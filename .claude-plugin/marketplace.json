@@ -1,0 +1,28 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cryptolab-rune",
+  "owner": {
+    "name": "CryptoLabInc",
+    "email": "zotanika@cryptolab.co.kr"
+  },
+  "metadata": {
+    "description": "FHE-encrypted organizational memory plugins by CryptoLabInc"
+  },
+  "plugins": [
+    {
+      "name": "rune",
+      "description": "FHE-encrypted organizational memory for teams. Capture and retrieve institutional knowledge with zero-knowledge privacy.",
+      "version": "0.1.0",
+      "source": "./",
+      "author": {
+        "name": "Sunchul Jung",
+        "email": "zotanika@cryptolab.co.kr"
+      },
+      "homepage": "https://envector.io",
+      "repository": "https://github.com/CryptoLabInc/rune",
+      "license": "Apache-2.0",
+      "keywords": ["memory", "fhe", "encryption", "organizational-knowledge", "vector-search"],
+      "category": "productivity"
+    }
+  ]
+}

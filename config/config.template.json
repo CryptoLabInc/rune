@@ -1,0 +1,16 @@
+{
+  "vault": {
+    "endpoint": "VAULT_GRPC_ENDPOINT",
+    "token": "VAULT_TOKEN"
+  },
+  "envector": {
+    "endpoint": "ENVECTOR_ENDPOINT",
+    "api_key": "ENVECTOR_API_KEY"
+  },
+  "state": "dormant",
+  "metadata": {
+    "configVersion": "1.0",
+    "lastUpdated": null,
+    "teamId": null
+  }
+}

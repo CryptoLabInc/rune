@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "envector": {
+      "command": "PLUGIN_DIR/.venv/bin/python3",
+      "args": [
+        "PLUGIN_DIR/mcp/server/server.py",
+        "--mode", "stdio"
+      ],
+      "env": {
+        "ENVECTOR_CONFIG": "USER_HOME/.rune/config.json",
+        "ENVECTOR_AUTO_KEY_SETUP": "false",
+        "PYTHONPATH": "PLUGIN_DIR/mcp"
+      },
+      "description": "enVector MCP server for encrypted vector operations"
+    }
+  }
+}
