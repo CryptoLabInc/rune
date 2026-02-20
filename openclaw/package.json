@@ -1,5 +1,5 @@
 {
-  "name": "@openclaw/rune",
+  "name": "@cryptolab/rune",
   "version": "0.1.0",
   "description": "FHE-encrypted organizational memory for OpenClaw",
   "type": "module",
@@ -21,7 +21,7 @@
     "@sinclair/typebox": "0.34.48"
   },
   "peerDependencies": {
-    "openclaw": ">=0.1.0"
+    "openclaw": "*"
   },
   "openclaw": {
     "extensions": [
