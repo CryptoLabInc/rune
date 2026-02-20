@@ -15,7 +15,7 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "prepublishOnly": "bash scripts/bundle-rune-core.sh"
+    "prepack": "bash scripts/bundle-rune-core.sh"
   },
   "dependencies": {
     "@sinclair/typebox": "0.34.48"
