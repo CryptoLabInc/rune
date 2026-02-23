@@ -37,7 +37,7 @@ _original_metadata_key_path_fget = KeyParameter.metadata_key_path.fget
 
 def _safe_sec_key_getter(self):
     """Return None when SecKey.json is absent instead of crashing."""
-    if getattr(self, '_sec_key_stream', None):
+    if getattr(self, 'sec_key_stream', None):
         return _original_sec_key_fget(self)
     path = _original_sec_key_path_fget(self)
     if path and not os.path.exists(path):
