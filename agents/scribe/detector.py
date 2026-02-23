@@ -39,8 +39,8 @@ class DecisionDetector:
     def __init__(
         self,
         pattern_cache: PatternCache,
-        threshold: float = 0.7,
-        high_confidence_threshold: float = 0.8
+        threshold: float = 0.35,
+        high_confidence_threshold: float = 0.7
     ):
         """
         Initialize decision detector.

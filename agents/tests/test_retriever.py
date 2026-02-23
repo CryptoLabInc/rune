@@ -140,45 +140,49 @@ class TestSearcher:
         from agents.retriever.searcher import Searcher
         return Searcher(mock_client, mock_embedding, "test-collection")
 
-    def test_search_returns_results(self, searcher):
+    @pytest.mark.asyncio
+    async def test_search_returns_results(self, searcher):
         from agents.retriever.query_processor import QueryProcessor
 
         processor = QueryProcessor()
         query = processor.parse("Why PostgreSQL?")
 
-        results = searcher.search(query)
+        results = await searcher.search(query)
 
         assert len(results) > 0
         assert results[0].record_id == "dec_2024-01-01_arch_postgres"
 
-    def test_search_result_has_payload_text(self, searcher):
+    @pytest.mark.asyncio
+    async def test_search_result_has_payload_text(self, searcher):
         from agents.retriever.query_processor import QueryProcessor
 
         processor = QueryProcessor()
         query = processor.parse("Why PostgreSQL?")
 
-        results = searcher.search(query)
+        results = await searcher.search(query)
 
         assert results[0].payload_text != ""
         assert "Decision Record" in results[0].payload_text
 
-    def test_search_result_has_certainty(self, searcher):
+    @pytest.mark.asyncio
+    async def test_search_result_has_certainty(self, searcher):
         from agents.retriever.query_processor import QueryProcessor
 
         processor = QueryProcessor()
         query = processor.parse("Why PostgreSQL?")
 
-        results = searcher.search(query)
+        results = await searcher.search(query)
 
         assert results[0].certainty == "supported"
 
-    def test_is_reliable_check(self, searcher):
+    @pytest.mark.asyncio
+    async def test_is_reliable_check(self, searcher):
         from agents.retriever.query_processor import QueryProcessor
 
         processor = QueryProcessor()
         query = processor.parse("Why PostgreSQL?")
 
-        results = searcher.search(query)
+        results = await searcher.search(query)
 
         # Supported certainty should be reliable
         assert results[0].is_reliable is True
