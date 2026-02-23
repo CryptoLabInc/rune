@@ -2,15 +2,84 @@
 
 from typing import Union, List, Dict, Any
 import base64
+import os
 import numpy as np
 import pyenvector as ev  # pip install pyenvector
 from pyenvector.crypto.block import CipherBlock
+from pyenvector.crypto.parameter import KeyParameter
 from google.protobuf.json_format import MessageToDict
 
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 KEY_PATH = SCRIPT_DIR.parent.parent / "keys" # Manage keys directory at project root
+
+# ---------------------------------------------------------------------------
+# Vault-model safety patches for pyenvector KeyParameter
+#
+# In the Vault security model SecKey and MetadataKey never leave Vault,
+# so the local .json files do not exist.  pyenvector's KeyParameter
+# properties call utils.get_key_stream(path) which falls through to
+# ast.literal_eval(path_string) and raises SyntaxError when the file
+# is missing.
+#
+# The patches return None for missing key files, allowing Cipher to
+# initialise in encrypt-only mode — exactly what insert operations need.
+# ---------------------------------------------------------------------------
+_original_sec_key_fget = KeyParameter.sec_key.fget
+_original_sec_key_path_fget = KeyParameter.sec_key_path.fget
+_original_metadata_key_fget = KeyParameter.metadata_key.fget
+_original_metadata_key_path_fget = KeyParameter.metadata_key_path.fget
+
+def _safe_sec_key_getter(self):
+    """Return None when SecKey.json is absent instead of crashing."""
+    if getattr(self, '_sec_key_stream', None):
+        return _original_sec_key_fget(self)
+    path = _original_sec_key_path_fget(self)
+    if path and not os.path.exists(path):
+        return None
+    return _original_sec_key_fget(self)
+
+def _safe_sec_key_path_getter(self):
+    """Return None when SecKey.json is absent so Cipher skips decryptor init."""
+    path = _original_sec_key_path_fget(self)
+    if path and not os.path.exists(path):
+        return None
+    return path
+
+def _safe_metadata_key_getter(self):
+    """Return None when MetadataKey.json is absent instead of crashing."""
+    if getattr(self, 'metadata_key_stream', None):
+        return _original_metadata_key_fget(self)
+    path = _original_metadata_key_path_fget(self)
+    if path and not os.path.exists(path):
+        return None
+    return _original_metadata_key_fget(self)
+
+def _safe_metadata_key_path_getter(self):
+    """Return None when MetadataKey.json is absent so Cipher skips metadata encryption."""
+    path = _original_metadata_key_path_fget(self)
+    if path and not os.path.exists(path):
+        return None
+    return path
+
+_original_metadata_encryption_fget = KeyParameter.metadata_encryption.fget
+
+def _safe_metadata_encryption_getter(self):
+    """Return False when MetadataKey.json is absent (app-layer handles encryption)."""
+    if not _original_metadata_encryption_fget(self):
+        return False
+    # If metadata_encryption is True but key file is missing, override to False
+    path = _original_metadata_key_path_fget(self)
+    if path and not os.path.exists(path):
+        return False
+    return True
+
+KeyParameter.sec_key = property(_safe_sec_key_getter, KeyParameter.sec_key.fset)
+KeyParameter.sec_key_path = property(_safe_sec_key_path_getter)
+KeyParameter.metadata_key = property(_safe_metadata_key_getter, KeyParameter.metadata_key.fset)
+KeyParameter.metadata_key_path = property(_safe_metadata_key_path_getter)
+KeyParameter.metadata_encryption = property(_safe_metadata_encryption_getter, KeyParameter.metadata_encryption.fset)
 
 class EnVectorSDKAdapter:
     """
@@ -25,6 +94,8 @@ class EnVectorSDKAdapter:
             query_encryption: bool,
             access_token: str = None,
             auto_key_setup: bool = True,
+            agent_id: str = None,
+            agent_dek: bytes = None,
         ):
         """
         Initializes the EnVectorSDKAdapter with an optional endpoint.
@@ -38,10 +109,14 @@ class EnVectorSDKAdapter:
             access_token (str, optional): The access token for the enVector SDK.
             auto_key_setup (bool): If True, generates keys automatically when not found.
                                    Set to False when keys are provided externally (e.g., from Vault).
+            agent_id (str): Per-agent identifier for app-layer metadata encryption.
+            agent_dek (bytes): Per-agent AES-256 DEK (32 bytes) for metadata encryption.
         """
         if not key_path:
             key_path = str(KEY_PATH)
         self.query_encryption = query_encryption
+        self._agent_id = agent_id
+        self._agent_dek = agent_dek
         ev.init(address=address, key_path=key_path, key_id=key_id, eval_mode=eval_mode, auto_key_setup=auto_key_setup, access_token=access_token)
 
     #------------------- Create Index ------------------#
@@ -159,6 +234,16 @@ class EnVectorSDKAdapter:
             # Handle exceptions and return an appropriate error message
             return {"ok": False, "error": repr(e)}
 
+    def _app_encrypt_metadata(self, metadata_str: str) -> str:
+        """
+        App-layer metadata encryption using per-agent DEK.
+        Returns JSON: {"a": "<agent_id>", "c": "<base64_ciphertext>"}
+        """
+        import json as _json
+        from pyenvector.utils.aes import encrypt_metadata as aes_encrypt
+        ct = aes_encrypt(metadata_str, self._agent_dek)
+        return _json.dumps({"a": self._agent_id, "c": ct})
+
     def invoke_insert(self, index_name: str, vectors: List[List[float]], metadata: List[Any] = None):
         """
         Invokes the enVector SDK's insert functionality.
@@ -171,6 +256,10 @@ class EnVectorSDKAdapter:
         Returns:
             Any: Raw insert results from the enVector SDK.
         """
+        # App-layer metadata encryption with per-agent DEK
+        if self._agent_dek and metadata:
+            metadata = [self._app_encrypt_metadata(m) for m in metadata]
+
         index = ev.Index(index_name)  # Create an index instance with the given index name
         # Insert vectors with optional metadata
         return index.insert(data=vectors, metadata=metadata) # Return list of inserted vectors' IDs
