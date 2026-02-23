@@ -21,8 +21,11 @@ fi
 # fastembed treats the snapshot as "already cached", skipping re-download.
 # This leaves model_optimized.onnx missing → ONNXRuntime crashes the server.
 # Resolve the same way fastembed does: FASTEMBED_CACHE_PATH → tempfile.gettempdir()/fastembed_cache
-FASTEMBED_CACHE="${FASTEMBED_CACHE_PATH:-$("$VENV_DIR/bin/python3" -c "import tempfile; print(tempfile.gettempdir())" 2>/dev/null)/fastembed_cache}"
-if [ -d "$FASTEMBED_CACHE" ] && \
+_tmpdir="$("$VENV_DIR/bin/python3" -c "import tempfile; print(tempfile.gettempdir())" 2>/dev/null)"
+FASTEMBED_CACHE="${FASTEMBED_CACHE_PATH:-${_tmpdir}/fastembed_cache}"
+if [ -z "$FASTEMBED_CACHE" ] || [ "$FASTEMBED_CACHE" = "/fastembed_cache" ]; then
+    echo "[rune] Warning: could not resolve fastembed cache path, skipping self-heal" >&2
+elif [ -d "$FASTEMBED_CACHE" ] && \
    find "$FASTEMBED_CACHE" -name "*.incomplete" -print -quit 2>/dev/null | grep -q .; then
     echo "[rune] Incomplete model cache detected — purging for re-download..." >&2
     for model_dir in "$FASTEMBED_CACHE"/models--*; do
