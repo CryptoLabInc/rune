@@ -89,8 +89,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
   "scribe": {
     "slack_webhook_port": 8080,
     "slack_signing_secret": "",
-    "similarity_threshold": 0.5,
-    "auto_capture_threshold": 0.8,
+    "similarity_threshold": 0.35,
+    "auto_capture_threshold": 0.7,
     "tier2_enabled": true
   },
   "envector": {

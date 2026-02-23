@@ -349,13 +349,15 @@ class MCPServerApp:
                     entry.get("data", "") for entry in encrypted_entries
                 ]
                 if encrypted_blobs and any(encrypted_blobs):
+                    non_empty = [(idx, b) for idx, b in enumerate(encrypted_blobs) if b]
                     decrypted_metadata = await self.vault.decrypt_metadata(
-                        encrypted_metadata_list=[b for b in encrypted_blobs if b is not None]
+                        encrypted_metadata_list=[b for _, b in non_empty]
                     )
-                    # Merge decrypted metadata with scores
-                    for i, entry in enumerate(encrypted_entries):
-                        if i < len(decrypted_metadata):
-                            entry["metadata"] = decrypted_metadata[i]
+                    # Merge decrypted metadata with scores (index-safe)
+                    for dec_idx, (entry_idx, _) in enumerate(non_empty):
+                        if dec_idx < len(decrypted_metadata):
+                            encrypted_entries[entry_idx]["metadata"] = decrypted_metadata[dec_idx]
+                    for entry in encrypted_entries:
                         entry.pop("data", None)
 
                 return {
@@ -535,7 +537,7 @@ class MCPServerApp:
                 parsed_query = query_processor.parse(query)
 
                 # Step 2: Search enVector (multi-query expansion, dedup, ranking)
-                results = searcher.search(parsed_query, topk=topk)
+                results = await searcher.search(parsed_query, topk=topk)
 
                 # Step 3: Synthesize answer (LLM synthesis with certainty respect)
                 answer = synthesizer.synthesize(parsed_query, results)
@@ -709,7 +711,7 @@ class MCPServerApp:
                 logger.warning("No vault index name — skipping retriever pipeline init")
             else:
                 query_processor = QueryProcessor(anthropic_api_key=anthropic_key)
-                searcher = Searcher(envector_client, embedding_svc, self._vault_index_name)
+                searcher = Searcher(envector_client, embedding_svc, self._vault_index_name, vault_client=self.vault)
                 synthesizer = Synthesizer(anthropic_api_key=anthropic_key)
 
                 self._retriever = {

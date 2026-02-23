@@ -206,6 +206,53 @@ class EnVectorClient:
 
         return self.insert(index_name, vectors, metadata)
 
+    def score(
+        self,
+        index_name: str,
+        query_vector: List[float],
+    ) -> Dict[str, Any]:
+        """
+        Encrypted similarity scoring (Vault-secured pipeline step 1).
+
+        Returns encrypted score blobs for Vault decryption.
+
+        Args:
+            index_name: Index to score against
+            query_vector: Query embedding vector
+
+        Returns:
+            Result dict with encrypted_blobs list
+        """
+        self._ensure_initialized()
+        return self._adapter.call_score(
+            index_name=index_name,
+            query=[query_vector],
+        )
+
+    def remind(
+        self,
+        index_name: str,
+        indices: List[Dict[str, Any]],
+        output_fields: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Retrieve metadata for indices returned by Vault (Vault-secured pipeline step 3).
+
+        Args:
+            index_name: Index to fetch metadata from
+            indices: List of dicts with shard_idx, row_idx, score
+            output_fields: Fields to include (default: ["metadata"])
+
+        Returns:
+            Result dict with metadata entries
+        """
+        self._ensure_initialized()
+        return self._adapter.call_remind(
+            index_name=index_name,
+            indices=indices,
+            output_fields=output_fields,
+        )
+
     def search(
         self,
         index_name: str,

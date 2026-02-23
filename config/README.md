@@ -68,8 +68,8 @@ The config file also supports optional sections for agent configuration:
   },
   "scribe": {
     "slack_webhook_port": 8080,
-    "similarity_threshold": 0.5,
-    "auto_capture_threshold": 0.8,
+    "similarity_threshold": 0.35,
+    "auto_capture_threshold": 0.7,
     "tier2_enabled": true,
     "tier2_model": "claude-haiku-4-5-20251001"
   },
