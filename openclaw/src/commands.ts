@@ -1,5 +1,6 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import {
@@ -228,7 +229,7 @@ export function registerRuneCommands(api: OpenClawPluginApi): void {
         // Try to auto-setup
         if (fs.existsSync(INSTALL_SCRIPT)) {
           try {
-            execSync(`bash "${INSTALL_SCRIPT}"`, {
+            execFileSync("bash", [INSTALL_SCRIPT], {
               cwd: RUNE_CORE,
               stdio: "pipe",
               timeout: 120_000,
@@ -247,7 +248,7 @@ export function registerRuneCommands(api: OpenClawPluginApi): void {
 
       // Check MCP import
       try {
-        execSync(`"${venvPython}" -c "import mcp"`, { stdio: "pipe", timeout: 10_000 });
+        execFileSync(venvPython, ["-c", "import mcp"], { stdio: "pipe", timeout: 10_000 });
       } catch {
         return {
           text: "MCP library not importable in Python venv.\nTry deleting rune-core/.venv and running /rune-activate again.",
@@ -261,16 +262,23 @@ export function registerRuneCommands(api: OpenClawPluginApi): void {
 
       try {
         if (vaultEndpoint.startsWith("http://") || vaultEndpoint.startsWith("https://")) {
-          execSync(`curl -sf "${vaultEndpoint}/health"`, { stdio: "pipe", timeout: 10_000 });
-          vaultOk = true;
+          const healthUrl = new URL("/health", vaultEndpoint).href;
+          const res = await fetch(healthUrl, { signal: AbortSignal.timeout(10_000) });
+          if (res.ok) vaultOk = true;
+          else vaultError = `Vault health returned ${res.status}`;
         } else {
           // tcp:// or plain host:port
           const cleaned = vaultEndpoint.replace(/^tcp:\/\//, "");
           const [host, portStr] = cleaned.split(":");
-          if (host && portStr) {
-            execSync(`timeout 5 bash -c 'echo > /dev/tcp/${host}/${portStr}'`, {
-              stdio: "pipe",
-              timeout: 10_000,
+          const port = Number(portStr);
+          if (host && port > 0) {
+            await new Promise<void>((resolve, reject) => {
+              const sock = net.connect({ host, port, timeout: 5_000 }, () => {
+                sock.destroy();
+                resolve();
+              });
+              sock.on("error", reject);
+              sock.on("timeout", () => { sock.destroy(); reject(new Error("connection timed out")); });
             });
             vaultOk = true;
           } else {

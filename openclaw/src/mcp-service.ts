@@ -20,7 +20,10 @@ const RESTART_DELAY_MS = 2_000;
 
 let mcpClient: RuneMcpClient | null = null;
 let mcpProcess: ChildProcess | null = null;
+let mcpLogStream: fs.WriteStream | null = null;
 let restartCount = 0;
+let stopping = false;
+let restartTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function getMcpClient(): RuneMcpClient | null {
   return mcpClient;
@@ -70,20 +73,20 @@ export async function startMcpServer(api: OpenClawPluginApi): Promise<void> {
   if (!fs.existsSync(venvPython)) {
     api.logger.info("rune-mcp: creating Python venv...");
     try {
-      const { execSync } = await import("node:child_process");
+      const { execFileSync } = await import("node:child_process");
       const requirementsTxt = path.join(RUNE_CORE, "requirements.txt");
-      execSync(`python3 -m venv "${path.join(RUNE_CORE, ".venv")}"`, {
+      execFileSync("python3", ["-m", "venv", path.join(RUNE_CORE, ".venv")], {
         cwd: RUNE_CORE,
         stdio: "pipe",
         timeout: 30_000,
       });
-      execSync(`"${venvPython}" -m pip install --quiet --upgrade pip`, {
+      execFileSync(venvPython, ["-m", "pip", "install", "--quiet", "--upgrade", "pip"], {
         cwd: RUNE_CORE,
         stdio: "pipe",
         timeout: 60_000,
       });
       if (fs.existsSync(requirementsTxt)) {
-        execSync(`"${venvPython}" -m pip install --quiet -r "${requirementsTxt}"`, {
+        execFileSync(venvPython, ["-m", "pip", "install", "--quiet", "-r", requirementsTxt], {
           cwd: RUNE_CORE,
           stdio: "pipe",
           timeout: 120_000,
@@ -99,7 +102,7 @@ export async function startMcpServer(api: OpenClawPluginApi): Promise<void> {
 
   // Start MCP server process
   const logFile = path.join(getLogsDir(), "envector-mcp.log");
-  const logStream = fs.createWriteStream(logFile, { flags: "a" });
+  mcpLogStream = fs.createWriteStream(logFile, { flags: "a" });
 
   const child = spawn(pythonBin, [MCP_SERVER_SCRIPT, "--mode", "stdio"], {
     cwd: RUNE_CORE,
@@ -115,22 +118,29 @@ export async function startMcpServer(api: OpenClawPluginApi): Promise<void> {
   mcpProcess = child;
 
   // Pipe stderr to log file
-  child.stderr?.pipe(logStream);
+  child.stderr?.pipe(mcpLogStream);
 
   // Setup MCP client
   const client = new RuneMcpClient(child, api.logger);
   mcpClient = client;
 
-  // Handle crashes with auto-restart
+  // Handle crashes with auto-restart (skip if intentionally stopping)
   client.on("exit", (code: number | null) => {
     api.logger.warn(`rune-mcp: process exited with code ${code}`);
     mcpClient = null;
     mcpProcess = null;
+    if (mcpLogStream) {
+      mcpLogStream.end();
+      mcpLogStream = null;
+    }
+
+    if (stopping) return;
 
     if (isActive() && restartCount < MAX_RESTART_ATTEMPTS) {
       restartCount++;
       api.logger.info(`rune-mcp: restarting (attempt ${restartCount}/${MAX_RESTART_ATTEMPTS})...`);
-      setTimeout(() => {
+      restartTimer = setTimeout(() => {
+        restartTimer = null;
         startMcpServer(api).catch((err) => {
           api.logger.error(`rune-mcp: restart failed — ${String(err)}`);
         });
@@ -150,6 +160,13 @@ export async function startMcpServer(api: OpenClawPluginApi): Promise<void> {
 }
 
 export async function stopMcpServer(api: OpenClawPluginApi): Promise<void> {
+  stopping = true;
+
+  if (restartTimer) {
+    clearTimeout(restartTimer);
+    restartTimer = null;
+  }
+
   if (mcpClient) {
     try {
       await mcpClient.close();
@@ -168,6 +185,12 @@ export async function stopMcpServer(api: OpenClawPluginApi): Promise<void> {
     mcpProcess = null;
   }
 
+  if (mcpLogStream) {
+    mcpLogStream.end();
+    mcpLogStream = null;
+  }
+
   restartCount = 0;
+  stopping = false;
   api.logger.info("rune-mcp: server stopped");
 }

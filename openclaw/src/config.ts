@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
 // ============================================================================
 // Types
@@ -123,7 +124,8 @@ export function maskSecret(value: string): string {
  *   2. Repository layout: parent directory (rune repo root contains mcp/, agents/, etc.)
  */
 export function resolveRuneCorePath(): string {
-  const pluginRoot = path.resolve(import.meta.dirname ?? __dirname, "..");
+  const __dir = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
+  const pluginRoot = path.resolve(__dir, "..");
   // npm-installed: <plugin>/rune-core/
   const bundled = path.join(pluginRoot, "rune-core");
   if (fs.existsSync(bundled)) return bundled;
