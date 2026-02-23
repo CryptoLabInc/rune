@@ -31,9 +31,11 @@ class EnVectorClient:
         self,
         address: str = "localhost:50050",
         key_path: str = "~/.rune/keys",
-        key_id: str = "rune_key",
+        key_id: str = None,
         access_token: Optional[str] = None,
         auto_key_setup: bool = True,
+        agent_id: Optional[str] = None,
+        agent_dek: Optional[bytes] = None,
     ):
         """
         Initialize EnVector client.
@@ -44,12 +46,16 @@ class EnVectorClient:
             key_id: Key identifier
             access_token: Cloud access token (for enVector Cloud)
             auto_key_setup: Auto-generate keys if not found
+            agent_id: Per-agent identifier for app-layer metadata encryption
+            agent_dek: Per-agent AES-256 DEK (32 bytes) from Vault
         """
         self._address = address
         self._key_path = Path(key_path).expanduser()
         self._key_id = key_id
         self._access_token = access_token
         self._auto_key_setup = auto_key_setup
+        self._agent_id = agent_id
+        self._agent_dek = agent_dek
         self._adapter = None
         self._initialized = False
 
@@ -72,6 +78,8 @@ class EnVectorClient:
                 query_encryption=False,  # Plain queries for simplicity
                 access_token=self._access_token,
                 auto_key_setup=self._auto_key_setup,
+                agent_id=self._agent_id,
+                agent_dek=self._agent_dek,
             )
             self._initialized = True
             logger.info("Connected to %s", self._address)
