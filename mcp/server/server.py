@@ -36,12 +36,48 @@ from adapter import EnVectorSDKAdapter, EmbeddingAdapter
 from adapter.vault_client import VaultClient, VaultError
 
 
+async def _async_fetch_keys_from_vault(vault_endpoint: str, vault_token: str, key_path: str) -> tuple:
+    """
+    Async core: fetches public keys (EncKey, EvalKey) from Rune-Vault via gRPC.
+
+    Returns:
+        tuple: (success: bool, index_name: Optional[str])
+    """
+    client = VaultClient(vault_endpoint=vault_endpoint, vault_token=vault_token)
+    try:
+        bundle = await client.get_public_key()
+
+        # Extract team index name before saving key files
+        vault_index_name = bundle.pop("index_name", None)
+        if vault_index_name:
+            logger.info(f"Vault provided team index name: {vault_index_name}")
+
+        # Ensure key directory exists
+        os.makedirs(key_path, exist_ok=True)
+
+        # Save each key file
+        for filename, key_content in bundle.items():
+            filepath = os.path.join(key_path, filename)
+            with open(filepath, 'w') as f:
+                f.write(key_content)
+            logger.info(f"Saved {filename} to {filepath}")
+
+        return True, vault_index_name
+
+    except Exception as e:
+        logger.error(f"Failed to fetch keys from Vault: {e}")
+        return False, None
+    finally:
+        await client.close()
+
+
 def fetch_keys_from_vault(vault_endpoint: str, vault_token: str, key_path: str) -> tuple:
     """
-    Fetches public keys (EncKey, EvalKey) from Rune-Vault via gRPC.
+    Fetches public keys from Rune-Vault. Safe to call from both sync (main)
+    and async (reload_pipelines) contexts.
 
     Args:
-        vault_endpoint: Rune-Vault endpoint URL (e.g., http://vault-mcp:50080/mcp)
+        vault_endpoint: Rune-Vault endpoint URL
         vault_token: Authentication token for Vault
         key_path: Local directory to save the fetched keys
 
@@ -50,35 +86,22 @@ def fetch_keys_from_vault(vault_endpoint: str, vault_token: str, key_path: str) 
     """
     import asyncio
 
-    async def _fetch():
-        client = VaultClient(vault_endpoint=vault_endpoint, vault_token=vault_token)
-        try:
-            bundle = await client.get_public_key()
-
-            # Extract team index name before saving key files
-            vault_index_name = bundle.pop("index_name", None)
-            if vault_index_name:
-                logger.info(f"Vault provided team index name: {vault_index_name}")
-
-            # Ensure key directory exists
-            os.makedirs(key_path, exist_ok=True)
-
-            # Save each key file
-            for filename, key_content in bundle.items():
-                filepath = os.path.join(key_path, filename)
-                with open(filepath, 'w') as f:
-                    f.write(key_content)
-                logger.info(f"Saved {filename} to {filepath}")
-
-            return True, vault_index_name
-
-        except Exception as e:
-            logger.error(f"Failed to fetch keys from Vault: {e}")
-            return False, None
-        finally:
-            await client.close()
-
-    return asyncio.run(_fetch())
+    try:
+        asyncio.get_running_loop()
+        # Inside an existing event loop (e.g. reload_pipelines tool) —
+        # run in a separate thread to avoid "cannot call asyncio.run()" error.
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                asyncio.run,
+                _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_path),
+            )
+            return future.result(timeout=30)
+    except RuntimeError:
+        # No running loop — safe to use asyncio.run() directly.
+        return asyncio.run(
+            _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_path)
+        )
 
 class MCPServerApp:
     """
@@ -89,6 +112,10 @@ class MCPServerApp:
     - Rune-Vault holds secret key and performs all decryption
     - Agent never has access to secret key
     """
+    # Canonical key defaults (single source of truth for Rune plugin mode)
+    DEFAULT_KEY_PATH = os.path.expanduser("~/.rune/keys")
+    DEFAULT_KEY_ID = "rune_key"
+
     def __init__(
             self,
             envector_adapter: Optional[EnVectorSDKAdapter] = None,
@@ -96,6 +123,8 @@ class MCPServerApp:
             embedding_adapter: "EmbeddingAdapter" = None,
             vault_client: Optional[VaultClient] = None,
             vault_index_name: Optional[str] = None,
+            key_path: Optional[str] = None,
+            key_id: Optional[str] = None,
             scribe_pipeline: Optional[Dict[str, Any]] = None,
             retriever_pipeline: Optional[Dict[str, Any]] = None,
         ) -> None:
@@ -106,6 +135,8 @@ class MCPServerApp:
             mcp_server_name (str): The name of the MCP server.
             vault_client (VaultClient): Optional Vault client for secure decryption.
             vault_index_name (str): Team index name provisioned by Vault admin (optional).
+            key_path (str): Root directory for encryption keys.
+            key_id (str): Key identifier (subdirectory under key_path).
             scribe_pipeline (dict): Pre-initialized scribe pipeline components.
             retriever_pipeline (dict): Pre-initialized retriever pipeline components.
         """
@@ -114,6 +145,8 @@ class MCPServerApp:
         self.embedding = embedding_adapter
         self.vault = vault_client
         self._vault_index_name = vault_index_name
+        self._key_path = key_path or self.DEFAULT_KEY_PATH
+        self._key_id = key_id or self.DEFAULT_KEY_ID
         self._scribe = scribe_pipeline
         self._retriever = retriever_pipeline
         # mcp
@@ -537,10 +570,42 @@ class MCPServerApp:
                 model=rune_config.embedding.model,
             )
 
+            # Use canonical key path from instance (set by main or default)
+            key_path = self._key_path
+            key_id = self._key_id
+            key_dir = os.path.join(key_path, key_id)
+            enc_key_path = os.path.join(key_dir, "EncKey.json")
+
+            # Fetch public keys from Vault if not present locally
+            if rune_config.vault.endpoint and rune_config.vault.token:
+                if not os.path.exists(enc_key_path):
+                    logger.info("Keys not found locally — fetching from Vault...")
+                    success, vault_index = fetch_keys_from_vault(
+                        rune_config.vault.endpoint,
+                        rune_config.vault.token,
+                        key_dir,
+                    )
+                    if success:
+                        logger.info("Successfully fetched keys from Vault")
+                        if vault_index and not self._vault_index_name:
+                            self._vault_index_name = vault_index
+                    else:
+                        result["errors"].append("Failed to fetch keys from Vault")
+                        logger.error("Failed to fetch keys from Vault — capture/search will fail")
+
+            # Early return if EncKey still missing after fetch attempt
+            if not os.path.exists(enc_key_path):
+                result["errors"].append(
+                    f"EncKey.json not found at {enc_key_path}. "
+                    "Cannot initialize pipelines without encryption keys."
+                )
+                logger.error(f"EncKey.json missing at {enc_key_path} — aborting pipeline init")
+                return result
+
             envector_client = EnVectorClient(
                 address=rune_config.envector.endpoint,
-                key_path=str(os.path.expanduser("~/.rune/keys")),
-                key_id="rune_key",
+                key_path=key_path,
+                key_id=key_id,
                 access_token=rune_config.envector.api_key,
                 auto_key_setup=False,
             )
@@ -709,8 +774,16 @@ if __name__ == "__main__":
     VAULT_INDEX_NAME = None
 
     if RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN:
+        # When Vault is configured (Rune plugin mode), use canonical key path
+        # so that main() adapter and _init_pipelines() share the same keys.
+        ENVECTOR_KEY_PATH = MCPServerApp.DEFAULT_KEY_PATH
+        ENVECTOR_KEY_ID = MCPServerApp.DEFAULT_KEY_ID
+
         logger.info(f"Vault configured — fetching public keys from: {RUNEVAULT_ENDPOINT}")
-        success, vault_index = fetch_keys_from_vault(RUNEVAULT_ENDPOINT, RUNEVAULT_TOKEN, os.path.join(ENVECTOR_KEY_PATH, ENVECTOR_KEY_ID))
+        success, vault_index = fetch_keys_from_vault(
+            RUNEVAULT_ENDPOINT, RUNEVAULT_TOKEN,
+            os.path.join(ENVECTOR_KEY_PATH, ENVECTOR_KEY_ID),
+        )
         if success:
             logger.info("Successfully fetched keys from Vault")
             AUTO_KEY_SETUP = False
@@ -767,6 +840,8 @@ if __name__ == "__main__":
         embedding_adapter=embedding_adapter,
         vault_client=vault_client,
         vault_index_name=VAULT_INDEX_NAME,
+        key_path=ENVECTOR_KEY_PATH,
+        key_id=ENVECTOR_KEY_ID,
     )
 
     # Initialize pipelines (reads ~/.rune/config.json state)
