@@ -1,0 +1,31 @@
+{
+  "name": "@cryptolab/rune",
+  "version": "0.1.0",
+  "description": "FHE-encrypted organizational memory for OpenClaw",
+  "type": "module",
+  "files": [
+    "index.ts",
+    "src/",
+    "rune-core/mcp/",
+    "rune-core/agents/",
+    "rune-core/patterns/",
+    "rune-core/scripts/",
+    "rune-core/config/",
+    "rune-core/requirements.txt",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "prepack": "bash scripts/bundle-rune-core.sh"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.48"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

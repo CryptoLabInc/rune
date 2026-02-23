@@ -1,0 +1,68 @@
+{
+  "id": "rune",
+  "name": "Rune",
+  "description": "FHE-encrypted organizational memory for teams",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "vault_endpoint": {
+        "type": "string",
+        "description": "Rune-Vault gRPC endpoint"
+      },
+      "vault_token": {
+        "type": "string",
+        "description": "Vault authentication token"
+      },
+      "envector_endpoint": {
+        "type": "string",
+        "description": "enVector cluster endpoint"
+      },
+      "envector_api_key": {
+        "type": "string",
+        "description": "enVector API key"
+      },
+      "auto_capture": {
+        "type": "boolean",
+        "default": true,
+        "description": "Automatically capture decisions from LLM output"
+      },
+      "auto_retrieve": {
+        "type": "boolean",
+        "default": true,
+        "description": "Automatically retrieve relevant context for incoming messages"
+      }
+    }
+  },
+  "uiHints": {
+    "vault_endpoint": {
+      "label": "Vault Endpoint",
+      "placeholder": "tcp://vault-TEAM.oci.envector.io:50051",
+      "help": "Rune-Vault gRPC endpoint for key management"
+    },
+    "vault_token": {
+      "label": "Vault Token",
+      "sensitive": true,
+      "placeholder": "evt_..."
+    },
+    "envector_endpoint": {
+      "label": "enVector Endpoint",
+      "placeholder": "cluster-xxx.envector.io",
+      "help": "enVector cluster endpoint for encrypted vector storage"
+    },
+    "envector_api_key": {
+      "label": "enVector API Key",
+      "sensitive": true,
+      "placeholder": "envector_..."
+    },
+    "auto_capture": {
+      "label": "Auto-Capture",
+      "help": "Automatically capture organizational decisions from conversations"
+    },
+    "auto_retrieve": {
+      "label": "Auto-Retrieve",
+      "help": "Automatically search organizational memory for relevant context"
+    }
+  }
+}
