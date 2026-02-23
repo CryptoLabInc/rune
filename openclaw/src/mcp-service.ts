@@ -122,7 +122,7 @@ export async function startMcpServer(api: OpenClawPluginApi): Promise<void> {
   mcpClient = client;
 
   // Handle crashes with auto-restart
-  client.on("exit", (code: number) => {
+  client.on("exit", (code: number | null) => {
     api.logger.warn(`rune-mcp: process exited with code ${code}`);
     mcpClient = null;
     mcpProcess = null;
