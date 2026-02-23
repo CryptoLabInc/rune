@@ -77,15 +77,23 @@ async def _async_fetch_keys_from_vault(vault_endpoint: str, vault_token: str, ke
         agent_dek_bytes = None
         if vault_agent_dek_b64:
             import base64
-            agent_dek_bytes = base64.b64decode(vault_agent_dek_b64)
+            try:
+                agent_dek_bytes = base64.b64decode(vault_agent_dek_b64)
+            except (base64.binascii.Error, ValueError) as e:
+                logger.error(f"Failed to decode agent_dek from Vault (invalid base64): {e}")
+                return False, vault_index_name, vault_key_id, vault_agent_id, None
+            if len(agent_dek_bytes) != 32:
+                logger.error(f"agent_dek has invalid length {len(agent_dek_bytes)} bytes (expected 32 for AES-256)")
+                return False, vault_index_name, vault_key_id, vault_agent_id, None
 
-        # Save keys under key_base_path/<key_id>/
+        # Save keys under key_base_path/<key_id>/ with restrictive permissions
         key_dir = os.path.join(key_base_path, vault_key_id)
-        os.makedirs(key_dir, exist_ok=True)
+        os.makedirs(key_dir, mode=0o700, exist_ok=True)
 
         for filename, key_content in bundle.items():
             filepath = os.path.join(key_dir, filename)
-            with open(filepath, 'w') as f:
+            fd = os.open(filepath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
                 f.write(key_content)
             logger.info(f"Saved {filename} to {filepath}")
 
