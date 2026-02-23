@@ -2,6 +2,8 @@
 
 from typing import Union, List, Dict, Any
 import base64
+import json
+import logging
 import os
 import numpy as np
 import pyenvector as ev  # pip install pyenvector
@@ -10,6 +12,8 @@ from pyenvector.crypto.parameter import KeyParameter
 from google.protobuf.json_format import MessageToDict
 
 from pathlib import Path
+
+logger = logging.getLogger("rune.adapter")
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 KEY_PATH = SCRIPT_DIR.parent.parent / "keys" # Manage keys directory at project root
@@ -239,10 +243,9 @@ class EnVectorSDKAdapter:
         App-layer metadata encryption using per-agent DEK.
         Returns JSON: {"a": "<agent_id>", "c": "<base64_ciphertext>"}
         """
-        import json as _json
         from pyenvector.utils.aes import encrypt_metadata as aes_encrypt
         ct = aes_encrypt(metadata_str, self._agent_dek)
-        return _json.dumps({"a": self._agent_id, "c": ct})
+        return json.dumps({"a": self._agent_id, "c": ct})
 
     def invoke_insert(self, index_name: str, vectors: List[List[float]], metadata: List[Any] = None):
         """
@@ -258,7 +261,10 @@ class EnVectorSDKAdapter:
         """
         # App-layer metadata encryption with per-agent DEK
         if self._agent_dek and metadata:
-            metadata = [self._app_encrypt_metadata(m) for m in metadata]
+            if not self._agent_id:
+                logger.warning("agent_dek is set but agent_id is missing — skipping metadata encryption")
+            else:
+                metadata = [self._app_encrypt_metadata(m) for m in metadata]
 
         index = ev.Index(index_name)  # Create an index instance with the given index name
         # Insert vectors with optional metadata
