@@ -176,14 +176,9 @@ export async function stopMcpServer(api: OpenClawPluginApi): Promise<void> {
     mcpClient = null;
   }
 
-  if (mcpProcess) {
-    try {
-      mcpProcess.kill("SIGTERM");
-    } catch {
-      // already dead
-    }
-    mcpProcess = null;
-  }
+  // mcpClient.close() already sends SIGTERM/SIGKILL to the process,
+  // so just clear the reference here.
+  mcpProcess = null;
 
   if (mcpLogStream) {
     mcpLogStream.end();

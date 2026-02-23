@@ -2,7 +2,7 @@
 set -e
 
 # Bundle rune-core Python sources into the npm package.
-# Called by prepublishOnly — copies from the parent rune repo root
+# Called by prepack — copies from the parent rune repo root
 # into a local rune-core/ directory so npm pack includes the files.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

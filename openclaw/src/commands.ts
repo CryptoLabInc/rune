@@ -18,8 +18,7 @@ import {
   resolveRuneCorePath,
   type RuneConfig,
 } from "./config.js";
-import { getMcpClient } from "./mcp-service.js";
-import { startMcpServer, stopMcpServer } from "./mcp-service.js";
+import { getMcpClient, startMcpServer, stopMcpServer } from "./mcp-service.js";
 
 // ============================================================================
 // Paths

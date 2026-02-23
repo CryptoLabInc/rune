@@ -78,7 +78,14 @@ export class RuneMcpClient extends EventEmitter {
 
     try {
       const msg = JSON.parse(trimmed) as JsonRpcResponse;
-      if (msg.id != null && this.pending.has(msg.id)) {
+
+      // Server-initiated notifications have no id — log and skip
+      if (msg.id == null) {
+        this.logger.debug?.(`rune-mcp: server notification: ${(msg as { method?: string }).method ?? "unknown"}`);
+        return;
+      }
+
+      if (this.pending.has(msg.id)) {
         const entry = this.pending.get(msg.id)!;
         this.pending.delete(msg.id);
         if (msg.error) {
