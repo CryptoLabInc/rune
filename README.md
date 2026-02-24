@@ -1,10 +1,16 @@
 # Rune
+**FHE-Encrypted Organizational Memory for AI Agents**
 
-**Organizational Memory System for Claude**
+Rune is a `/plugin` installable agent-native solution that transforms organizational memory into a strategic asset by **connecting the isolated activities of local agents through encrypted memory**.
 
-Rune is a `/plugin` installable system that provides FHE-encrypted organizational memory for Claude agents. Install with one command, configure with your team's credentials, and start capturing institutional knowledge.
+Experience it now in Claude Code:
+```
+> /plugin marketplace add CryptoLabInc/rune
+> /plugin install rune
+```
+Install with simple commands, configure with your team's credentials, and start capturing institutional knowledge.
 
-## What is This?
+## So, What is This?
 
 This is the **complete plugin** with everything needed to run Rune locally:
 
