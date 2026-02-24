@@ -24,7 +24,7 @@ Configuration:
   [check] enVector: <endpoint or "not set">
 
 Infrastructure:
-  [check] Python venv: <path or "not found">
+  [check] Python venv: <installedFrom>/.venv (read installedFrom from config metadata)
   [check] MCP server logs: <recent or "stale/missing">
 
 Recommendations:
