@@ -188,10 +188,11 @@ class DecisionRecord(BaseModel):
     links: List[dict] = Field(default_factory=list, description="Related links (ADR, PR, etc.)")
     tags: List[str] = Field(default_factory=list)
 
-    # Phase Chain fields — for linked long-term memory
-    group_id: Optional[str] = Field(default=None, description="Shared ID linking all phases of one reasoning chain")
+    # Group fields — for linked long-term memory
+    group_id: Optional[str] = Field(default=None, description="Shared ID linking all records in a group")
+    group_type: Optional[str] = Field(default=None, description="Group type: 'phase_chain' (sequential reasoning) or 'bundle' (detail facets)")
     phase_seq: Optional[int] = Field(default=None, description="0-indexed position within the group")
-    phase_total: Optional[int] = Field(default=None, description="Total number of phases in the group")
+    phase_total: Optional[int] = Field(default=None, description="Total number of records in the group")
 
     quality: Quality = Field(default_factory=Quality)
     payload: Payload = Field(default_factory=Payload)

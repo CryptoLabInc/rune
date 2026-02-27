@@ -29,8 +29,9 @@ class SearchResult:
     status: str
     score: float
     metadata: Dict[str, Any] = field(default_factory=dict)
-    # Phase chain fields
+    # Group fields (phase_chain or bundle)
     group_id: Optional[str] = None
+    group_type: Optional[str] = None
     phase_seq: Optional[int] = None
     phase_total: Optional[int] = None
 
@@ -41,7 +42,7 @@ class SearchResult:
 
     @property
     def is_phase(self) -> bool:
-        """Check if this result is part of a phase chain"""
+        """Check if this result is part of a group (phase_chain or bundle)"""
         return self.group_id is not None
 
     @property
@@ -263,8 +264,9 @@ class Searcher:
             if isinstance(decision, dict):
                 payload_text = decision.get("what", "")
 
-        # Extract phase chain fields
+        # Extract group fields
         group_id = metadata.get("group_id")
+        group_type = metadata.get("group_type")
         phase_seq = metadata.get("phase_seq")
         phase_total = metadata.get("phase_total")
 
@@ -278,6 +280,7 @@ class Searcher:
             score=raw.get("score", 0.0),
             metadata=metadata,
             group_id=group_id,
+            group_type=group_type,
             phase_seq=phase_seq,
             phase_total=phase_total,
         )

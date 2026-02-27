@@ -274,18 +274,20 @@ class RecordBuilder:
             record.payload.text = render_payload_text(record)
             return [record]
 
-        # ===== Multi-phase: build linked records =====
+        # ===== Multi-record: phase_chain or bundle =====
         phases = extraction.phases
         domain = self._parse_domain(detection.domain)
         timestamp = datetime.now(timezone.utc)
         group_title = extraction.group_title or self._extract_title(clean_text, detection)
         group_id = generate_group_id(timestamp, domain, group_title)
+        group_type = extraction.group_type or "phase_chain"
         phase_total = len(phases)
 
         records: List[DecisionRecord] = []
         for seq, phase in enumerate(phases):
             phase_title = phase.phase_title or f"Phase {seq + 1}"
-            record_id = generate_record_id(timestamp, domain, phase_title) + f"_p{seq}"
+            suffix = f"_b{seq}" if group_type == "bundle" else f"_p{seq}"
+            record_id = generate_record_id(timestamp, domain, phase_title) + suffix
 
             # Parse timestamp for decision detail
             when = ""
@@ -333,8 +335,9 @@ class RecordBuilder:
                     review_notes=redaction_notes if redaction_notes else None,
                 ),
                 payload=Payload(format="markdown", text=""),
-                # Phase chain fields
+                # Group fields (phase_chain or bundle)
                 group_id=group_id,
+                group_type=group_type,
                 phase_seq=seq,
                 phase_total=phase_total,
             )

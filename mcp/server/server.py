@@ -506,8 +506,9 @@ class MCPServerApp:
                     "certainty": first.why.certainty.value,
                 }
                 if len(records) > 1:
-                    result["phase_count"] = len(records)
+                    result["record_count"] = len(records)
                     result["group_id"] = first.group_id
+                    result["group_type"] = first.group_type or "phase_chain"
                 return result
 
             except Exception as e:
