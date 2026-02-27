@@ -29,11 +29,20 @@ class SearchResult:
     status: str
     score: float
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Phase chain fields
+    group_id: Optional[str] = None
+    phase_seq: Optional[int] = None
+    phase_total: Optional[int] = None
 
     @property
     def is_reliable(self) -> bool:
         """Check if result has reliable evidence"""
         return self.certainty in ("supported", "partially_supported")
+
+    @property
+    def is_phase(self) -> bool:
+        """Check if this result is part of a phase chain"""
+        return self.group_id is not None
 
     @property
     def summary(self) -> str:
@@ -79,7 +88,8 @@ class Searcher:
     async def search(
         self,
         query: ParsedQuery,
-        topk: Optional[int] = None
+        topk: Optional[int] = None,
+        expand_phases: bool = True,
     ) -> List[SearchResult]:
         """
         Search for relevant Decision Records.
@@ -87,6 +97,8 @@ class Searcher:
         Args:
             query: Parsed query from QueryProcessor
             topk: Number of results (default from config)
+            expand_phases: If True, automatically fetch sibling phases
+                when a phase chain member is found
 
         Returns:
             List of SearchResult objects sorted by relevance
@@ -120,8 +132,14 @@ class Searcher:
         if query.time_scope != TimeScope.ALL_TIME:
             all_results = self._filter_by_time(all_results, query.time_scope)
 
-        # Return top results
-        return all_results[:topk]
+        # Trim to topk before phase expansion
+        all_results = all_results[:topk]
+
+        # Expand phase chains: fetch sibling phases for any phase results
+        if expand_phases:
+            all_results = await self._expand_phase_chains(all_results)
+
+        return all_results
 
     async def _search_single(self, query_text: str, topk: int) -> List[SearchResult]:
         """Execute a single search query via the appropriate pipeline."""
@@ -245,6 +263,11 @@ class Searcher:
             if isinstance(decision, dict):
                 payload_text = decision.get("what", "")
 
+        # Extract phase chain fields
+        group_id = metadata.get("group_id")
+        phase_seq = metadata.get("phase_seq")
+        phase_total = metadata.get("phase_total")
+
         return SearchResult(
             record_id=record_id,
             title=title,
@@ -254,7 +277,76 @@ class Searcher:
             status=status,
             score=raw.get("score", 0.0),
             metadata=metadata,
+            group_id=group_id,
+            phase_seq=phase_seq,
+            phase_total=phase_total,
         )
+
+    async def _expand_phase_chains(
+        self,
+        results: List[SearchResult],
+        max_chains: int = 2,
+    ) -> List[SearchResult]:
+        """
+        Expand phase chain results by fetching sibling phases.
+
+        When a search result is part of a phase chain, searches for the
+        group_id to retrieve all sibling phases and inserts them in order.
+
+        Args:
+            results: Current search results
+            max_chains: Max number of chains to expand (cost control)
+
+        Returns:
+            Results with phase chains expanded inline
+        """
+        # Find unique group_ids from phase results
+        seen_groups = set()
+        groups_to_expand = []
+        for r in results:
+            if r.is_phase and r.group_id not in seen_groups:
+                seen_groups.add(r.group_id)
+                groups_to_expand.append(r.group_id)
+
+        if not groups_to_expand:
+            return results
+
+        # Limit expansion for cost control
+        groups_to_expand = groups_to_expand[:max_chains]
+
+        # Fetch siblings for each group
+        group_siblings: Dict[str, List[SearchResult]] = {}
+        existing_ids = {r.record_id for r in results}
+
+        for group_id in groups_to_expand:
+            # Search by group_id (embedded in payload.text)
+            siblings = await self._search_single(f"Group: {group_id}", topk=10)
+            chain = [s for s in siblings if s.group_id == group_id]
+            # Sort by phase_seq
+            chain.sort(key=lambda s: s.phase_seq if s.phase_seq is not None else 0)
+            group_siblings[group_id] = chain
+
+        # Rebuild result list with chains expanded inline
+        expanded = []
+        expanded_ids = set()
+
+        for r in results:
+            if r.record_id in expanded_ids:
+                continue
+
+            if r.is_phase and r.group_id in group_siblings:
+                # Insert entire chain at this position
+                for sibling in group_siblings[r.group_id]:
+                    if sibling.record_id not in expanded_ids:
+                        expanded.append(sibling)
+                        expanded_ids.add(sibling.record_id)
+                # Remove group from dict so we don't expand again
+                del group_siblings[r.group_id]
+            else:
+                expanded.append(r)
+                expanded_ids.add(r.record_id)
+
+        return expanded
 
     def _filter_by_time(
         self,

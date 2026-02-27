@@ -31,11 +31,12 @@ from ..common.schemas import (
     ReviewState,
     SourceType,
     generate_record_id,
+    generate_group_id,
 )
 from ..common.schemas.templates import render_payload_text
 from ..common.language import LanguageInfo
 from .detector import DetectionResult
-from .llm_extractor import LLMExtractor
+from .llm_extractor import LLMExtractor, ExtractionResult
 
 
 @dataclass
@@ -131,7 +132,7 @@ class RecordBuilder:
         if self._llm_extractor and self._llm_extractor.is_available:
             # ===== LLM extraction (preferred for all languages) =====
             # Robust to typos, abbreviations, colloquialisms
-            extracted = self._llm_extractor.extract(clean_text)
+            extracted = self._llm_extractor.extract_single(clean_text)
             title = extracted.title or self._extract_title(clean_text, detection)
             rationale = extracted.rationale
             problem = extracted.problem
@@ -197,6 +198,151 @@ class RecordBuilder:
         record.payload.text = render_payload_text(record)
 
         return record
+
+    def build_phases(
+        self,
+        raw_event: RawEvent,
+        detection: DetectionResult,
+        language: Optional[LanguageInfo] = None,
+    ) -> List[DecisionRecord]:
+        """
+        Build one or more Decision Records, splitting into phases if needed.
+
+        For short texts or when LLM is unavailable, returns a single-element list
+        (delegating to build()). For long reasoning chains, splits into linked
+        phase records sharing a group_id.
+
+        Args:
+            raw_event: Raw event data
+            detection: Detection result from DecisionDetector
+            language: Optional detected language info
+
+        Returns:
+            List of DecisionRecords (1 for single, 2-7 for phase chain)
+        """
+        # Without LLM, fall back to single record
+        if not self._llm_extractor or not self._llm_extractor.is_available:
+            return [self.build(raw_event, detection, language)]
+
+        clean_text, redaction_notes = self._redact_sensitive(raw_event.text)
+
+        # Phase-aware extraction (auto-detects short vs long)
+        extraction: ExtractionResult = self._llm_extractor.extract(clean_text)
+
+        if not extraction.is_multi_phase:
+            # Single record — use the single extraction result
+            fields = extraction.single
+            if fields is None:
+                return [self.build(raw_event, detection, language)]
+
+            title = fields.title or self._extract_title(clean_text, detection)
+            evidence = self._extract_evidence(raw_event, clean_text)
+            certainty, missing_info = self._determine_certainty(evidence, fields.rationale)
+            status = self._status_from_hint(fields.status_hint, evidence, clean_text)
+            domain = self._parse_domain(detection.domain)
+            timestamp = datetime.now(timezone.utc)
+            record_id = generate_record_id(timestamp, domain, title)
+
+            record = DecisionRecord(
+                id=record_id,
+                domain=domain,
+                sensitivity=self._default_sensitivity,
+                status=status,
+                timestamp=timestamp,
+                title=title,
+                decision=self._extract_decision_detail(raw_event, clean_text),
+                context=Context(
+                    problem=fields.problem,
+                    alternatives=fields.alternatives[:5],
+                    trade_offs=fields.trade_offs[:5],
+                ),
+                why=Why(
+                    rationale_summary=fields.rationale,
+                    certainty=certainty,
+                    missing_info=missing_info,
+                ),
+                evidence=evidence,
+                tags=fields.tags or self._extract_tags(clean_text, detection),
+                quality=Quality(
+                    scribe_confidence=detection.confidence,
+                    review_state=ReviewState.UNREVIEWED,
+                    review_notes=redaction_notes if redaction_notes else None,
+                ),
+                payload=Payload(format="markdown", text=""),
+            )
+            record.ensure_evidence_certainty_consistency()
+            record.payload.text = render_payload_text(record)
+            return [record]
+
+        # ===== Multi-phase: build linked records =====
+        phases = extraction.phases
+        domain = self._parse_domain(detection.domain)
+        timestamp = datetime.now(timezone.utc)
+        group_title = extraction.group_title or self._extract_title(clean_text, detection)
+        group_id = generate_group_id(timestamp, domain, group_title)
+        phase_total = len(phases)
+
+        records: List[DecisionRecord] = []
+        for seq, phase in enumerate(phases):
+            phase_title = phase.phase_title or f"Phase {seq + 1}"
+            record_id = generate_record_id(timestamp, domain, phase_title) + f"_p{seq}"
+
+            # Parse timestamp for decision detail
+            when = ""
+            if raw_event.timestamp:
+                try:
+                    ts = float(raw_event.timestamp)
+                    when = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+                except (ValueError, TypeError):
+                    when = raw_event.timestamp
+
+            decision_detail = DecisionDetail(
+                what=phase.phase_decision[:500],
+                who=[f"user:{raw_event.user}"] if raw_event.user else [],
+                where=f"{raw_event.source}:{raw_event.channel}" if raw_event.channel else raw_event.source,
+                when=when,
+            )
+
+            evidence = self._extract_evidence(raw_event, clean_text)
+            certainty, missing_info = self._determine_certainty(evidence, phase.phase_rationale)
+            status = self._status_from_hint(extraction.status_hint, evidence, clean_text)
+
+            record = DecisionRecord(
+                id=record_id,
+                domain=domain,
+                sensitivity=self._default_sensitivity,
+                status=status,
+                timestamp=timestamp,
+                title=phase_title,
+                decision=decision_detail,
+                context=Context(
+                    problem=phase.phase_problem,
+                    alternatives=phase.alternatives[:5],
+                    trade_offs=phase.trade_offs[:5],
+                ),
+                why=Why(
+                    rationale_summary=phase.phase_rationale,
+                    certainty=certainty,
+                    missing_info=missing_info,
+                ),
+                evidence=evidence,
+                tags=phase.tags or extraction.tags or self._extract_tags(clean_text, detection),
+                quality=Quality(
+                    scribe_confidence=detection.confidence,
+                    review_state=ReviewState.UNREVIEWED,
+                    review_notes=redaction_notes if redaction_notes else None,
+                ),
+                payload=Payload(format="markdown", text=""),
+                # Phase chain fields
+                group_id=group_id,
+                phase_seq=seq,
+                phase_total=phase_total,
+            )
+            record.ensure_evidence_certainty_consistency()
+            record.payload.text = render_payload_text(record)
+            records.append(record)
+
+        return records
 
     def _redact_sensitive(self, text: str) -> tuple[str, Optional[str]]:
         """Redact sensitive data from text"""

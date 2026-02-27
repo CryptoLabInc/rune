@@ -481,27 +481,34 @@ class MCPServerApp:
                     timestamp=str(datetime.now(timezone.utc).timestamp()),
                     source=source,
                 )
-                record = record_builder.build(raw_event, detection)
+                records = record_builder.build_phases(raw_event, detection)
 
                 # Store in enVector with FHE encryption
+                texts = [r.payload.text for r in records]
+                metadata = [r.model_dump(mode="json") for r in records]
                 insert_result = envector_client.insert_with_text(
                     index_name=self._vault_index_name,
-                    texts=[record.payload.text],
+                    texts=texts,
                     embedding_service=embedding_service,
-                    metadata=[record.model_dump(mode="json")],
+                    metadata=metadata,
                 )
 
                 if not insert_result.get("ok"):
                     return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
 
-                return {
+                first = records[0]
+                result = {
                     "ok": True,
                     "captured": True,
-                    "record_id": record.id,
-                    "summary": record.title,
-                    "domain": record.domain.value,
-                    "certainty": record.why.certainty.value,
+                    "record_id": first.id,
+                    "summary": first.title,
+                    "domain": first.domain.value,
+                    "certainty": first.why.certainty.value,
                 }
+                if len(records) > 1:
+                    result["phase_count"] = len(records)
+                    result["group_id"] = first.group_id
+                return result
 
             except Exception as e:
                 logger.error(f"Capture failed: {e}", exc_info=True)

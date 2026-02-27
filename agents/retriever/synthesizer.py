@@ -295,13 +295,53 @@ class Synthesizer:
         )
 
     def _format_records_for_prompt(self, results: List[SearchResult]) -> str:
-        """Format search results for LLM prompt"""
-        formatted = []
+        """Format search results for LLM prompt, grouping phase chains."""
+        # Group results: phase chains together, standalone separate
+        groups = []  # List of (group_id_or_none, [results])
+        seen_groups = set()
 
-        for i, r in enumerate(results[:5], 1):
-            formatted.append(f"""
+        for r in results:
+            if r.is_phase and r.group_id:
+                if r.group_id not in seen_groups:
+                    seen_groups.add(r.group_id)
+                    # Collect all results with this group_id
+                    chain = [x for x in results if x.group_id == r.group_id]
+                    chain.sort(key=lambda x: x.phase_seq if x.phase_seq is not None else 0)
+                    groups.append((r.group_id, chain))
+            elif not r.is_phase:
+                groups.append((None, [r]))
+
+        # Format each group
+        formatted = []
+        record_num = 1
+
+        for group_id, group_results in groups:
+            if group_id and len(group_results) > 1:
+                # Phase chain — format as unified block
+                first = group_results[0]
+                formatted.append(f"""
 ---
-Record {i}: [{r.record_id}]
+Record {record_num}: Phase Chain [{group_id}]
+Overall Domain: {first.domain}
+Phases: {len(group_results)}
+""")
+                for phase in group_results:
+                    seq = (phase.phase_seq or 0) + 1
+                    total = phase.phase_total or len(group_results)
+                    formatted.append(f"""
+Phase {seq}/{total}: {phase.title} [{phase.record_id}]
+Certainty: {phase.certainty}
+
+{phase.payload_text[:800]}
+""")
+                formatted.append("---\n")
+                record_num += 1
+            else:
+                # Single record (standalone or single-phase)
+                r = group_results[0]
+                formatted.append(f"""
+---
+Record {record_num}: [{r.record_id}]
 Title: {r.title}
 Domain: {r.domain}
 Certainty: {r.certainty}
@@ -311,6 +351,7 @@ Content:
 {r.payload_text[:1000]}
 ---
 """)
+                record_num += 1
 
         return "\n".join(formatted)
 

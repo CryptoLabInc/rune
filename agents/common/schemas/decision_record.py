@@ -188,6 +188,11 @@ class DecisionRecord(BaseModel):
     links: List[dict] = Field(default_factory=list, description="Related links (ADR, PR, etc.)")
     tags: List[str] = Field(default_factory=list)
 
+    # Phase Chain fields — for linked long-term memory
+    group_id: Optional[str] = Field(default=None, description="Shared ID linking all phases of one reasoning chain")
+    phase_seq: Optional[int] = Field(default=None, description="0-indexed position within the group")
+    phase_total: Optional[int] = Field(default=None, description="Total number of phases in the group")
+
     quality: Quality = Field(default_factory=Quality)
     payload: Payload = Field(default_factory=Payload)
 
@@ -228,3 +233,11 @@ def generate_record_id(timestamp: datetime, domain: Domain, title: str) -> str:
     words = title.lower().split()[:3]
     slug = "_".join(w for w in words if w.isalnum() or w.replace("_", "").isalnum())
     return f"dec_{date_str}_{domain.value}_{slug}"
+
+
+def generate_group_id(timestamp: datetime, domain: Domain, title: str) -> str:
+    """Generate a shared group ID for a phase chain"""
+    date_str = timestamp.strftime("%Y-%m-%d")
+    words = title.lower().split()[:3]
+    slug = "_".join(w for w in words if w.isalnum() or w.replace("_", "").isalnum())
+    return f"grp_{date_str}_{domain.value}_{slug}"
