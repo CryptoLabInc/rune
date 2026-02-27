@@ -49,33 +49,33 @@ Claude: [Records team process]
 
 ## Manual Context Storage
 
-Scribe captures most decisions automatically from conversation. Use `/rune:remember` when Scribe missed something or you want to store context that isn't part of the current conversation:
+Scribe captures most decisions automatically from conversation. Use `/rune:memorize` when Scribe missed something or you want to store context that isn't part of the current conversation:
 
 ### Security Policies
 
 ```
-/rune:remember "All API keys must be stored in environment variables,
+/rune:memorize "All API keys must be stored in environment variables,
 never hardcoded. Use AWS Secrets Manager for production."
 ```
 
 ### Design Patterns
 
 ```
-/rune:remember "We use the Repository pattern for data access.
+/rune:memorize "We use the Repository pattern for data access.
 Each entity has a corresponding repository interface in the domain layer."
 ```
 
 ### Performance Decisions
 
 ```
-/rune:remember "Database queries must use pagination. Maximum page size
+/rune:memorize "Database queries must use pagination. Maximum page size
 is 100 items. Always include total count in response."
 ```
 
 ### Onboarding Information
 
 ```
-/rune:remember "New developers should read docs/ARCHITECTURE.md first,
+/rune:memorize "New developers should read docs/ARCHITECTURE.md first,
 then set up their environment with scripts/dev-setup.sh"
 ```
 
@@ -271,14 +271,14 @@ Supported redaction patterns:
 Import existing documentation:
 
 ```
-/rune:remember "$(cat docs/ARCHITECTURE.md)"
+/rune:memorize "$(cat docs/ARCHITECTURE.md)"
 ```
 
 Import decision records:
 
 ```
 for file in docs/decisions/*.md; do
-  /rune:remember "$(cat $file)"
+  /rune:memorize "$(cat $file)"
 done
 ```
 
@@ -321,7 +321,7 @@ Decision made after 2-week trial with both databases."
 When circumstances change:
 
 ```
-/rune:remember "Updated database decision: We migrated from PostgreSQL
+/rune:memorize "Updated database decision: We migrated from PostgreSQL
 to MongoDB in Q2 2025. Reason: Document model evolved to be too complex
 for relational schema. PostgreSQL worked well initially but became
 bottleneck at scale."
@@ -347,9 +347,9 @@ Claude: [Summarizes captured decisions from last 3 months]
 
 **Why**: Scribe uses pattern matching and significance scoring (threshold 0.7) to decide what to capture. Some context may fall below the threshold if it lacks clear decision-language triggers like "we decided...", "we chose X over Y because...", etc.
 
-**Solution**: Use `/rune:remember` as a manual override:
+**Solution**: Use `/rune:memorize` as a manual override:
 ```
-/rune:remember "Previous decision: [repeat the important context]"
+/rune:memorize "Previous decision: [repeat the important context]"
 ```
 
 ### Too Much Noise
@@ -372,9 +372,9 @@ Use: "Why did we choose PostgreSQL over MySQL for the user service?"
 
 **Issue**: Retrieved context is outdated.
 
-**Solution**: State the updated decision in conversation (Scribe will capture it), or use `/rune:remember` to force-store:
+**Solution**: State the updated decision in conversation (Scribe will capture it), or use `/rune:memorize` to force-store:
 ```
-/rune:remember "Updated: [new information that supersedes old decision]"
+/rune:memorize "Updated: [new information that supersedes old decision]"
 ```
 
 ---
@@ -428,7 +428,7 @@ Source: Captured from infra team 2 months ago"
 
 **Automatic Capture (Scribe)**: Automatically identifies and captures significant decisions from conversation — the primary capture path.
 **Automatic Retrieval (Retriever)**: Automatically detects recall-intent queries in natural conversation — the primary retrieval path.
-**Manual Override (`/rune:remember`)**: Force-store context that Scribe missed — use sparingly.
+**Manual Override (`/rune:memorize`)**: Force-store context that Scribe missed — use sparingly.
 **Manual Override (`/rune:recall`)**: Explicitly search memory bypassing Retriever's intent detection — use when natural language doesn't trigger recall.
 **Team Collaboration**: All team members share same organizational memory.
 **Security**: FHE encryption ensures zero-knowledge privacy.
