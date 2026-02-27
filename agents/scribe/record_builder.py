@@ -294,7 +294,7 @@ class RecordBuilder:
             if raw_event.timestamp:
                 try:
                     ts = float(raw_event.timestamp)
-                    when = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+                    when = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
                 except (ValueError, TypeError):
                     when = raw_event.timestamp
 

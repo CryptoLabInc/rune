@@ -188,6 +188,129 @@ class TestSearcher:
         assert results[0].is_reliable is True
 
 
+class TestExpandPhaseChains:
+    """Tests for phase chain expansion in Searcher"""
+
+    @pytest.fixture
+    def mock_client(self):
+        from unittest.mock import AsyncMock
+        client = Mock()
+        client.search_with_text = Mock(return_value={"ok": True, "results": []})
+        client.parse_search_results = Mock(return_value=[])
+        return client
+
+    @pytest.fixture
+    def mock_embedding(self):
+        embedding = Mock()
+        embedding.embed_single.return_value = [0.1] * 384
+        return embedding
+
+    @pytest.fixture
+    def searcher(self, mock_client, mock_embedding):
+        from agents.retriever.searcher import Searcher
+        return Searcher(mock_client, mock_embedding, "test-collection")
+
+    def _make_result(self, record_id, group_id=None, group_type=None, phase_seq=None, phase_total=None, score=0.8):
+        from agents.retriever.searcher import SearchResult
+        return SearchResult(
+            record_id=record_id,
+            title=f"Title {record_id}",
+            payload_text=f"Content of {record_id}",
+            domain="architecture",
+            certainty="supported",
+            status="accepted",
+            score=score,
+            group_id=group_id,
+            group_type=group_type,
+            phase_seq=phase_seq,
+            phase_total=phase_total,
+        )
+
+    @pytest.mark.asyncio
+    async def test_expand_fetches_siblings(self, searcher):
+        """Test that expansion fetches siblings for phase results"""
+        grp = "grp_2026-01-01_arch_plg"
+        results = [
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=3),
+        ]
+
+        # Mock _search_single to return siblings
+        sibling_results = [
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=3),
+            self._make_result("dec_p2", group_id=grp, group_type="phase_chain", phase_seq=2, phase_total=3),
+        ]
+        from unittest.mock import AsyncMock
+        searcher._search_single = AsyncMock(return_value=sibling_results)
+
+        expanded = await searcher._expand_phase_chains(results)
+
+        # Should have fetched siblings
+        searcher._search_single.assert_called_once()
+        # Should contain siblings ordered by phase_seq
+        assert len(expanded) == 2  # Only siblings (originals filtered by existing_ids)
+        assert expanded[0].phase_seq == 1
+        assert expanded[1].phase_seq == 2
+
+    @pytest.mark.asyncio
+    async def test_expand_orders_by_phase_seq(self, searcher):
+        """Test that expanded results are ordered by phase_seq"""
+        grp = "grp_2026-01-01_arch_test"
+        results = [
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=3),
+        ]
+
+        # Return siblings out of order
+        from unittest.mock import AsyncMock
+        searcher._search_single = AsyncMock(return_value=[
+            self._make_result("dec_p2", group_id=grp, group_type="phase_chain", phase_seq=2, phase_total=3),
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=3),
+        ])
+
+        expanded = await searcher._expand_phase_chains(results)
+
+        # Siblings should be sorted by phase_seq
+        seqs = [r.phase_seq for r in expanded]
+        assert seqs == sorted(seqs)
+
+    @pytest.mark.asyncio
+    async def test_expand_no_duplicate_record_ids(self, searcher):
+        """Test that expanded results have no duplicate record_ids"""
+        grp = "grp_2026-01-01_arch_dedup"
+        results = [
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=2),
+        ]
+
+        # Sibling search returns the original + new one
+        from unittest.mock import AsyncMock
+        searcher._search_single = AsyncMock(return_value=[
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=2),
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=2),
+        ])
+
+        expanded = await searcher._expand_phase_chains(results)
+
+        # No duplicates
+        ids = [r.record_id for r in expanded]
+        assert len(ids) == len(set(ids))
+
+    @pytest.mark.asyncio
+    async def test_expand_standalone_untouched(self, searcher):
+        """Test that standalone (non-phase) results are passed through"""
+        results = [
+            self._make_result("dec_standalone", score=0.9),
+        ]
+
+        from unittest.mock import AsyncMock
+        searcher._search_single = AsyncMock()
+
+        expanded = await searcher._expand_phase_chains(results)
+
+        # No search should be made for non-phase results
+        searcher._search_single.assert_not_called()
+        assert len(expanded) == 1
+        assert expanded[0].record_id == "dec_standalone"
+
+
 class TestSynthesizer:
     """Tests for Synthesizer"""
 
@@ -285,6 +408,113 @@ class TestSynthesizer:
         result = synthesizer_no_llm.synthesize(sample_query, sample_results)
 
         assert len(result.related_queries) > 0
+
+
+class TestSynthesizerGrouping:
+    """Tests for phase chain / bundle grouping in Synthesizer._format_records_for_prompt"""
+
+    @pytest.fixture
+    def synthesizer_no_llm(self):
+        from agents.retriever.synthesizer import Synthesizer
+        return Synthesizer(anthropic_api_key=None)
+
+    def _make_result(self, record_id, group_id=None, group_type=None, phase_seq=None, phase_total=None, title="Test", score=0.8):
+        from agents.retriever.searcher import SearchResult
+        return SearchResult(
+            record_id=record_id,
+            title=title,
+            payload_text=f"Content of {record_id}",
+            domain="architecture",
+            certainty="supported",
+            status="accepted",
+            score=score,
+            group_id=group_id,
+            group_type=group_type,
+            phase_seq=phase_seq,
+            phase_total=phase_total,
+        )
+
+    def test_phase_chain_grouped_as_single_block(self, synthesizer_no_llm):
+        """Test that phase chain results render as one 'Phase Chain' block"""
+        grp = "grp_2026-01-01_arch_strategy"
+        results = [
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=3, title="Market Analysis"),
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=3, title="Pricing Model"),
+            self._make_result("dec_p2", group_id=grp, group_type="phase_chain", phase_seq=2, phase_total=3, title="Roadmap"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        assert "Phase Chain" in formatted
+        assert "Phase 1/3" in formatted
+        assert "Phase 2/3" in formatted
+        assert "Phase 3/3" in formatted
+        # Should be a single record block, not three separate ones
+        assert formatted.count("Record ") == 1
+
+    def test_bundle_grouped_as_single_block(self, synthesizer_no_llm):
+        """Test that bundle results render as one 'Decision Bundle' block"""
+        grp = "grp_2026-01-01_product_auth"
+        results = [
+            self._make_result("dec_b0", group_id=grp, group_type="bundle", phase_seq=0, phase_total=2, title="Auth Method"),
+            self._make_result("dec_b1", group_id=grp, group_type="bundle", phase_seq=1, phase_total=2, title="Token Storage"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        assert "Decision Bundle" in formatted
+        assert "Facet 1" in formatted
+        assert "Facet 2" in formatted
+        assert formatted.count("Record ") == 1
+
+    def test_standalone_formatted_individually(self, synthesizer_no_llm):
+        """Test that standalone records are formatted individually"""
+        results = [
+            self._make_result("dec_standalone1", title="Choose PostgreSQL"),
+            self._make_result("dec_standalone2", title="Use Redis"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        assert "Choose PostgreSQL" in formatted
+        assert "Use Redis" in formatted
+        assert "Phase Chain" not in formatted
+        assert "Decision Bundle" not in formatted
+        assert formatted.count("Record ") == 2
+
+    def test_mixed_grouped_and_standalone(self, synthesizer_no_llm):
+        """Test mix of grouped and standalone results"""
+        grp = "grp_2026-01-01_arch_mix"
+        results = [
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=2, title="Phase A"),
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=2, title="Phase B"),
+            self._make_result("dec_standalone", title="Standalone Decision"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        assert "Phase Chain" in formatted
+        assert "Standalone Decision" in formatted
+        # 1 grouped block + 1 standalone = 2 record blocks
+        assert formatted.count("Record ") == 2
+
+    def test_phases_ordered_by_phase_seq(self, synthesizer_no_llm):
+        """Test that phases within a group are ordered by phase_seq"""
+        grp = "grp_2026-01-01_arch_order"
+        # Deliberately out of order
+        results = [
+            self._make_result("dec_p2", group_id=grp, group_type="phase_chain", phase_seq=2, phase_total=3, title="Third"),
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=3, title="First"),
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=3, title="Second"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        # Phases should appear in seq order
+        pos_first = formatted.index("First")
+        pos_second = formatted.index("Second")
+        pos_third = formatted.index("Third")
+        assert pos_first < pos_second < pos_third
 
 
 class TestQueryProcessorMultilingual:

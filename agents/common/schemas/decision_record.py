@@ -237,7 +237,7 @@ def generate_record_id(timestamp: datetime, domain: Domain, title: str) -> str:
 
 
 def generate_group_id(timestamp: datetime, domain: Domain, title: str) -> str:
-    """Generate a shared group ID for a phase chain"""
+    """Generate a shared group ID for related records (phase_chain or bundle)"""
     date_str = timestamp.strftime("%Y-%m-%d")
     words = title.lower().split()[:3]
     slug = "_".join(w for w in words if w.isalnum() or w.replace("_", "").isalnum())

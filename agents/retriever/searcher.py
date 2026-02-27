@@ -140,7 +140,7 @@ class Searcher:
         if expand_phases:
             all_results = await self._expand_phase_chains(all_results)
 
-        return all_results
+        return all_results[:topk]
 
     async def _search_single(self, query_text: str, topk: int) -> List[SearchResult]:
         """Execute a single search query via the appropriate pipeline."""
@@ -324,7 +324,7 @@ class Searcher:
         for group_id in groups_to_expand:
             # Search by group_id (embedded in payload.text)
             siblings = await self._search_single(f"Group: {group_id}", topk=10)
-            chain = [s for s in siblings if s.group_id == group_id]
+            chain = [s for s in siblings if s.group_id == group_id and s.record_id not in existing_ids]
             # Sort by phase_seq
             chain.sort(key=lambda s: s.phase_seq if s.phase_seq is not None else 0)
             group_siblings[group_id] = chain
