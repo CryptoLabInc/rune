@@ -16,4 +16,4 @@ Usage:
     from agents.retriever import Searcher, Synthesizer
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
