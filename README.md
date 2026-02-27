@@ -248,10 +248,10 @@ Validate infrastructure and switch to Active state
 /rune:activate
 ```
 
-### `/rune:remember <context>`
+### `/rune:memorize <context>`
 Manually store context that Scribe's automatic capture missed (Active state only)
 ```
-/rune:remember "We chose PostgreSQL for better JSON support"
+/rune:memorize "We chose PostgreSQL for better JSON support"
 ```
 
 ### `/rune:recall <query>`
@@ -286,9 +286,9 @@ Or use the explicit command as an override:
 ```
 
 ### Manual Context Storage
-If Scribe missed something, use `/rune:remember` to force-store:
+If Scribe missed something, use `/rune:memorize` to force-store:
 ```
-/rune:remember "We chose PostgreSQL for better JSON support"
+/rune:memorize "We chose PostgreSQL for better JSON support"
 ```
 
 ## Security

@@ -342,9 +342,9 @@ export function registerRuneCommands(api: OpenClawPluginApi): void {
     },
   });
 
-  // ── rune-remember ────────────────────────────────────────────────────
+  // ── rune-memorize ────────────────────────────────────────────────────
   api.registerCommand({
-    name: "rune-remember",
+    name: "rune-memorize",
     description: "Store organizational context to encrypted memory",
     acceptsArgs: true,
     handler: async (ctx) => {
@@ -354,7 +354,7 @@ export function registerRuneCommands(api: OpenClawPluginApi): void {
 
       const text = ctx.args?.trim() ?? "";
       if (!text) {
-        return { text: "Usage: /rune-remember <context to store>\nExample: /rune-remember We chose PostgreSQL for ACID guarantees" };
+        return { text: "Usage: /rune-memorize <context to store>\nExample: /rune-memorize We chose PostgreSQL for ACID guarantees" };
       }
 
       const client = getMcpClient();

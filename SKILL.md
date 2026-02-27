@@ -105,7 +105,7 @@ Recommendations:
   - Check full status: scripts/check-infrastructure.sh
 ```
 
-### `/rune:remember <context>`
+### `/rune:memorize <context>`
 **Purpose**: Manually store organizational context when Scribe's automatic capture missed it or the user wants to force-store specific information.
 
 **When to use**: Scribe automatically captures significant decisions from conversation (see Automatic Behavior below). This command is an **override** for cases where:
@@ -119,7 +119,7 @@ Recommendations:
 
 **Example**:
 ```
-/rune:remember "We chose PostgreSQL over MongoDB for better ACID guarantees"
+/rune:memorize "We chose PostgreSQL over MongoDB for better ACID guarantees"
 ```
 
 ### `/rune:recall <query>`
