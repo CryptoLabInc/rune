@@ -6,9 +6,9 @@ set -e
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_NAME="rune"
-MARKETPLACE="local"
+MARKETPLACE="cryptolab-rune"
 PLUGIN_KEY="${PLUGIN_NAME}@${MARKETPLACE}"
-VERSION="0.1.0"
+VERSION="0.1.1"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -87,34 +87,6 @@ with open(path, 'w') as f:
     json.dump(data, f, indent=2)
 "
 print_info "Enabled in settings.json: enabledPlugins['$PLUGIN_KEY'] = true"
-
-# ---- 4. Register local marketplace if not present ----
-MARKETPLACES_FILE="$PLUGINS_DIR/known_marketplaces.json"
-if [ -f "$MARKETPLACES_FILE" ]; then
-    python3 -c "
-import json
-
-path = '$MARKETPLACES_FILE'
-
-with open(path, 'r') as f:
-    data = json.load(f)
-
-if 'local' not in data:
-    data['local'] = {
-        'source': {
-            'source': 'local',
-            'path': '$HOME/.claude/plugins/cache/local'
-        },
-        'installLocation': '$HOME/.claude/plugins/cache/local',
-        'lastUpdated': '$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")'
-    }
-    with open(path, 'w') as f:
-        json.dump(data, f, indent=2)
-    print('  Added local marketplace')
-else:
-    print('  Local marketplace already registered')
-"
-fi
 
 echo ""
 print_info "Rune plugin registered in Claude Code"

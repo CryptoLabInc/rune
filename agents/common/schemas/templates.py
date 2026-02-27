@@ -169,6 +169,14 @@ def render_payload_text(record: "DecisionRecord") -> str:
     if record.why.missing_info:
         rationale += "\n\nMissing Information:\n" + "\n".join(f"- {m}" for m in record.why.missing_info)
 
+    # Group info (phase_chain or bundle)
+    phase_line = ""
+    if getattr(record, 'group_id', None):
+        seq = (getattr(record, 'phase_seq', None) or 0) + 1
+        total = getattr(record, 'phase_total', None) or "?"
+        gtype = getattr(record, 'group_type', None) or "phase_chain"
+        phase_line = f"\nPart: {seq} of {total} | Type: {gtype} | Group: {record.group_id}"
+
     # Render template
     text = PAYLOAD_TEMPLATE.format(
         title=record.title,
@@ -190,6 +198,15 @@ def render_payload_text(record: "DecisionRecord") -> str:
         links=links,
         tags=tags,
     )
+
+    # Insert phase line after ID line
+    if phase_line:
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if line.startswith("ID: "):
+                lines.insert(i + 1, phase_line.lstrip("\n"))
+                break
+        text = "\n".join(lines)
 
     # Clean up multiple blank lines
     while "\n\n\n" in text:

@@ -22,6 +22,7 @@ from .decision_record import (
     Certainty,
     ReviewState,
     generate_record_id,
+    generate_group_id,
 )
 from .templates import render_payload_text, render_display_text, PAYLOAD_TEMPLATE, PAYLOAD_HEADERS
 
@@ -43,6 +44,7 @@ __all__ = [
     "Certainty",
     "ReviewState",
     "generate_record_id",
+    "generate_group_id",
     "render_payload_text",
     "render_display_text",
     "PAYLOAD_TEMPLATE",

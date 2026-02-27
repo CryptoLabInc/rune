@@ -198,7 +198,7 @@ class TestRecordBuilderMultilingual:
 
         extractor = Mock(spec=LLMExtractor)
         extractor.is_available = True
-        extractor.extract.return_value = ExtractedFields(
+        fields = ExtractedFields(
             title="Adopt PostgreSQL for database",
             rationale="Better JSON support and team familiarity with PostgreSQL",
             problem="Need a reliable database for financial transactions",
@@ -207,6 +207,8 @@ class TestRecordBuilderMultilingual:
             status_hint="accepted",
             tags=["database", "postgresql"],
         )
+        extractor.extract.return_value = fields
+        extractor.extract_single.return_value = fields
         return extractor
 
     @pytest.fixture
@@ -252,7 +254,7 @@ class TestRecordBuilderMultilingual:
         language = LanguageInfo(code="ko", confidence=0.95, script="Hangul")
         record = builder_with_llm.build(korean_raw_event, sample_detection, language=language)
 
-        mock_llm_extractor.extract.assert_called_once()
+        mock_llm_extractor.extract_single.assert_called_once()
         assert record is not None
         assert record.title == "Adopt PostgreSQL for database"
 
@@ -286,7 +288,7 @@ class TestRecordBuilderMultilingual:
         record = builder_with_llm.build(event, sample_detection)
 
         # LLM extractor SHOULD be called for English too (preferred for all languages)
-        mock_llm_extractor.extract.assert_called_once()
+        mock_llm_extractor.extract_single.assert_called_once()
         assert record is not None
         assert record.title == "Adopt PostgreSQL for database"
 
@@ -307,7 +309,7 @@ class TestRecordBuilderMultilingual:
         record = builder_with_llm.build(event, sample_detection, language=language)
 
         # LLM extractor SHOULD be called regardless of language
-        mock_llm_extractor.extract.assert_called_once()
+        mock_llm_extractor.extract_single.assert_called_once()
         assert record is not None
         assert record.title == "Adopt PostgreSQL for database"
 
@@ -362,10 +364,12 @@ class TestRecordBuilderMultilingual:
 
         extractor = Mock()
         extractor.is_available = True
-        extractor.extract.return_value = ExtractedFields(
+        fields = ExtractedFields(
             title="Consider using Redis",
             status_hint="proposed",
         )
+        extractor.extract.return_value = fields
+        extractor.extract_single.return_value = fields
 
         builder = RecordBuilder(
             default_sensitivity=Sensitivity.INTERNAL,
@@ -414,7 +418,7 @@ class TestRecordBuilderMultilingual:
         record = builder_with_llm.build(event, sample_detection, language=language)
 
         # LLM should handle typos/informal language gracefully
-        mock_llm_extractor.extract.assert_called_once()
+        mock_llm_extractor.extract_single.assert_called_once()
         assert record is not None
         assert record.title == "Adopt PostgreSQL for database"
 
@@ -496,3 +500,198 @@ class TestPayloadTextGeneration:
         assert "MySQL" in payload_text
         assert "MongoDB" in payload_text
         assert "(chosen)" in payload_text
+
+
+class TestBuildPhases:
+    """Tests for RecordBuilder.build_phases()"""
+
+    @pytest.fixture
+    def sample_detection(self):
+        from agents.scribe.detector import DetectionResult
+
+        return DetectionResult(
+            is_significant=True,
+            confidence=0.85,
+            matched_pattern="We decided",
+            category="architecture",
+            domain="architecture",
+            priority="high",
+        )
+
+    @pytest.fixture
+    def sample_raw_event(self):
+        from agents.scribe.record_builder import RawEvent
+
+        return RawEvent(
+            text='We decided to use PostgreSQL because "better JSON support"',
+            user="U12345",
+            channel="architecture",
+            timestamp="1706799600",
+            source="slack",
+        )
+
+    def test_single_extraction_returns_one_record(self, sample_raw_event, sample_detection):
+        """build_phases returns 1-element list for single extraction"""
+        from agents.scribe.record_builder import RecordBuilder
+        from agents.scribe.llm_extractor import ExtractedFields, ExtractionResult
+        from agents.common.schemas import Sensitivity
+        from unittest.mock import Mock
+
+        extractor = Mock()
+        extractor.is_available = True
+        extractor.extract.return_value = ExtractionResult(
+            group_title="",
+            group_type="",
+            status_hint="accepted",
+            tags=["database"],
+            single=ExtractedFields(
+                title="Adopt PostgreSQL",
+                rationale="Better JSON support",
+                problem="Need a database",
+                status_hint="accepted",
+                tags=["database"],
+            ),
+            phases=None,
+        )
+
+        builder = RecordBuilder(
+            default_sensitivity=Sensitivity.INTERNAL,
+            llm_extractor=extractor,
+        )
+
+        records = builder.build_phases(sample_raw_event, sample_detection)
+
+        assert len(records) == 1
+        assert records[0].title == "Adopt PostgreSQL"
+        assert records[0].group_id is None
+
+    def test_multi_phase_returns_linked_records(self, sample_raw_event, sample_detection):
+        """build_phases returns multiple records with consistent group fields for phase chain"""
+        from agents.scribe.record_builder import RecordBuilder
+        from agents.scribe.llm_extractor import PhaseExtractedFields, ExtractionResult
+        from agents.common.schemas import Sensitivity
+        from unittest.mock import Mock
+
+        phases = [
+            PhaseExtractedFields(
+                phase_title="Market Analysis",
+                phase_decision="Target mid-market SaaS companies",
+                phase_rationale="Largest underserved segment",
+                phase_problem="Need to identify target market",
+                tags=["market"],
+            ),
+            PhaseExtractedFields(
+                phase_title="Pricing Strategy",
+                phase_decision="Freemium with usage-based tiers",
+                phase_rationale="Lowers adoption barrier",
+                phase_problem="Need a pricing model",
+                tags=["pricing"],
+            ),
+            PhaseExtractedFields(
+                phase_title="Roadmap",
+                phase_decision="Ship MVP in Q1, enterprise in Q2",
+                phase_rationale="Fast iteration cycle",
+                phase_problem="Need delivery timeline",
+                tags=["roadmap"],
+            ),
+        ]
+
+        extractor = Mock()
+        extractor.is_available = True
+        extractor.extract.return_value = ExtractionResult(
+            group_title="PLG Strategy",
+            group_type="phase_chain",
+            status_hint="accepted",
+            tags=["strategy"],
+            single=None,
+            phases=phases,
+        )
+
+        builder = RecordBuilder(
+            default_sensitivity=Sensitivity.INTERNAL,
+            llm_extractor=extractor,
+        )
+
+        records = builder.build_phases(sample_raw_event, sample_detection)
+
+        assert len(records) == 3
+
+        # All share the same group_id
+        group_ids = {r.group_id for r in records}
+        assert len(group_ids) == 1
+        assert None not in group_ids
+
+        # All have correct group_type
+        assert all(r.group_type == "phase_chain" for r in records)
+
+        # phase_seq is sequential (0, 1, 2)
+        seqs = [r.phase_seq for r in records]
+        assert seqs == [0, 1, 2]
+
+        # All have phase_total == 3
+        assert all(r.phase_total == 3 for r in records)
+
+        # Record IDs are unique with _p suffix
+        ids = [r.id for r in records]
+        assert len(ids) == len(set(ids))
+        assert any("_p0" in rid for rid in ids)
+        assert any("_p1" in rid for rid in ids)
+
+    def test_bundle_uses_b_suffix(self, sample_raw_event, sample_detection):
+        """build_phases uses _b suffix for bundle group type"""
+        from agents.scribe.record_builder import RecordBuilder
+        from agents.scribe.llm_extractor import PhaseExtractedFields, ExtractionResult
+        from agents.common.schemas import Sensitivity
+        from unittest.mock import Mock
+
+        phases = [
+            PhaseExtractedFields(
+                phase_title="Auth Method",
+                phase_decision="Use OAuth 2.0",
+                phase_rationale="Industry standard",
+                phase_problem="Authentication approach",
+            ),
+            PhaseExtractedFields(
+                phase_title="Token Storage",
+                phase_decision="HTTP-only cookies",
+                phase_rationale="XSS protection",
+                phase_problem="Where to store tokens",
+            ),
+        ]
+
+        extractor = Mock()
+        extractor.is_available = True
+        extractor.extract.return_value = ExtractionResult(
+            group_title="Auth Architecture",
+            group_type="bundle",
+            status_hint="accepted",
+            tags=["auth"],
+            single=None,
+            phases=phases,
+        )
+
+        builder = RecordBuilder(
+            default_sensitivity=Sensitivity.INTERNAL,
+            llm_extractor=extractor,
+        )
+
+        records = builder.build_phases(sample_raw_event, sample_detection)
+
+        assert len(records) == 2
+        assert all(r.group_type == "bundle" for r in records)
+
+        ids = [r.id for r in records]
+        assert any("_b0" in rid for rid in ids)
+        assert any("_b1" in rid for rid in ids)
+
+    def test_no_llm_falls_back_to_single(self, sample_raw_event, sample_detection):
+        """build_phases returns single record when LLM unavailable"""
+        from agents.scribe.record_builder import RecordBuilder
+        from agents.common.schemas import Sensitivity
+
+        builder = RecordBuilder(default_sensitivity=Sensitivity.INTERNAL)
+
+        records = builder.build_phases(sample_raw_event, sample_detection)
+
+        assert len(records) == 1
+        assert records[0].group_id is None
