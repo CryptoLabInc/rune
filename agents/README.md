@@ -47,25 +47,26 @@ Both Scribe and Retriever use `LLMClient` for all LLM calls. The provider is con
 
 ## How Agents Work with Rune
 
-Agents interact with organizational memory through two MCP tools exposed by envector-mcp-server:
+Agents interact with organizational memory through MCP tools exposed by envector-mcp-server:
 
+- **`capture`**: Store organizational decisions via 3-tier pipeline (embedding similarity → LLM filter → LLM extraction → FHE-encrypted storage).
+- **`recall`**: Search and synthesize answers from shared team memory. Uses Vault-secured pipeline — secret key never leaves Vault. Returns LLM-synthesized answers with source citations.
 - **`search`**: Search the operator's own encrypted vector data. Secret key is held locally by the MCP server runtime.
-- **`remember`**: Recall from shared team memory. Secret key is held exclusively by Rune-Vault server — never loaded into the MCP server. This isolation prevents agent tampering attacks.
 
 ### Capture Workflow (Scribe)
 
 1. Detect significant context (pattern matching on conversation)
-2. Generate embedding for the context
-3. Call `insert` tool → encrypt and store in enVector Cloud
+2. Call `capture` tool → 3-tier pipeline → encrypt and store in enVector Cloud
 
 ### Retrieval Workflow (Retriever)
 
-1. Parse user query
-2. Call `remember` tool, which orchestrates:
-   - Embed query, run encrypted similarity scoring on enVector Cloud → result ciphertext
+1. Parse user query (intent detection, entity extraction, query expansion)
+2. Call `recall` tool, which orchestrates:
+   - Multi-query encrypted similarity scoring on enVector Cloud → result ciphertext
    - Rune-Vault decrypts result ciphertext with secret key, selects top-k
-   - Retrieve metadata for top-k indices from enVector Cloud
-3. Synthesize answer from retrieved context
+   - Retrieve and decrypt metadata for top-k indices
+   - LLM synthesis with certainty respect
+3. Return synthesized answer with source citations
 
 ## Next Steps
 
