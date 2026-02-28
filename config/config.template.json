@@ -7,9 +7,29 @@
     "endpoint": "ENVECTOR_ENDPOINT",
     "api_key": "ENVECTOR_API_KEY"
   },
+  "llm": {
+    "provider": "anthropic",
+    "tier2_provider": "anthropic",
+    "anthropic_api_key": "",
+    "anthropic_model": "claude-sonnet-4-20250514",
+    "openai_api_key": "",
+    "openai_model": "gpt-4o-mini",
+    "openai_tier2_model": "",
+    "google_api_key": "",
+    "google_model": "gemini-2.0-flash-exp",
+    "google_tier2_model": ""
+  },
+  "scribe": {
+    "tier2_enabled": true,
+    "tier2_model": "claude-haiku-4-5-20251001"
+  },
+  "retriever": {
+    "topk": 10,
+    "confidence_threshold": 0.5
+  },
   "state": "dormant",
   "metadata": {
-    "configVersion": "1.0",
+    "configVersion": "2.0",
     "lastUpdated": null,
     "teamId": null
   }

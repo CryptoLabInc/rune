@@ -66,6 +66,15 @@ The config file also supports optional sections for agent configuration:
     "mode": "femb",
     "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
   },
+  "llm": {
+    "provider": "auto",
+    "tier2_provider": "auto",
+    "anthropic_model": "claude-sonnet-4-20250514",
+    "openai_model": "gpt-4o-mini",
+    "openai_tier2_model": "",
+    "google_model": "gemini-2.0-flash-exp",
+    "google_tier2_model": ""
+  },
   "scribe": {
     "slack_webhook_port": 8080,
     "similarity_threshold": 0.35,
@@ -75,13 +84,18 @@ The config file also supports optional sections for agent configuration:
   },
   "retriever": {
     "topk": 10,
-    "confidence_threshold": 0.5,
-    "anthropic_model": "claude-sonnet-4-20250514"
+    "confidence_threshold": 0.5
   }
 }
 ```
 
-All optional sections have sensible defaults. See `agents/common/config.py` for the full schema.
+`llm.provider` / `llm.tier2_provider` values:
+- `"anthropic"`: force Anthropic models
+- `"openai"`: force OpenAI models
+- `"google"`: force Google Gemini models
+- `"auto"`: infer from MCP client identity (`clientInfo.name`) when available
+
+All optional sections have sensible defaults. LLM API keys can be set via environment variables instead of the config file. See `agents/common/config.py` for the full schema.
 
 ## Manual Configuration
 
@@ -132,6 +146,15 @@ export RUNEVAULT_TOKEN="your-vault-token"
 # enVector Cloud
 export ENVECTOR_ENDPOINT="runestone-xxx.clusters.envector.io"
 export ENVECTOR_API_KEY="your-api-key"
+
+# LLM provider routing (optional)
+export RUNE_LLM_PROVIDER="anthropic"  # or "openai" or "google"
+export RUNE_TIER2_LLM_PROVIDER="anthropic"  # defaults to RUNE_LLM_PROVIDER
+export ANTHROPIC_API_KEY="your-anthropic-key"
+# or
+export OPENAI_API_KEY="your-openai-key"
+# or
+export GOOGLE_API_KEY="your-google-key"  # also accepts GEMINI_API_KEY
 ```
 
 The plugin will check environment variables if `~/.rune/config.json` doesn't exist.
