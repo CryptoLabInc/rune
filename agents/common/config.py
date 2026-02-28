@@ -8,8 +8,6 @@ import os
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional
-
 
 # Default config paths
 CONFIG_DIR = Path.home() / ".rune"
@@ -46,6 +44,21 @@ class EmbeddingConfig:
 
 
 @dataclass
+class LLMConfig:
+    """Shared LLM provider configuration across all agents"""
+    provider: str = "anthropic"
+    tier2_provider: str = "anthropic"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-20250514"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_tier2_model: str = ""
+    google_api_key: str = ""
+    google_model: str = "gemini-2.0-flash-exp"
+    google_tier2_model: str = ""
+
+
+@dataclass
 class ScribeConfig:
     """Scribe agent configuration"""
     slack_webhook_port: int = 8080
@@ -63,8 +76,6 @@ class RetrieverConfig:
     """Retriever agent configuration"""
     topk: int = 10
     confidence_threshold: float = 0.5
-    anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-20250514"
 
 
 @dataclass
@@ -73,9 +84,11 @@ class RuneConfig:
     vault: VaultConfig = field(default_factory=VaultConfig)
     envector: EnVectorConfig = field(default_factory=EnVectorConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
     scribe: ScribeConfig = field(default_factory=ScribeConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     state: str = "dormant"  # "active" or "dormant"
+    _env_sourced_keys: set = field(default_factory=set, repr=False)
 
 
 def _parse_vault_config(data: dict) -> VaultConfig:
@@ -121,13 +134,54 @@ def _parse_scribe_config(data: dict) -> ScribeConfig:
 
 
 def _parse_retriever_config(data: dict) -> RetrieverConfig:
-    """Parse retriever section from config dict"""
+    """Parse retriever section from config dict (non-LLM fields only)"""
     retriever_data = data.get("retriever", {})
     return RetrieverConfig(
         topk=retriever_data.get("topk", 10),
         confidence_threshold=retriever_data.get("confidence_threshold", 0.5),
+    )
+
+
+def _parse_llm_config(data: dict) -> LLMConfig:
+    """Parse LLM configuration with backward-compatible migration.
+
+    Reads from ``data["llm"]`` first. If that section is absent, falls back
+    to reading LLM-specific keys from ``data["retriever"]`` and
+    ``data["scribe"]["tier2_provider"]`` for backward compatibility with
+    configs written before the ``llm`` section existed.
+    """
+    llm_data = data.get("llm")
+
+    if llm_data is not None:
+        # New-style config: read directly from llm section
+        return LLMConfig(
+            provider=llm_data.get("provider", "anthropic"),
+            tier2_provider=llm_data.get("tier2_provider", "anthropic"),
+            anthropic_api_key=llm_data.get("anthropic_api_key", ""),
+            anthropic_model=llm_data.get("anthropic_model", "claude-sonnet-4-20250514"),
+            openai_api_key=llm_data.get("openai_api_key", ""),
+            openai_model=llm_data.get("openai_model", "gpt-4o-mini"),
+            openai_tier2_model=llm_data.get("openai_tier2_model", ""),
+            google_api_key=llm_data.get("google_api_key", ""),
+            google_model=llm_data.get("google_model", "gemini-2.0-flash-exp"),
+            google_tier2_model=llm_data.get("google_tier2_model", ""),
+        )
+
+    # Migration: fall back to retriever + scribe fields
+    retriever_data = data.get("retriever", {})
+    scribe_data = data.get("scribe", {})
+
+    return LLMConfig(
+        provider=retriever_data.get("llm_provider", "anthropic"),
+        tier2_provider=scribe_data.get("tier2_provider", "anthropic"),
         anthropic_api_key=retriever_data.get("anthropic_api_key", ""),
         anthropic_model=retriever_data.get("anthropic_model", "claude-sonnet-4-20250514"),
+        openai_api_key=retriever_data.get("openai_api_key", ""),
+        openai_model=retriever_data.get("openai_model", "gpt-4o-mini"),
+        openai_tier2_model="",
+        google_api_key=retriever_data.get("google_api_key", ""),
+        google_model=retriever_data.get("google_model", "gemini-2.0-flash-exp"),
+        google_tier2_model="",
     )
 
 
@@ -151,6 +205,7 @@ def load_config() -> RuneConfig:
             config.vault = _parse_vault_config(data)
             config.envector = _parse_envector_config(data)
             config.embedding = _parse_embedding_config(data)
+            config.llm = _parse_llm_config(data)
             config.scribe = _parse_scribe_config(data)
             config.retriever = _parse_retriever_config(data)
             config.state = data.get("state", "dormant")
@@ -183,10 +238,23 @@ def load_config() -> RuneConfig:
     if os.getenv("NOTION_SIGNING_SECRET"):
         config.scribe.notion_signing_secret = os.getenv("NOTION_SIGNING_SECRET")
 
-    if os.getenv("ANTHROPIC_API_KEY"):
-        config.retriever.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-    if os.getenv("ANTHROPIC_MODEL"):
-        config.retriever.anthropic_model = os.getenv("ANTHROPIC_MODEL")
+    # LLM env var overrides (target config.llm, track env-sourced keys)
+    _env_llm_map = {
+        "ANTHROPIC_API_KEY": "anthropic_api_key",
+        "ANTHROPIC_MODEL": "anthropic_model",
+        "OPENAI_API_KEY": "openai_api_key",
+        "OPENAI_MODEL": "openai_model",
+        "GOOGLE_API_KEY": "google_api_key",
+        "GEMINI_API_KEY": "google_api_key",
+        "GOOGLE_MODEL": "google_model",
+        "RUNE_LLM_PROVIDER": "provider",
+        "RUNE_TIER2_LLM_PROVIDER": "tier2_provider",
+    }
+    for env_var, attr in _env_llm_map.items():
+        val = os.getenv(env_var)
+        if val:
+            setattr(config.llm, attr, val)
+            config._env_sourced_keys.add(attr)
 
     if os.getenv("RUNE_STATE"):
         config.state = os.getenv("RUNE_STATE")
@@ -195,8 +263,34 @@ def load_config() -> RuneConfig:
 
 
 def save_config(config: RuneConfig) -> None:
-    """Save configuration to file"""
+    """Save configuration to file.
+
+    API key fields that were sourced from environment variables are written
+    as empty strings so that secrets are not persisted to disk.
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+    env_sourced = getattr(config, "_env_sourced_keys", set())
+
+    # Build llm section, blanking out env-sourced API key fields
+    _llm_api_key_fields = {
+        "anthropic_api_key", "openai_api_key", "google_api_key",
+    }
+    llm_section = {
+        "provider": config.llm.provider,
+        "tier2_provider": config.llm.tier2_provider,
+        "anthropic_api_key": config.llm.anthropic_api_key,
+        "anthropic_model": config.llm.anthropic_model,
+        "openai_api_key": config.llm.openai_api_key,
+        "openai_model": config.llm.openai_model,
+        "openai_tier2_model": config.llm.openai_tier2_model,
+        "google_api_key": config.llm.google_api_key,
+        "google_model": config.llm.google_model,
+        "google_tier2_model": config.llm.google_tier2_model,
+    }
+    for key in _llm_api_key_fields:
+        if key in env_sourced:
+            llm_section[key] = ""
 
     data = {
         "vault": {
@@ -211,6 +305,7 @@ def save_config(config: RuneConfig) -> None:
             "mode": config.embedding.mode,
             "model": config.embedding.model,
         },
+        "llm": llm_section,
         "scribe": {
             "slack_webhook_port": config.scribe.slack_webhook_port,
             "similarity_threshold": config.scribe.similarity_threshold,
@@ -224,8 +319,6 @@ def save_config(config: RuneConfig) -> None:
         "retriever": {
             "topk": config.retriever.topk,
             "confidence_threshold": config.retriever.confidence_threshold,
-            "anthropic_api_key": config.retriever.anthropic_api_key,
-            "anthropic_model": config.retriever.anthropic_model,
         },
         "state": config.state,
     }
