@@ -460,25 +460,21 @@ class TestConversationCaptureDecisions:
         from agents.scribe.tier2_filter import Tier2Filter, FilterResult
 
         f = Tier2Filter.__new__(Tier2Filter)
-        f._api_key = "test-key"
+        f._provider = "anthropic"
         f._model = "claude-haiku-4-5-20251001"
-        f._client = Mock()
 
-        def side_effect_evaluate(**kwargs):
-            messages = kwargs.get("messages", [])
-            if messages:
-                user_content = messages[0]["content"]
-                # Extract the actual text from "Message: ..." format
-                text = user_content.replace("Message: ", "").split("\n(Tier 1")[0]
-                judgment = simulate_tier2_judgment(text)
-                response = Mock()
-                content_block = Mock()
-                content_block.text = json.dumps(judgment)
-                response.content = [content_block]
-                return response
-            return make_tier2_response(True, "default", "general")
+        mock_llm = Mock()
+        mock_llm.is_available = True
 
-        f._client.messages.create.side_effect = side_effect_evaluate
+        def side_effect_evaluate(prompt, **kwargs):
+            # Extract the actual text from "<message>\n...\n</message>" format
+            text = prompt.replace("<message>\n", "").split("\n</message>")[0]
+            text = text.split("\n(Tier 1")[0]
+            judgment = simulate_tier2_judgment(text)
+            return json.dumps(judgment)
+
+        mock_llm.generate.side_effect = side_effect_evaluate
+        f._llm = mock_llm
         return f
 
     def test_alice_capture_decisions(self, tier2_filter):
@@ -754,23 +750,21 @@ class TestFullPipelineFlow:
 
         # Tier 2: simulated judgment
         tier2 = Tier2Filter.__new__(Tier2Filter)
-        tier2._api_key = "test"
+        tier2._provider = "anthropic"
         tier2._model = "test"
-        tier2._client = Mock()
 
-        def tier2_side_effect(**kwargs):
-            messages = kwargs.get("messages", [])
-            if messages:
-                text = messages[0]["content"].replace("Message: ", "").split("\n(Tier 1")[0]
-                judgment = simulate_tier2_judgment(text)
-                response = Mock()
-                block = Mock()
-                block.text = json.dumps(judgment)
-                response.content = [block]
-                return response
-            return make_tier2_response(True, "default", "general")
+        mock_llm = Mock()
+        mock_llm.is_available = True
 
-        tier2._client.messages.create.side_effect = tier2_side_effect
+        def tier2_side_effect(prompt, **kwargs):
+            # Extract the actual text from "<message>\n...\n</message>" format
+            text = prompt.replace("<message>\n", "").split("\n</message>")[0]
+            text = text.split("\n(Tier 1")[0]
+            judgment = simulate_tier2_judgment(text)
+            return json.dumps(judgment)
+
+        mock_llm.generate.side_effect = tier2_side_effect
+        tier2._llm = mock_llm
 
         # Tier 3: RecordBuilder (regex fallback, no LLM)
         builder = RecordBuilder()

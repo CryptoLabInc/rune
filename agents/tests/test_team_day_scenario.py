@@ -663,27 +663,21 @@ class TestDayScenarioPipeline:
 
         # Tier 2 mock
         tier2 = Tier2Filter.__new__(Tier2Filter)
-        tier2._api_key = "test"
+        tier2._provider = "anthropic"
         tier2._model = "test"
-        tier2._client = Mock()
 
-        def tier2_call(**kwargs):
-            msgs = kwargs.get("messages", [])
-            if msgs:
-                text = msgs[0]["content"].replace("Message: ", "").split("\n(Tier 1")[0]
-                j = simulate_tier2(text)
-                resp = Mock()
-                blk = Mock()
-                blk.text = json.dumps(j)
-                resp.content = [blk]
-                return resp
-            resp = Mock()
-            blk = Mock()
-            blk.text = json.dumps({"capture": True, "reason": "default", "domain": "general"})
-            resp.content = [blk]
-            return resp
+        mock_llm = Mock()
+        mock_llm.is_available = True
 
-        tier2._client.messages.create.side_effect = tier2_call
+        def tier2_call(prompt, **kwargs):
+            # Extract the actual text from "<message>\n...\n</message>" format
+            text = prompt.replace("<message>\n", "").split("\n</message>")[0]
+            text = text.split("\n(Tier 1")[0]
+            j = simulate_tier2(text)
+            return json.dumps(j)
+
+        mock_llm.generate.side_effect = tier2_call
+        tier2._llm = mock_llm
 
         # Tier 3
         builder = RecordBuilder()

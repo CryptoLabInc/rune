@@ -13,6 +13,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from ..common.llm_client import LLMClient
+from ..common.llm_utils import parse_llm_json
+
 logger = logging.getLogger("rune.scribe.llm_extractor")
 
 # Texts longer than this threshold trigger multi-phase extraction
@@ -189,26 +192,29 @@ class LLMExtractor:
 
     def __init__(
         self,
+        llm_provider: str = "anthropic",
         anthropic_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        google_api_key: Optional[str] = None,
         model: str = "claude-sonnet-4-20250514",
     ):
-        self._api_key = anthropic_api_key
+        self._provider = llm_provider
         self._model = model
-        self._client = None
-
-        if anthropic_api_key:
-            try:
-                import anthropic
-                self._client = anthropic.Anthropic(api_key=anthropic_api_key)
-            except ImportError:
-                logger.warning("anthropic package not installed")
-            except Exception as e:
-                logger.warning("Failed to init Anthropic client: %s", e)
+        self._llm = LLMClient(
+            provider=llm_provider,
+            model=model,
+            anthropic_api_key=anthropic_api_key,
+            openai_api_key=openai_api_key,
+            google_api_key=google_api_key,
+        )
 
     @property
     def is_available(self) -> bool:
         """Check if LLM client is ready"""
-        return self._client is not None
+        return self._llm.is_available
+
+    def _generate(self, prompt: str, max_tokens: int) -> str:
+        return self._llm.generate(prompt, max_tokens=max_tokens)
 
     def extract(self, text: str) -> ExtractionResult:
         """Extract structured fields, auto-detecting split strategy.
@@ -281,12 +287,7 @@ class LLMExtractor:
         """Single-phase extraction (original logic)."""
         try:
             prompt = EXTRACTION_PROMPT.format(text=text)
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=512,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = response.content[0].text.strip()
+            raw = self._generate(prompt, max_tokens=512)
             return self._parse_single_response(raw)
         except Exception as e:
             logger.warning("Single extraction failed: %s", e)
@@ -295,13 +296,8 @@ class LLMExtractor:
     def _extract_phases(self, text: str) -> ExtractionResult:
         """Multi-phase extraction for long reasoning chains."""
         prompt = PHASE_EXTRACTION_PROMPT.format(text=text)
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.content[0].text.strip()
-        data = self._parse_json(raw)
+        raw = self._generate(prompt, max_tokens=2048)
+        data = parse_llm_json(raw)
 
         phases_data = data.get("phases", [])
         group_title = str(data.get("group_title", ""))[:60]
@@ -359,13 +355,8 @@ class LLMExtractor:
     def _extract_bundle(self, text: str) -> ExtractionResult:
         """Bundle extraction: split a single decision into detail facets."""
         prompt = BUNDLE_SPLIT_PROMPT.format(text=text)
-        response = self._client.messages.create(
-            model=self._model,
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.content[0].text.strip()
-        data = self._parse_json(raw)
+        raw = self._generate(prompt, max_tokens=2048)
+        data = parse_llm_json(raw)
 
         phases_data = data.get("phases", [])
         group_title = str(data.get("group_title", ""))[:60]
@@ -411,28 +402,9 @@ class LLMExtractor:
             phases=phases,
         )
 
-    def _parse_json(self, raw: str) -> dict:
-        """Parse JSON from LLM response, handling code fences."""
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            raw = "\n".join(lines)
-
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start >= 0 and end > start:
-                try:
-                    return json.loads(raw[start:end])
-                except json.JSONDecodeError:
-                    pass
-        return {}
-
     def _parse_single_response(self, raw: str) -> ExtractedFields:
         """Parse LLM JSON response into ExtractedFields."""
-        data = self._parse_json(raw)
+        data = parse_llm_json(raw)
         if not data:
             return ExtractedFields()
 
