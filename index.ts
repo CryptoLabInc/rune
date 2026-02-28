@@ -19,7 +19,7 @@ const plugin = {
   id: "rune",
   name: "Rune",
   description: "FHE-encrypted organizational memory for teams",
-  version: "0.1.0",
+  version: "0.1.1",
 
   register(api: OpenClawPluginApi) {
     // 1. Slash commands (/rune-status, /rune-configure, /rune-activate, etc.)

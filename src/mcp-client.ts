@@ -118,7 +118,7 @@ export class RuneMcpClient extends EventEmitter {
     const result = await this.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "openclaw-rune", version: "0.1.0" },
+      clientInfo: { name: "openclaw-rune", version: "0.1.1" },
     });
     this.logger.info(`rune-mcp: initialized — ${JSON.stringify(result)}`);
 
