@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from .searcher import SearchResult
 from .query_processor import ParsedQuery
+from ..common.llm_client import LLMClient
 
 logger = logging.getLogger("rune.retriever.synthesizer")
 
@@ -70,7 +71,7 @@ Found {count} relevant record(s):
 
 ---
 **Note**: This is a direct listing without LLM synthesis.
-Configure ANTHROPIC_API_KEY for natural language answers.
+Configure an LLM provider key (Anthropic/OpenAI) for natural language answers.
 """,
     "ko": """## "{query}" 검색 결과
 
@@ -80,7 +81,7 @@ Configure ANTHROPIC_API_KEY for natural language answers.
 
 ---
 **참고**: LLM 합성 없이 직접 목록을 표시합니다.
-자연어 답변을 위해 ANTHROPIC_API_KEY를 설정하세요.
+자연어 답변을 위해 LLM 제공자 키(Anthropic/OpenAI)를 설정하세요.
 """,
     "ja": """## "{query}" の検索結果
 
@@ -90,7 +91,7 @@ Configure ANTHROPIC_API_KEY for natural language answers.
 
 ---
 **注意**: LLM合成なしの直接リスティングです。
-自然言語での回答にはANTHROPIC_API_KEYを設定してください。
+自然言語での回答にはLLMプロバイダーキー(Anthropic/OpenAI)を設定してください。
 """,
 }
 
@@ -107,33 +108,36 @@ class Synthesizer:
 
     def __init__(
         self,
+        llm_provider: str = "anthropic",
         anthropic_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        google_api_key: Optional[str] = None,
         model: str = "claude-sonnet-4-20250514"
     ):
         """
         Initialize synthesizer.
 
         Args:
+            llm_provider: LLM provider to use
             anthropic_api_key: Anthropic API key (optional)
+            openai_api_key: OpenAI API key (optional)
+            google_api_key: Gemini API key (optional)
             model: Model to use for synthesis
         """
-        self._api_key = anthropic_api_key
+        self._provider = llm_provider
         self._model = model
-        self._client = None
-
-        if anthropic_api_key:
-            try:
-                import anthropic
-                self._client = anthropic.Anthropic(api_key=anthropic_api_key)
-            except ImportError:
-                logger.warning("anthropic package not installed")
-            except Exception as e:
-                logger.warning("Failed to init Anthropic client: %s", e)
+        self._llm = LLMClient(
+            provider=llm_provider,
+            model=model,
+            anthropic_api_key=anthropic_api_key,
+            openai_api_key=openai_api_key,
+            google_api_key=google_api_key,
+        )
 
     @property
     def has_llm(self) -> bool:
         """Check if LLM is available"""
-        return self._client is not None
+        return self._llm.is_available
 
     def synthesize(
         self,
@@ -197,16 +201,11 @@ class Synthesizer:
         )
 
         # Call LLM
-        response = self._client.messages.create(
-            model=self._model,
+        answer_text = self._llm.generate(
+            prompt,
             max_tokens=1024,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
             timeout=30.0,
         )
-
-        answer_text = response.content[0].text
 
         # Calculate confidence based on results
         confidence = self._calculate_confidence(results)

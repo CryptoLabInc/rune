@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ..common.language import LanguageInfo, detect_language
+from ..common.llm_client import LLMClient
+from ..common.llm_utils import parse_llm_json
 
 logger = logging.getLogger("rune.retriever.query")
 
@@ -156,26 +158,31 @@ JSON:"""
 
     def __init__(
         self,
+        llm_provider: str = "anthropic",
         anthropic_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        google_api_key: Optional[str] = None,
         model: str = "claude-sonnet-4-20250514",
     ):
         """Initialize query processor.
 
         Args:
-            anthropic_api_key: Optional API key for LLM-based multilingual parsing
-            model: Anthropic model to use
+            llm_provider: LLM provider to use
+            anthropic_api_key: Optional API key for Anthropic
+            openai_api_key: Optional API key for OpenAI
+            google_api_key: Optional API key for Gemini
+            model: Provider model to use
         """
-        self._llm_client = None
+        self._llm = None
         self._model = model
 
-        if anthropic_api_key:
-            try:
-                import anthropic
-                self._llm_client = anthropic.Anthropic(api_key=anthropic_api_key)
-            except ImportError:
-                pass
-            except Exception:
-                pass
+        self._llm = LLMClient(
+            provider=llm_provider,
+            model=model,
+            anthropic_api_key=anthropic_api_key,
+            openai_api_key=openai_api_key,
+            google_api_key=google_api_key,
+        )
 
     def parse(self, query: str) -> ParsedQuery:
         """
@@ -189,7 +196,7 @@ JSON:"""
         """
         language = detect_language(query)
 
-        if language.is_english or not self._llm_client:
+        if language.is_english or not self._llm or not self._llm.is_available:
             # English path: existing regex (unchanged)
             return self._parse_english(query, language)
         else:
@@ -231,14 +238,12 @@ JSON:"""
         """Parse non-English query using LLM for intent classification + translation."""
         try:
             prompt = self.QUERY_PARSE_PROMPT.format(query=query)
-            response = self._llm_client.messages.create(
-                model=self._model,
+            raw = self._llm.generate(
+                prompt,
                 max_tokens=256,
-                messages=[{"role": "user", "content": prompt}],
                 timeout=30.0,
             )
-            raw = response.content[0].text.strip()
-            result = self._parse_llm_query_response(raw)
+            result = parse_llm_json(raw)
 
             # Map intent string to enum
             intent_map = {v.value: v for v in QueryIntent}
@@ -274,25 +279,6 @@ JSON:"""
             logger.warning("LLM parsing failed: %s", e)
             # Fallback to regex parsing
             return self._parse_english(query, language)
-
-    def _parse_llm_query_response(self, raw: str) -> dict:
-        """Parse LLM JSON response for query analysis."""
-        if raw.startswith("```"):
-            lines = raw.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            raw = "\n".join(lines)
-
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start >= 0 and end > start:
-                try:
-                    return json.loads(raw[start:end])
-                except json.JSONDecodeError:
-                    return {}
-            return {}
 
     def _clean_query(self, query: str) -> str:
         """Clean and normalize query text"""
