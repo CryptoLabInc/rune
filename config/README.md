@@ -49,7 +49,7 @@ API key for enVector Cloud authentication.
 
 **Example**: `your-envector-api-key`
 
-> **Note**: The index name for team shared memory is managed by the Vault admin and distributed automatically at startup. All tools (`remember`, `capture`, `recall`) use the Vault-provided index name.
+> **Note**: The index name for team shared memory is managed by the Vault admin and distributed automatically at startup. All tools (`capture`, `recall`) use the Vault-provided index name.
 
 ### `state` (required)
 Plugin activation state. Values:

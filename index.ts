@@ -28,7 +28,7 @@ const plugin = {
     // 2. MCP server lifecycle (Python process management)
     api.registerService(createMcpService(api));
 
-    // 3. Agent tools (rune_remember, rune_capture, rune_recall)
+    // 3. Agent tools (rune_capture, rune_recall)
     registerRuneTools(api);
 
     // 4. Lifecycle hooks (auto-capture, auto-retrieve, context injection)

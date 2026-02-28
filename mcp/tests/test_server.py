@@ -89,7 +89,7 @@ async def test_low_level_tools_not_registered(mcp_server):
 
 
 # =========================================================================== #
-#  Fake Vault Client for testing remember / vault_status tools
+#  Fake Vault Client for testing vault_status tools
 # =========================================================================== #
 
 class FakeVaultClient(VaultClient):
@@ -133,7 +133,7 @@ class FakeVaultClient(VaultClient):
 def mcp_server_with_vault():
     """
     MCP server fixture with a fake Vault client injected,
-    enabling the `remember` and `vault_status` tools.
+    enabling the `vault_status` tool.
     """
     class FakeAdapterWithVault(EnVectorSDKAdapter):
         def __init__(self):
@@ -157,64 +157,12 @@ def mcp_server_with_vault():
         def invoke_search(self, index_name: str, query, topk: int):
             return [{"id": 1, "score": 0.9, "metadata": {"fieldA": "valueA"}}]
 
-        # --- new remember (score + remind) pipeline mocks ---
-        def call_score(self, index_name: str, query) -> Dict[str, Any]:
-            return {"ok": True, "encrypted_blobs": ["ZmFrZV9ibG9i"]}
-
-        def call_remind(self, index_name: str, indices: List[Dict[str, Any]], output_fields=None) -> Dict[str, Any]:
-            results = [{"metadata": f"memory_{entry['shard_idx']}_{entry['row_idx']}", "score": entry.get("score", 0.0)} for entry in indices]
-            return {"ok": True, "results": results}
-
     app = MCPServerApp(
         envector_adapter=FakeAdapterWithVault(),
         mcp_server_name="test-mcp-vault",
         embedding_adapter=FakeEmbeddingAdapter(),
         vault_client=FakeVaultClient(),
         vault_index_name="team-decisions",
-    )
-    return app.mcp
-
-
-@pytest.fixture
-def mcp_server_with_vault_no_index():
-    """
-    MCP server fixture with Vault but NO team index name configured.
-    Tests the case where old Vault doesn't provide index_name.
-    """
-    class FakeAdapterWithVault(EnVectorSDKAdapter):
-        def __init__(self):
-            pass
-
-        def invoke_get_index_list(self) -> List[str]:
-            return ["index_a", "index_b"]
-
-        def invoke_get_index_info(self, index_name: str) -> Dict[str, Any]:
-            if index_name not in ("index_a", "index_b"):
-                raise ValueError(f"Index '{index_name}' not found")
-            return {"index_name": index_name, "dim": 128, "row_count": 42}
-
-        def invoke_create_index(self, index_name: str, dim: int, index_params: Dict[str, Any] = None) -> Dict[str, Any]:
-            return {"index_name": index_name, "dim": dim, "index_params": index_params}
-
-        def invoke_insert(self, index_name: str, vectors, metadata=None):
-            return {"index_name": index_name, "vectors": vectors, "metadata": metadata}
-
-        def invoke_search(self, index_name: str, query, topk: int):
-            return [{"id": 1, "score": 0.9, "metadata": {"fieldA": "valueA"}}]
-
-        def call_score(self, index_name: str, query) -> Dict[str, Any]:
-            return {"ok": True, "encrypted_blobs": ["ZmFrZV9ibG9i"]}
-
-        def call_remind(self, index_name: str, indices: List[Dict[str, Any]], output_fields=None) -> Dict[str, Any]:
-            results = [{"metadata": f"memory_{entry['shard_idx']}_{entry['row_idx']}", "score": entry.get("score", 0.0)} for entry in indices]
-            return {"ok": True, "results": results}
-
-    app = MCPServerApp(
-        envector_adapter=FakeAdapterWithVault(),
-        mcp_server_name="test-mcp-vault-no-index",
-        embedding_adapter=FakeEmbeddingAdapter(),
-        vault_client=FakeVaultClient(),
-        vault_index_name=None,
     )
     return app.mcp
 
@@ -257,156 +205,6 @@ async def test_vault_status_without_vault(mcp_server):
         assert data.get("secure_search_available") is False
 
 
-# ----------- Remember Tool Tests ----------- #
-
-@pytest.mark.asyncio
-async def test_tools_list_contains_remember(mcp_server_with_vault):
-    async with Client(mcp_server_with_vault) as client:
-        tools = await client.list_tools()
-        names = [t.name for t in tools]
-        assert "remember" in names
-
-
-@pytest.mark.asyncio
-async def test_remember_happy_path(mcp_server_with_vault):
-    async with Client(mcp_server_with_vault) as client:
-        result = await client.call_tool(
-            "remember",
-            {
-                "index_name": "index_a",
-                "query": [0.1, 0.2, 0.3],
-                "topk": 2,
-                "request_id": "test_req_001",
-            }
-        )
-        data = getattr(result, "data", None) or getattr(result, "structured", None) \
-               or getattr(result, "structured_content", None)
-
-        assert data is not None, "No data returned from tool call"
-        assert data.get("ok") is True
-        assert isinstance(data.get("results"), list)
-        assert len(data["results"]) == 2
-        assert data.get("request_id") == "test_req_001"
-
-
-@pytest.mark.asyncio
-async def test_remember_with_text_query(mcp_server_with_vault):
-    """When a text query is given, the embedding adapter should be used."""
-    async with Client(mcp_server_with_vault) as client:
-        result = await client.call_tool(
-            "remember",
-            {
-                "index_name": "index_a",
-                "query": "what was the last decision?",
-                "topk": 1,
-            }
-        )
-        data = getattr(result, "data", None) or getattr(result, "structured", None) \
-               or getattr(result, "structured_content", None)
-
-        assert data is not None, "No data returned from tool call"
-        assert data.get("ok") is True
-
-
-@pytest.mark.asyncio
-async def test_remember_topk_exceeds_limit(mcp_server_with_vault):
-    """topk > 10 should be rejected by policy."""
-    async with Client(mcp_server_with_vault) as client:
-        result = await client.call_tool(
-            "remember",
-            {
-                "index_name": "index_a",
-                "query": [0.1, 0.2, 0.3],
-                "topk": 11,
-            }
-        )
-        data = getattr(result, "data", None) or getattr(result, "structured", None) \
-               or getattr(result, "structured_content", None)
-
-        assert data is not None, "No data returned from tool call"
-        assert data.get("ok") is False
-        assert "max" in data.get("error", "").lower() or "10" in data.get("error", "")
-
-
-@pytest.mark.asyncio
-async def test_remember_without_vault(mcp_server):
-    """When vault is not configured, remember should return an error."""
-    async with Client(mcp_server) as client:
-        result = await client.call_tool(
-            "remember",
-            {
-                "index_name": "index_a",
-                "query": [0.1, 0.2, 0.3],
-                "topk": 3,
-            }
-        )
-        data = getattr(result, "data", None) or getattr(result, "structured", None) \
-               or getattr(result, "structured_content", None)
-
-        assert data is not None, "No data returned from tool call"
-        assert data.get("ok") is False
-        assert "vault" in data.get("error", "").lower()
-
-
-# ----------- Vault Index Name Tests ----------- #
-
-@pytest.mark.asyncio
-async def test_remember_uses_vault_index_when_omitted(mcp_server_with_vault):
-    """When index_name is omitted, the vault-provisioned team index should be used."""
-    async with Client(mcp_server_with_vault) as client:
-        result = await client.call_tool(
-            "remember",
-            {
-                "query": [0.1, 0.2, 0.3],
-                "topk": 2,
-            }
-        )
-        data = getattr(result, "data", None) or getattr(result, "structured", None) \
-               or getattr(result, "structured_content", None)
-
-        assert data is not None, "No data returned from tool call"
-        assert data.get("ok") is True
-        assert isinstance(data.get("results"), list)
-
-
-@pytest.mark.asyncio
-async def test_remember_explicit_index_overrides_vault(mcp_server_with_vault):
-    """When index_name is explicitly provided, it should override the vault default."""
-    async with Client(mcp_server_with_vault) as client:
-        result = await client.call_tool(
-            "remember",
-            {
-                "index_name": "index_a",
-                "query": [0.1, 0.2, 0.3],
-                "topk": 2,
-            }
-        )
-        data = getattr(result, "data", None) or getattr(result, "structured", None) \
-               or getattr(result, "structured_content", None)
-
-        assert data is not None, "No data returned from tool call"
-        assert data.get("ok") is True
-
-
-@pytest.mark.asyncio
-async def test_remember_fails_when_no_index_and_no_vault(mcp_server_with_vault_no_index):
-    """When no vault index is configured and index_name is omitted, should return error."""
-    async with Client(mcp_server_with_vault_no_index) as client:
-        result = await client.call_tool(
-            "remember",
-            {
-                "query": [0.1, 0.2, 0.3],
-                "topk": 2,
-            }
-        )
-        data = getattr(result, "data", None) or getattr(result, "structured", None) \
-               or getattr(result, "structured_content", None)
-
-        assert data is not None, "No data returned from tool call"
-        assert data.get("ok") is False
-        assert "index_name" in data.get("error", "").lower() or "required" in data.get("error", "").lower()
-
-
 @pytest.mark.asyncio
 async def test_vault_status_includes_team_index_name(mcp_server_with_vault):
     """vault_status should expose the team_index_name field."""
@@ -418,9 +216,6 @@ async def test_vault_status_includes_team_index_name(mcp_server_with_vault):
         assert data is not None, "No data returned from tool call"
         assert data.get("ok") is True
         assert data.get("team_index_name") == "team-decisions"
-
-
-# ----------- Remember / Vault Status / Index Name Tool Tests Finished ----------- #
 
 
 # ----------- Degraded Mode Tests (no enVector adapter) ----------- #
@@ -439,25 +234,9 @@ async def test_degraded_server_starts_and_lists_tools(mcp_server_degraded):
         tools = await client.list_tools()
         names = [t.name for t in tools]
         assert "reload_pipelines" in names
-        assert "remember" in names
         assert "capture" in names
         assert "recall" in names
         assert "vault_status" in names
-
-
-@pytest.mark.asyncio
-async def test_remember_returns_error_when_no_adapter(mcp_server_degraded):
-    """remember tool should return graceful error when enVector adapter is None."""
-    async with Client(mcp_server_degraded) as client:
-        result = await client.call_tool(
-            "remember",
-            {"index_name": "test", "query": [0.1, 0.2], "topk": 1},
-        )
-        data = getattr(result, "data", None) or getattr(result, "structured", None) \
-               or getattr(result, "structured_content", None)
-        assert data is not None
-        assert data.get("ok") is False
-        assert "adapter" in data.get("error", "").lower()
 
 
 # ----------- Reload Pipelines Tool Tests ----------- #
