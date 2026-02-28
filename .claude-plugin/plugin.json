@@ -1,7 +1,7 @@
 {
   "name": "rune",
   "description": "FHE-encrypted organizational memory for teams. Capture and retrieve institutional knowledge with zero-knowledge privacy.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": {
     "name": "Sunchul Jung",
     "email": "zotanika@cryptolab.co.kr"

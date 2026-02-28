@@ -6,9 +6,10 @@ set -e
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="$HOME/.rune/config.json"
-MCP_NAME="rune-envector"
+MCP_NAME="rune"
 
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
@@ -27,6 +28,28 @@ print_warn() {
     echo -e "${YELLOW}⚠${NC} $1"
 }
 
+# --- Uninstall mode ---
+if [ "${1:-}" = "uninstall" ] || [ "${1:-}" = "--uninstall" ]; then
+    print_header "Rune Uninstaller for Codex"
+
+    if command -v codex >/dev/null 2>&1; then
+        codex mcp remove "$MCP_NAME" >/dev/null 2>&1 && \
+            print_info "Removed MCP server '$MCP_NAME' from Codex" || \
+            echo -e "${RED}✗${NC} MCP server '$MCP_NAME' was not registered"
+    fi
+
+    if [ -d "$PLUGIN_DIR/.venv" ]; then
+        rm -rf "$PLUGIN_DIR/.venv"
+        print_info "Removed Python virtual environment"
+    fi
+
+    echo ""
+    echo "Rune has been uninstalled from Codex."
+    echo "Config file at $CONFIG_FILE was preserved (delete manually if needed)."
+    exit 0
+fi
+
+# --- Install mode ---
 print_header "Rune Installer for Codex"
 
 if ! command -v codex >/dev/null 2>&1; then

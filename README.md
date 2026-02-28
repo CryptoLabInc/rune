@@ -89,30 +89,31 @@ Before installing this plugin, you MUST have:
 ### Codex CLI Installation (One Command)
 
 ```bash
+# Clone repository
+git clone https://github.com/CryptoLabInc/rune.git
 cd rune
 ./scripts/install-codex.sh
 ```
 
 This command:
 1. Creates `.venv` and installs Python dependencies
-2. Registers Rune MCP server in Codex as `rune-envector`
+2. Registers Rune MCP server in Codex as `rune`
 
 Verify:
 ```bash
 codex mcp list
 ```
 
-### Manual Installation (Advanced)
+### Manual Installation for Claude Code users
 
 ```bash
 # Clone repository
 git clone https://github.com/CryptoLabInc/rune.git
 cd rune
 
-# Register as local marketplace and install (from parent directory)
-cd ..
-claude plugin marketplace add ./rune
-claude plugin install rune@rune-local --scope user
+# Register as local marketplace and install
+claude plugin marketplace add ./
+claude plugin install rune@cryptolab --scope user
 
 # Restart Claude, then configure credentials
 /rune:configure

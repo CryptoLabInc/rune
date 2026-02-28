@@ -77,13 +77,13 @@ cd rune
 
 This automatically:
 1. Creates `.venv` and installs Python dependencies
-2. Registers Rune MCP server as `rune-envector` in Codex
+2. Registers Rune MCP server as `rune` in Codex
 
 ### Verify
 
 ```bash
 codex mcp list
-# Should show rune-envector
+# Should show rune
 ```
 
 ### Configuration
