@@ -71,7 +71,7 @@ Found {count} relevant record(s):
 
 ---
 **Note**: This is a direct listing without LLM synthesis.
-Configure an LLM provider key (Anthropic/OpenAI) for natural language answers.
+Configure an LLM provider key (Anthropic/OpenAI/Google) for natural language answers.
 """,
     "ko": """## "{query}" 검색 결과
 
@@ -81,7 +81,7 @@ Configure an LLM provider key (Anthropic/OpenAI) for natural language answers.
 
 ---
 **참고**: LLM 합성 없이 직접 목록을 표시합니다.
-자연어 답변을 위해 LLM 제공자 키(Anthropic/OpenAI)를 설정하세요.
+자연어 답변을 위해 LLM 제공자 키(Anthropic/OpenAI/Google)를 설정하세요.
 """,
     "ja": """## "{query}" の検索結果
 
@@ -91,7 +91,7 @@ Configure an LLM provider key (Anthropic/OpenAI) for natural language answers.
 
 ---
 **注意**: LLM合成なしの直接リスティングです。
-自然言語での回答にはLLMプロバイダーキー(Anthropic/OpenAI)を設定してください。
+自然言語での回答にはLLMプロバイダーキー(Anthropic/OpenAI/Google)を設定してください。
 """,
 }
 

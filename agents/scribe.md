@@ -17,9 +17,11 @@ Before doing anything, verify Rune is active:
 Monitor the current conversation for **significant decisions and organizational knowledge**. When you detect something worth capturing, call the `mcp__plugin_rune_envector__capture` MCP tool. The tool handles the full 3-tier pipeline internally:
 
 - **Tier 1**: Embedding similarity detection (0 LLM tokens)
-- **Tier 2**: Haiku policy filter (~200 tokens)
-- **Tier 3**: Sonnet structured extraction (~500 tokens)
+- **Tier 2**: Lightweight LLM policy filter (~200 tokens)
+- **Tier 3**: Full LLM structured extraction (~500 tokens)
 - **Storage**: FHE-encrypted vector insertion into enVector
+
+LLM models used in Tier 2/3 adapt to the configured provider (Anthropic, OpenAI, or Google). See `llm` section in `~/.rune/config.json`.
 
 ## What to Capture
 

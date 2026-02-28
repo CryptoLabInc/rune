@@ -20,6 +20,8 @@ Surface relevant past decisions and organizational context whenever the conversa
 2. **Search**: Multi-query encrypted vector search via enVector
 3. **Synthesis**: LLM-based answer generation respecting evidence certainty
 
+The LLM provider for query parsing and synthesis adapts to the configured provider (Anthropic, OpenAI, or Google). Falls back to simple formatting if no LLM is available.
+
 ## When to Call
 
 Call `recall` not only for explicit questions, but whenever the conversation involves:

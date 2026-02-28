@@ -69,8 +69,10 @@ Feature requests should include:
 
 ### Prerequisites
 - Git
+- Python 3.12
+- Node.js 18+ (for TypeScript wrapper)
 - Text editor (VS Code recommended)
-- Claude Code or Claude Desktop for testing
+- An MCP-compatible agent for testing (Claude Code, Codex CLI, etc.)
 
 ### Local Development
 
@@ -86,8 +88,14 @@ Feature requests should include:
    ```
    This sets up the venv, dependencies, and registers MCP servers in Claude Code/Desktop.
 
-3. **Test changes**
-   - Restart Claude Code
+3. **Run tests**
+   ```bash
+   source .venv/bin/activate
+   python -m pytest agents/tests/ -v
+   ```
+
+4. **Test changes in an agent**
+   - Restart your agent (Claude Code, Codex CLI, etc.)
    - Test plugin functionality with `/rune:status`
    - Verify documentation accuracy
 
@@ -232,19 +240,34 @@ rune/
 ├── CONTRIBUTING.md          # This file
 ├── LICENSE                  # Apache License 2.0
 ├── requirements.txt         # Python dependencies
+├── package.json             # TypeScript wrapper metadata (version source)
+├── openclaw.plugin.json     # Plugin metadata
+├── index.ts                 # TypeScript entry point
+├── src/                     # TypeScript wrapper (hooks, commands, tools)
+│   ├── config.ts            # Config reader with mtime caching
+│   ├── hooks.ts             # Hook definitions
+│   ├── commands.ts          # Slash command definitions
+│   ├── tools.ts             # Tool definitions
+│   ├── mcp-client.ts        # MCP client management
+│   └── mcp-service.ts       # MCP service lifecycle
 ├── .claude-plugin/
-│   ├── plugin.json          # Plugin metadata
+│   ├── plugin.json          # Plugin metadata (Claude Code)
 │   └── marketplace.json     # Marketplace listing
 ├── mcp/
 │   ├── server/
 │   │   └── server.py        # MCP server (stdio transport)
 │   └── adapter/             # enVector SDK + Vault adapters
 ├── agents/
-│   ├── common/              # Shared config, schemas, embedding service
+│   ├── common/              # Shared modules
+│   │   ├── config.py        # LLMConfig, load/save config
+│   │   ├── llm_client.py    # Multi-provider LLM client
+│   │   ├── llm_utils.py     # JSON parsing utilities
+│   │   ├── embedding_service.py
+│   │   └── schemas.py
 │   ├── scribe/              # Scribe agent (context capture + webhook server)
 │   │   └── handlers/        # Slack, Notion webhook handlers
 │   ├── retriever/           # Retriever agent (context recall)
-│   └── tests/               # Agent tests
+│   └── tests/               # Agent tests (pytest)
 ├── patterns/                # Capture trigger patterns (en/ko/ja)
 ├── commands/                # Claude skill command definitions
 ├── scripts/                 # Install, configure, start scripts
@@ -259,21 +282,23 @@ rune/
 
 - **SKILL.md**: Core plugin logic that Claude reads
 - **README.md**: User-facing documentation
-- **.claude-plugin/plugin.json**: Plugin metadata
-- **.claude-plugin/marketplace.json**: Marketplace listing
+- **package.json**: Version and TypeScript metadata
+- **openclaw.plugin.json**: Plugin metadata
 - **mcp/server/server.py**: The MCP server (stdio transport)
-- **agents/common/config.py**: Configuration schema with all fields
+- **agents/common/config.py**: `LLMConfig` dataclass and config schema
+- **agents/common/llm_client.py**: Multi-provider LLM abstraction
 - **config/**: Configuration templates and docs
 
 ## Release Process
 
 Maintainers only:
 
-1. Update version in `.claude-plugin/plugin.json`
+1. Update version in `package.json` and `openclaw.plugin.json`
 2. Update CHANGELOG.md
-3. Create git tag: `git tag v0.1.0`
-4. Push tag: `git push origin v0.1.0`
-5. Create GitHub release with notes
+3. Run tests: `python -m pytest agents/tests/ -v`
+4. Create git tag: `git tag v0.2.0`
+5. Push tag: `git push origin v0.2.0`
+6. Create GitHub release with notes
 
 ## Questions?
 

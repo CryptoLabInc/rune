@@ -33,6 +33,18 @@ This directory contains agent specifications and implementation guides.
 - Synthesizes comprehensive answers
 - Provides actionable insights
 
+## Shared Modules (`common/`)
+
+| Module | Purpose |
+|--------|---------|
+| `config.py` | `LLMConfig` dataclass, `load_config()` / `save_config()` with env-var override |
+| `llm_client.py` | `LLMClient` — unified `generate()` interface for Anthropic, OpenAI, and Google |
+| `llm_utils.py` | `parse_llm_json()` — shared JSON extraction from LLM responses |
+| `embedding_service.py` | Local embedding via sentence-transformers |
+| `schemas.py` | Shared data schemas |
+
+Both Scribe and Retriever use `LLMClient` for all LLM calls. The provider is configured via the top-level `llm` section in `~/.rune/config.json` or environment variables.
+
 ## How Agents Work with Rune
 
 Agents interact with organizational memory through two MCP tools exposed by envector-mcp-server:

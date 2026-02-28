@@ -1,6 +1,6 @@
 # Rune - Organizational Memory System
 
-**Context**: This skill provides encrypted organizational memory capabilities using Fully Homomorphic Encryption (FHE). It allows teams to capture, store, and retrieve institutional knowledge while maintaining zero-knowledge privacy.
+**Context**: This skill provides encrypted organizational memory capabilities using Fully Homomorphic Encryption (FHE). It allows teams to capture, store, and retrieve institutional knowledge while maintaining zero-knowledge privacy. Supports multiple LLM providers (Anthropic, OpenAI, Google) for cross-agent compatibility.
 
 ## Activation State
 

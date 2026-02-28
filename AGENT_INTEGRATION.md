@@ -6,15 +6,40 @@ Rune works with all major AI agents via native MCP (Model Context Protocol) supp
 
 | Agent | Integration | Setup |
 |-------|-------------|-------|
-| **Claude** | MCP Native (stdio) | ⭐ Easy |
-| **Gemini** | MCP Native (stdio) | ⭐ Easy |
+| **Claude Code** | MCP Native (stdio) | ⭐ Easy |
+| **Codex CLI** | MCP Native (stdio) | ⭐ One Command |
+| **Gemini CLI** | MCP Native (stdio) | ⭐ One Command |
 | **OpenAI GPT** | MCP Native (stdio) | ⭐ Easy |
 
 > **Note**: The MCP server uses **stdio transport only**. HTTP/SSE mode is not supported.
 
 ---
 
-## Claude
+## LLM Provider Configuration
+
+Rune's Scribe (capture) and Retriever (recall) pipelines use a lightweight LLM for filtering and synthesis. The provider is configured in `~/.rune/config.json`:
+
+```json
+{
+  "llm": {
+    "provider": "anthropic",
+    "tier2_provider": "anthropic"
+  }
+}
+```
+
+| Provider | Value | Models |
+|----------|-------|--------|
+| Anthropic | `"anthropic"` | claude-sonnet-4, claude-haiku-4.5 |
+| OpenAI | `"openai"` | gpt-4o-mini |
+| Google | `"google"` | gemini-2.0-flash-exp |
+| Auto-detect | `"auto"` | Inferred from MCP client identity |
+
+API keys are read from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` / `GEMINI_API_KEY`) or from the `llm` config section. See [config/README.md](config/README.md) for the full schema.
+
+---
+
+## Claude Code
 
 ### Automatic Setup (Recommended)
 
@@ -41,11 +66,45 @@ Restart Claude Code → MCP tools auto-load.
 
 ---
 
-## Gemini
+## Codex CLI
 
-**Update 2026**: Gemini has [native MCP support](https://cloud.google.com/blog/products/ai-machine-learning/announcing-official-mcp-support-for-google-services).
+### One-Command Installation
 
-### Option 1: Gemini SDK (Recommended)
+```bash
+cd rune
+./scripts/install-codex.sh
+```
+
+This automatically:
+1. Creates `.venv` and installs Python dependencies
+2. Registers Rune MCP server as `rune-envector` in Codex
+
+### Verify
+
+```bash
+codex mcp list
+# Should show rune-envector
+```
+
+### Configuration
+
+After installation, configure credentials:
+```bash
+cp config/config.template.json ~/.rune/config.json
+# Edit with your vault/envector credentials
+```
+
+Set LLM provider to OpenAI (default for Codex):
+```bash
+export RUNE_LLM_PROVIDER="openai"
+export OPENAI_API_KEY="your-key"
+```
+
+---
+
+## Gemini CLI
+
+### Option 1: Gemini SDK
 
 ```bash
 pip install google-generativeai mcp
@@ -82,7 +141,7 @@ import asyncio
 asyncio.run(main())
 ```
 
-### Option 2: Gemini CLI (Easiest)
+### Option 2: Gemini CLI MCP Config
 
 ```bash
 npm install -g @google/generative-ai-cli

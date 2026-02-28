@@ -1,12 +1,16 @@
 # Rune
 **FHE-Encrypted Organizational Memory for AI Agents**
 
-Rune is a `/plugin` installable agent-native solution that transforms organizational memory into a strategic asset by **connecting the isolated activities of local agents through encrypted memory**.
+Rune is an agent-native plugin that transforms organizational memory into a strategic asset by **connecting the isolated activities of local agents through encrypted memory**.
 
-Experience it now in Claude Code:
-```
-> /plugin marketplace add CryptoLabInc/rune
-> /plugin install rune
+Works with **Claude Code, Codex CLI, Gemini CLI**, and any MCP-compatible agent.
+
+```bash
+# Claude Code
+/plugin install github.com/CryptoLabInc/rune
+
+# Codex CLI
+cd rune && ./scripts/install-codex.sh
 ```
 Install with simple commands, configure with your team's credentials, and start capturing institutional knowledge.
 
@@ -16,10 +20,10 @@ This is the **complete plugin** with everything needed to run Rune locally:
 
 **Includes**:
 - ✅ MCP server (enVector client with Vault integration)
+- ✅ Multi-provider LLM support (Anthropic, OpenAI, Google)
 - ✅ Python dependencies (pyenvector, fastmcp, etc.)
-- ✅ Installation scripts (automated setup)
+- ✅ Installation scripts (Claude Code, Codex CLI, manual)
 - ✅ Agent specifications (Scribe, Retriever)
-- ✅ Claude skill prompts
 - ✅ Configuration management
 
 **Requires External Infrastructure** (deploy separately):
@@ -30,11 +34,13 @@ This is the **complete plugin** with everything needed to run Rune locally:
 ```
 Your Machine                    Cloud / Team Infrastructure
 ━━━━━━━━━━━━━                  ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Claude + Rune Plugin
+AI Agent + Rune Plugin
   ├─ enVector MCP Server ──→   enVector Cloud (encrypted vectors)
   │    └─ remember tool  ──→   Rune-Vault (team-shared, secret key holder)
-  ├─ Scribe Agent                   decrypts result ciphertext, returns top-k
-  └─ Retriever Agent
+  ├─ Scribe (capture)               decrypts result ciphertext, returns top-k
+  └─ Retriever (recall)
+
+Supported Agents: Claude Code, Codex CLI, Gemini CLI, custom MCP clients
 ```
 
 **Data Flow**:
@@ -59,7 +65,9 @@ Before installing this plugin, you MUST have:
 
 ## Installation
 
-### Automated Installation (Recommended)
+> **Other agents?** See [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md) for Codex CLI, Gemini CLI, and custom MCP client setup.
+
+### Claude Code (Recommended)
 
 ```
 /plugin install github.com/CryptoLabInc/rune
@@ -77,6 +85,22 @@ Before installing this plugin, you MUST have:
 - Python 3.12
 - 500MB disk space
 - Internet connection
+
+### Codex CLI Installation (One Command)
+
+```bash
+cd rune
+./scripts/install-codex.sh
+```
+
+This command:
+1. Creates `.venv` and installs Python dependencies
+2. Registers Rune MCP server in Codex as `rune-envector`
+
+Verify:
+```bash
+codex mcp list
+```
 
 ### Manual Installation (Advanced)
 
@@ -170,9 +194,15 @@ Manually edit `~/.rune/config.json` if needed:
     "endpoint": "runestone-xxx.clusters.envector.io",
     "api_key": "your-api-key"
   },
+  "llm": {
+    "provider": "anthropic",
+    "tier2_provider": "anthropic"
+  },
   "state": "active"
 }
 ```
+
+The `llm` section controls which LLM provider Scribe/Retriever use for synthesis and filtering. Provider values: `"anthropic"`, `"openai"`, `"google"`, or `"auto"` (infer from MCP client identity). API keys can be set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`). See [config/README.md](config/README.md) for full schema.
 
 ## Plugin States
 
