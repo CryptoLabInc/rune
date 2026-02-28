@@ -102,25 +102,58 @@ async def lifespan(app: FastAPI):
     )
     logger.info("Detector ready (threshold: %s)", config.scribe.similarity_threshold)
 
-    # Initialize Tier 2 LLM filter (Haiku — cheap, fast)
-    api_key = config.retriever.anthropic_api_key or None
-    if config.scribe.tier2_enabled and api_key:
+    # LLM configuration
+    llm_cfg = config.llm
+    llm_provider = (llm_cfg.provider or os.getenv("RUNE_LLM_PROVIDER", "anthropic")).lower()
+    tier2_provider = (llm_cfg.tier2_provider or os.getenv("RUNE_TIER2_LLM_PROVIDER", llm_provider)).lower()
+    anthropic_key = llm_cfg.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY") or None
+    openai_key = llm_cfg.openai_api_key or os.getenv("OPENAI_API_KEY") or None
+    google_key = llm_cfg.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or None
+
+    def _provider_key(provider: str):
+        if provider == "openai":
+            return openai_key
+        if provider == "google":
+            return google_key
+        return anthropic_key
+
+    def _provider_model(provider: str, role: str) -> str:
+        if provider == "openai":
+            if role == "tier2" and llm_cfg.openai_tier2_model:
+                return llm_cfg.openai_tier2_model
+            return llm_cfg.openai_model
+        if provider == "google":
+            if role == "tier2" and llm_cfg.google_tier2_model:
+                return llm_cfg.google_tier2_model
+            return llm_cfg.google_model
+        if role == "tier2":
+            return config.scribe.tier2_model
+        return llm_cfg.anthropic_model
+
+    # Initialize Tier 2 LLM filter
+    if config.scribe.tier2_enabled and _provider_key(tier2_provider):
         tier2_filter = Tier2Filter(
-            anthropic_api_key=api_key,
-            model=config.scribe.tier2_model,
+            llm_provider=tier2_provider,
+            anthropic_api_key=anthropic_key,
+            openai_api_key=openai_key,
+            google_api_key=google_key,
+            model=_provider_model(tier2_provider, "tier2"),
         )
         if tier2_filter.is_available:
-            logger.info("Tier 2 LLM filter ready (%s)", config.scribe.tier2_model)
+            logger.info("Tier 2 LLM filter ready (%s/%s)", tier2_provider, tier2_filter._model)
         else:
             logger.warning("Tier 2 LLM filter init failed (Tier 1 only)")
     else:
         tier2_filter = None
         logger.info("Tier 2 LLM filter disabled" if not config.scribe.tier2_enabled else "Tier 2 skipped (no API key)")
 
-    # Initialize Tier 3 LLM extractor (Sonnet — for record building)
+    # Initialize Tier 3 LLM extractor (for record building)
     llm_extractor = LLMExtractor(
-        anthropic_api_key=api_key,
-        model=config.retriever.anthropic_model,
+        llm_provider=llm_provider,
+        anthropic_api_key=anthropic_key,
+        openai_api_key=openai_key,
+        google_api_key=google_key,
+        model=_provider_model(llm_provider, "extract"),
     )
     if llm_extractor.is_available:
         logger.info("Tier 3 LLM extractor ready (Sonnet)")
