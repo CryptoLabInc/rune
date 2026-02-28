@@ -12,46 +12,133 @@ Works with **Claude Code, Codex CLI, Gemini CLI**, and any MCP-compatible agent.
 # Codex CLI
 cd rune && ./scripts/install-codex.sh
 ```
-Install with simple commands, configure with your team's credentials, and start capturing institutional knowledge.
 
-## So, What is This?
+## What is Rune?
 
 This is the **complete plugin** with everything needed to run Rune locally:
 
-**Includes**:
-- ✅ MCP server (enVector client with Vault integration)
-- ✅ Multi-provider LLM support (Anthropic, OpenAI, Google)
-- ✅ Python dependencies (pyenvector, fastmcp, etc.)
-- ✅ Installation scripts (Claude Code, Codex CLI, manual)
-- ✅ Agent specifications (Scribe, Retriever)
-- ✅ Configuration management
+- MCP server with FHE-encrypted vector operations (enVector + Vault integration)
+- Multi-provider LLM support (Anthropic, OpenAI, Google) for capture filtering and recall synthesis
+- Installation scripts for Claude Code, Codex CLI, and manual setup
+- Agent specifications (Scribe for capture, Retriever for recall)
 
-**Requires External Infrastructure** (deploy separately):
-- ⚠️ Rune-Vault server (team-shared, deployed by admin — see [rune-admin](https://github.com/CryptoLabInc/rune-admin))
-- ⚠️ enVector Cloud account (sign up at [envector.io](https://envector.io))
+**Requires external infrastructure** (deploy separately):
+- Rune-Vault server (team-shared, deployed by admin — see [rune-admin](https://github.com/CryptoLabInc/rune-admin))
+- enVector Cloud account (sign up at [envector.io](https://envector.io))
 
-**Architecture**:
+## MCP Tools
+
+Rune exposes these tools via MCP (stdio transport). Any MCP-compatible agent can use them directly.
+
+| Tool | Description |
+|------|-------------|
+| **`capture`** | Capture organizational decisions via 3-tier pipeline (embedding similarity → LLM policy filter → LLM extraction → FHE-encrypted storage) |
+| **`recall`** | Search and synthesize answers from encrypted team memory via Vault-secured pipeline (query expansion → encrypted scoring → Vault decryption → LLM synthesis) |
+| **`vault_status`** | Check Rune-Vault connection status and security mode |
+| **`reload_pipelines`** | Re-read config and reinitialize scribe/retriever pipelines |
+
+**Example — capture a decision:**
+```
+capture(text="We chose PostgreSQL over MongoDB for better ACID guarantees and JSON support.")
+```
+
+**Example — recall past context:**
+```
+recall(query="Why did we choose PostgreSQL?", topk=5)
+→ { answer: "The team chose PostgreSQL for...", sources: [...], confidence: 0.85 }
+```
+
+## Quick Start
+
+### Claude Code
+```
+/plugin install github.com/CryptoLabInc/rune
+```
+
+### Codex CLI
+```bash
+git clone https://github.com/CryptoLabInc/rune.git
+cd rune && ./scripts/install-codex.sh
+```
+
+### Gemini CLI / Other Agents
+See [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md) for Gemini CLI, OpenAI, and custom MCP client setup.
+
+### After Installation
+```bash
+cp config/config.template.json ~/.rune/config.json
+# Edit with your vault/envector credentials
+```
+
+Verify infrastructure:
+```bash
+cd rune && ./scripts/check-infrastructure.sh
+```
+
+## Architecture
+
 ```
 Your Machine                    Cloud / Team Infrastructure
 ━━━━━━━━━━━━━                  ━━━━━━━━━━━━━━━━━━━━━━━━━━
 AI Agent + Rune Plugin
   ├─ enVector MCP Server ──→   enVector Cloud (encrypted vectors)
-  │    └─ remember tool  ──→   Rune-Vault (team-shared, secret key holder)
+  │    └─ recall tool    ──→   Rune-Vault (team-shared, secret key holder)
   ├─ Scribe (capture)               decrypts result ciphertext, returns top-k
   └─ Retriever (recall)
 
 Supported Agents: Claude Code, Codex CLI, Gemini CLI, custom MCP clients
 ```
 
+```mermaid
+flowchart TD
+    Cloud[("enVector Cloud<br>(Encrypted Storage)")]
+
+    subgraph MCP [envector-mcp-server]
+        Search["search tool<br>(local secret key, owner's data)"]
+        Recall["recall tool<br>(Vault-secured, shared team memory)"]
+    end
+
+    subgraph Vault [Rune-Vault]
+        Decrypt["decrypt_scores()<br>(secret key holder)"]
+    end
+
+    subgraph Client [Client Agents]
+        Agent["Claude / Gemini / Codex / Custom"]
+    end
+
+    %% Capture flow
+    Agent -- "capture / search" --> Search
+    Search <-->|Encrypted Data| Cloud
+
+    %% Recall flow (4-step pipeline)
+    Agent -- "recall" --> Recall
+    Recall -- "1. encrypted similarity scoring" --> Cloud
+    Recall -- "2. decrypt result ciphertext<br>(secret key never leaves Vault)" --> Decrypt
+    Decrypt -- "indices + similarity values" --> Recall
+    Recall -- "3. retrieve + decrypt metadata<br>4. LLM synthesis" --> Agent
+
+    %% Styles
+    style Cloud fill:#eff,stroke:#333
+    style Search fill:#eef,stroke:#333
+    style Recall fill:#eef,stroke:#333
+    style Decrypt fill:#fee,stroke:#333
+    style Agent fill:#efe,stroke:#333
+```
+
 **Data Flow**:
-- **Capture**: Scribe → enVector MCP `insert` (encrypt with EncKey) → enVector Cloud
-- **Own data search**: enVector MCP `search` → encrypted similarity scoring on enVector Cloud → MCP server decrypts locally (secret key held by MCP server runtime)
-- **Shared memory recall**: enVector MCP `remember` → encrypted similarity scoring on enVector Cloud → Rune-Vault decrypts result ciphertext (secret key held exclusively by Vault) → retrieve metadata for top-k indices
-- The `remember` tool isolates secret key in Vault, preventing agent tampering attacks from decrypting shared vectors.
+- **Capture**: Scribe → MCP `capture` → 3-tier pipeline → FHE-encrypted insert → enVector Cloud
+- **Recall**: MCP `recall` → query expansion → encrypted similarity scoring on enVector Cloud → Rune-Vault decrypts result ciphertext (secret key held exclusively by Vault) → retrieve and decrypt metadata → LLM synthesis
+- **Own data search**: MCP `search` → encrypted similarity scoring → MCP server decrypts locally (secret key held by MCP server runtime)
+
+**Key Design**:
+- **Agent** calls MCP tools (`capture`, `recall`, `search`). Agent never contacts Vault directly.
+- **`recall` tool** uses a Vault-secured pipeline. The secret key never leaves Vault. This isolation prevents agent tampering attacks from indiscriminately decrypting shared vectors.
+- **Rune-Vault** holds the **secret key** exclusively. It decrypts only score ciphertext and metadata ciphertext — never sees raw vectors.
+- **envector-mcp-server** uses **Public Keys** (EncKey, EvalKey) for encryption and search. It can be scaled horizontally.
 
 ## Prerequisites
 
-Before installing this plugin, you MUST have:
+Before installing, you need:
 
 ### 1. Rune-Vault Access (from your team admin)
 - **Vault Endpoint**: Your Vault gRPC endpoint (e.g., `vault-host:50051`)
@@ -63,127 +150,11 @@ Before installing this plugin, you MUST have:
 
 **Don't have these?** Contact your team administrator or see the [full Rune deployment guide](https://github.com/CryptoLabInc/rune-admin).
 
-## Installation
-
-> **Other agents?** See [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md) for Codex CLI, Gemini CLI, and custom MCP client setup.
-
-### Claude Code (Recommended)
-
-```
-/plugin install github.com/CryptoLabInc/rune
-```
-
-**What happens**:
-1. Plugin files downloaded
-2. Python virtual environment created
-3. Dependencies installed (pyenvector, fastmcp, etc.)
-4. MCP servers configured in Claude
-5. You're prompted to configure credentials
-
-**Requirements**:
-- macOS or Linux (Windows is not supported)
-- Python 3.12
-- 500MB disk space
-- Internet connection
-
-### Codex CLI Installation (One Command)
-
-```bash
-# Clone repository
-git clone https://github.com/CryptoLabInc/rune.git
-cd rune
-./scripts/install-codex.sh
-```
-
-This command:
-1. Creates `.venv` and installs Python dependencies
-2. Registers Rune MCP server in Codex as `rune`
-
-Verify:
-```bash
-codex mcp list
-```
-
-### Manual Installation for Claude Code users
-
-```bash
-# Clone repository
-git clone https://github.com/CryptoLabInc/rune.git
-cd rune
-
-# Register as local marketplace and install
-claude plugin marketplace add ./
-claude plugin install rune@cryptolab --scope user
-
-# Restart Claude, then configure credentials
-/rune:configure
-```
-
-### Installation Verification
-
-```bash
-# Check infrastructure
-cd rune
-./scripts/check-infrastructure.sh
-```
-
-Expected output:
-```
-✓ Configuration file found
-✓ Vault Endpoint: configured
-✓ enVector MCP server is running
-✓ Python virtual environment found
-✓ Infrastructure checks passed ✓
-```
-
 ## Configuration
-
-### Initial Setup
-
-After installation, you have two options:
-
-**Option A: Interactive (Recommended)**
-```
-/rune:configure
-```
-
-Plugin will:
-1. Ask for Vault Endpoint, Token
-2. Ask for enVector endpoint, API key
-3. Validate infrastructure availability
-4. Set state to Active (if infrastructure ready) or Dormant (if not)
-
-**Option B: Manual**
-```bash
-cp config/config.template.json ~/.rune/config.json
-nano ~/.rune/config.json
-# Edit with your credentials
-```
-
-Then activate:
-```
-/rune:activate
-```
-
-### Starting MCP Servers
-
-After configuration, start the local MCP server:
-
-```bash
-cd rune
-./scripts/start-mcp-servers.sh
-```
-
-This starts:
-- **enVector MCP server**: Connects to enVector Cloud for encryption/storage, and to Rune-Vault for decryption of shared team memory
-
-> Note: Vault MCP runs on a remote server deployed by the team admin via [rune-admin](https://github.com/CryptoLabInc/rune-admin), not locally.
-
-Logs: `~/.rune/logs/envector-mcp.log`
 
 ### Configuration File
 
-Manually edit `~/.rune/config.json` if needed:
+`~/.rune/config.json`:
 
 ```json
 {
@@ -203,229 +174,105 @@ Manually edit `~/.rune/config.json` if needed:
 }
 ```
 
-The `llm` section controls which LLM provider Scribe/Retriever use for synthesis and filtering. Provider values: `"anthropic"`, `"openai"`, `"google"`, or `"auto"` (infer from MCP client identity). API keys can be set via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`). See [config/README.md](config/README.md) for full schema.
+### LLM Provider
+
+The `llm` section controls which LLM provider Scribe/Retriever use for filtering and synthesis.
+
+| Provider | Value | Environment Variable |
+|----------|-------|---------------------|
+| Anthropic | `"anthropic"` | `ANTHROPIC_API_KEY` |
+| OpenAI | `"openai"` | `OPENAI_API_KEY` |
+| Google | `"google"` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
+| Auto-detect | `"auto"` | Inferred from MCP client identity |
+
+See [config/README.md](config/README.md) for the full schema.
+
+### Starting the MCP Server
+
+```bash
+cd rune && ./scripts/start-mcp-servers.sh
+```
+
+Logs: `~/.rune/logs/envector-mcp.log`
+
+> Vault MCP runs on a remote server deployed by the team admin via [rune-admin](https://github.com/CryptoLabInc/rune-admin), not locally.
 
 ## Plugin States
 
-The plugin has two states based on configuration AND infrastructure availability:
+| State | Behavior |
+|-------|----------|
+| **Active** | Full functionality — capture and recall enabled, fail-safe switches to Dormant on errors |
+| **Dormant** | No network requests, no token waste — shows setup instructions, ready to activate |
 
-### Active State ✅
-**Requirements**:
-- ✓ Configuration file with all credentials
-- ✓ Infrastructure accessible (Vault + enVector)
-- ✓ MCP servers running
+Set `"state": "active"` in config after infrastructure is ready. The plugin automatically falls back to Dormant if operations fail.
 
-**Behavior**:
-- Automatically captures significant organizational context
-- Retrieves encrypted memory on demand
-- Full functionality enabled
-- **Fail-safe**: Switches to Dormant if operations fail
+## For Team Administrators
 
-### Dormant State ⏸️
-**Triggers**:
-- Configuration missing or incomplete
-- Infrastructure not accessible
-- MCP servers not running
-- Automatic fail-safe from Active state
+Rune requires a deployed **Rune-Vault** server and an **enVector Cloud** account. The Vault holds the team's secret key for decrypting search results — it is the single point of trust in the system.
 
-**Behavior**:
-- **No token waste**: Does NOT attempt capture/retrieval
-- **No network requests**: Only shows setup instructions
-- Shows helpful diagnostics on `/rune:status`
-- Ready to activate when infrastructure is available
+### Deploying Infrastructure
 
-### State Transitions
+See the [Rune-Admin Repository](https://github.com/CryptoLabInc/rune-admin):
 
-```
-Install → Dormant (default)
-  ↓ /rune:configure (with validation)
-  ├─ Infrastructure ready → Active ✅
-  └─ Infrastructure not ready → Dormant ⏸️
+1. **Deploy Rune-Vault** — OCI/AWS deployment via Terraform. Vault holds the secret key and enforces access policy (max results per query, audit trail).
+2. **Create enVector Cloud account** — Sign up at [envector.io](https://envector.io), create a cluster, generate API keys.
+3. **Provision team index** — Set the shared index name on the Vault server. All team members connecting to this Vault automatically use the same index.
 
-Dormant → Active
-  ↓ /rune:activate (after infrastructure is deployed)
-  └─ Validation passes → Active ✅
+### Onboarding Team Members
 
-Active → Dormant (automatic fail-safe)
-  ↓ Operation fails (Vault unreachable, etc.)
-  └─ Auto-switch to Dormant ⏸️
-```
+Provide each team member with:
+1. Vault gRPC endpoint and authentication token (same for all members)
+2. enVector cluster endpoint and API key (shared or individual)
 
-## Commands
+Members install the plugin and enter these credentials in `~/.rune/config.json`. See [examples/team-setup-example.md](examples/team-setup-example.md) for a complete walkthrough.
 
-### `/rune:status`
-Check plugin state and infrastructure health
-```
-Rune Plugin Status
-==================
-State: Active ✅
+### Security Management
 
-Configuration:
-  ✓ Config file: ~/.rune/config.json
-  ✓ Vault Endpoint: configured
+- **Token rotation**: Generate new Vault token, distribute to current members, revoke old token.
+- **Access revocation**: Rotate Vault token — departed members lose access immediately.
+- **Multiple projects**: Deploy separate Vault instances per project for isolated memory spaces.
 
-Infrastructure:
-  ✓ Python venv: /path/to/.venv
-  ✓ MCP servers: Running
-```
+Full deployment guide: https://github.com/CryptoLabInc/rune-admin/blob/main/deployment/README.md
 
-### `/rune:configure`
-Interactive credential setup with validation
+## Security & Privacy
 
-### `/rune:activate` (or `/rune:wakeup`)
-Validate infrastructure and switch to Active state
-```
-# Use after infrastructure is deployed
-/rune:activate
-```
-
-### `/rune:memorize <context>`
-Manually store context that Scribe's automatic capture missed (Active state only)
-```
-/rune:memorize "We chose PostgreSQL for better JSON support"
-```
-
-### `/rune:recall <query>`
-Explicitly search organizational memory — override for Retriever's automatic detection (Active state only)
-```
-/rune:recall "Why PostgreSQL?"
-```
-
-### `/rune:reset`
-Clear configuration and return to Dormant state
-
-## Usage
-
-Once activated, the plugin works automatically:
-
-### Automatic Context Capture
-Claude will automatically capture significant decisions and context:
-- Architecture decisions
-- Technical rationale
-- Code patterns
-- Team agreements
-
-### Context Retrieval
-Just ask Claude naturally — Retriever detects recall-intent queries automatically:
-```
-"What database decisions did we make?"
-```
-
-Or use the explicit command as an override:
-```
-/rune:recall "Why did we choose PostgreSQL?"
-```
-
-### Manual Context Storage
-If Scribe missed something, use `/rune:memorize` to force-store:
-```
-/rune:memorize "We chose PostgreSQL for better JSON support"
-```
-
-## Security
-
-- 🔐 **Zero-knowledge**: All data stored encrypted (FHE)
-- 🔑 **Local credentials**: Tokens stored only in `~/.rune/config.json`
-- 🛡️ **No cloud access**: enVector Cloud never sees plaintext
-- 👥 **Team sharing**: Same Vault = shared organizational memory
-
-## Privacy Policy
-
-### Data We Collect
-- **Credentials location**: Vault Endpoint, Vault token, enVector endpoint, and API key stored locally in `~/.rune/config.json`.
-- **Vector data**: Encrypted vector embeddings derived from organizational context are stored on enVector Cloud. The plaintext content is never transmitted or stored on any remote server.
-
-### How We Process Data
+**Zero-Knowledge Encryption**:
 - All data is encrypted client-side using **Fully Homomorphic Encryption (FHE)** before leaving your machine.
-- enVector Cloud performs similarity scoring on **encrypted data only** — the server never accesses plaintext vectors, queries, or metadata.
-- Rune-Vault decrypts only the similarity **score ciphertext** (not the original data) to select top-k results.
+- enVector Cloud performs similarity scoring on **encrypted data only** — the server never accesses plaintext.
+- Rune-Vault decrypts only score and metadata **ciphertext** (not raw vectors) to select top-k results.
 
-### Data Storage
-- **Local**: Configuration and credentials are stored in `~/.rune/config.json` on your machine.
-- **Cloud**: Only FHE-encrypted vectors and encrypted metadata are stored on enVector Cloud. No plaintext data is stored remotely.
+**Data Storage**:
+- **Local**: Credentials in `~/.rune/config.json` (user-only access recommended: `chmod 600`).
+- **Cloud**: Only FHE-encrypted vectors and encrypted metadata on enVector Cloud. No plaintext stored remotely.
 
-### Third-Party Sharing
-- Rune does **not** share any data with third parties.
-- In team deployments, the Rune-Vault server is operated by your **team administrator** and holds the shared secret key for decrypting score ciphertexts. The Vault never has access to raw vectors or metadata.
+**Third-Party Sharing**:
+- Rune does **not** share data with third parties. In team deployments, Vault is operated by your team admin.
 
-### Your Rights
-- **Data deletion**: You can delete your encrypted vectors by removing the corresponding enVector index via the MCP tools or enVector Cloud dashboard.
-- **Configuration reset**: Run `/rune:reset` or delete `~/.rune/config.json` to remove all local credentials and return to dormant state.
-- **Full removal**: Uninstall the plugin and delete `~/.rune/` to remove all local data.
+**Your Rights**:
+- **Data deletion**: Remove encrypted vectors via enVector Cloud dashboard or MCP tools.
+- **Configuration reset**: Delete `~/.rune/config.json` to remove all local credentials.
+- **Full removal**: Uninstall the plugin and delete `~/.rune/`.
 
 ## Troubleshooting
 
-### Plugin installed but not working?
+### Plugin not working?
 
-Check plugin state:
-```
-/rune:status
+```bash
+cd rune && ./scripts/check-infrastructure.sh
 ```
 
 ### Missing credentials?
 
-Reconfigure:
-```
-/rune:configure
+```bash
+cp config/config.template.json ~/.rune/config.json
+# Edit with your credentials, set "state": "active"
 ```
 
 ### Need to reset?
 
 ```bash
 rm ~/.rune/config.json
-/rune:configure
 ```
-
-## For Team Administrators
-
-To deploy the full Rune infrastructure (Vault + MCP servers), see:
-- **Rune-Admin Repository (for deployment)**: https://github.com/CryptoLabInc/rune-admin
-- **Deployment Guide**: https://github.com/CryptoLabInc/rune-admin/blob/main/deployment/README.md
-
-## Architecture
-
-```mermaid
-flowchart TD
-    Cloud[("enVector Cloud<br>(Encrypted Storage)")]
-
-    subgraph MCP [envector-mcp-server]
-        Search["search tool<br>(local secret key, owner's data)"]
-        Remember["remember tool<br>(Vault-secured, shared team memory)"]
-    end
-
-    subgraph Vault [Rune-Vault]
-        Decrypt["decrypt_scores()<br>(secret key holder)"]
-    end
-
-    subgraph Client [Client Agents]
-        Agent["Claude / Gemini / Custom"]
-    end
-
-    %% Capture flow
-    Agent -- "insert / search" --> Search
-    Search <-->|Encrypted Data| Cloud
-
-    %% Recall flow (3-step pipeline)
-    Agent -- "remember" --> Remember
-    Remember -- "1. encrypted similarity scoring" --> Cloud
-    Remember -- "2. decrypt result ciphertext<br>(secret key never leaves Vault)" --> Decrypt
-    Decrypt -- "indices + similarity values" --> Remember
-    Remember -- "3. retrieve metadata<br>for top-k indices" --> Agent
-
-    %% Styles
-    style Cloud fill:#eff,stroke:#333
-    style Search fill:#eef,stroke:#333
-    style Remember fill:#eef,stroke:#333
-    style Decrypt fill:#fee,stroke:#333
-    style Agent fill:#efe,stroke:#333
-```
-
-**Key Architecture**:
-- **Agent** calls MCP tools (`insert`, `search`, `remember`). Agent never contacts Vault directly.
-- **`search` tool** searches the operator's own encrypted data. The decryption key (secret key) is held locally by the MCP server runtime.
-- **`remember` tool** recalls from shared team memory. It orchestrates a 3-step pipeline: encrypted similarity scoring on enVector Cloud → Rune-Vault decrypts result ciphertext with secret key → retrieve metadata for top-k indices. This isolation prevents agent tampering attacks from indiscriminately decrypting shared vectors.
-- **Rune-Vault** holds **secret key** exclusively and decrypts the result ciphertext. It never sees raw vectors or metadata.
-- **envector-mcp-server** uses **Public Keys** (EncKey, EvalKey) for encryption and search. It can be scaled horizontally.
 
 ## Related Projects
 
