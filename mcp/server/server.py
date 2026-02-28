@@ -315,10 +315,11 @@ class MCPServerApp:
         @self.mcp.tool(
             name="capture",
             description=(
-                "Capture a significant organizational decision into encrypted memory. "
-                "Runs the 3-tier pipeline: Tier 1 embedding similarity detection, "
-                "Tier 2 LLM policy filter (Haiku), Tier 3 structured extraction (Sonnet). "
-                "Only captures text that passes all tiers as significant."
+                "Capture a significant organizational decision into FHE-encrypted team memory. "
+                "Runs a 3-tier pipeline: Tier 1 embedding similarity detection (zero LLM tokens), "
+                "Tier 2 lightweight LLM policy filter (~200 tokens), "
+                "Tier 3 full LLM structured extraction (~500 tokens). "
+                "Only text that passes all tiers is encrypted and stored on enVector Cloud."
             ),
             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
         )
@@ -420,10 +421,12 @@ class MCPServerApp:
         @self.mcp.tool(
             name="recall",
             description=(
-                "Search organizational memory for past decisions, context, and insights. "
-                "Parses the query to understand intent, searches encrypted vector memory "
-                "with multi-query expansion, and synthesizes a coherent answer. "
-                "Respects evidence certainty levels in the response."
+                "Search and synthesize answers from FHE-encrypted team memory via Vault-secured pipeline. "
+                "Pipeline: (1) query expansion and intent detection, "
+                "(2) encrypted similarity scoring on enVector Cloud, "
+                "(3) Rune-Vault decrypts result ciphertext (secret key never leaves Vault), "
+                "(4) LLM synthesis with source citations and certainty levels. "
+                "Use for questions about past decisions, trade-offs, and organizational knowledge."
             ),
             annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
         )
@@ -867,9 +870,9 @@ if __name__ == "__main__":
             vault_endpoint=RUNEVAULT_ENDPOINT,
             vault_token=RUNEVAULT_TOKEN,
         )
-        logger.info("Vault client initialized - remember tool available")
+        logger.info("Vault client initialized - recall tool available")
     else:
-        logger.info("Vault not configured - remember tool will be unavailable")
+        logger.info("Vault not configured - recall tool will be unavailable")
 
     # ── Create MCP app (pipelines initialized via _init_pipelines) ──
     app = MCPServerApp(
