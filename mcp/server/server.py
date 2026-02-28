@@ -30,7 +30,7 @@ if MCP_ROOT not in sys.path:
 if PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, PLUGIN_ROOT)
 
-from fastmcp import FastMCP  # pip install fastmcp
+from fastmcp import FastMCP, Context  # pip install fastmcp
 from mcp.types import ToolAnnotations
 from adapter import EnVectorSDKAdapter, EmbeddingAdapter
 from adapter.vault_client import VaultClient, VaultError
@@ -187,6 +187,9 @@ class MCPServerApp:
         self._agent_dek = agent_dek
         self._scribe = scribe_pipeline
         self._retriever = retriever_pipeline
+        self._client_provider_override: Optional[str] = None
+        self._active_llm_provider: Optional[str] = None
+        self._active_tier2_provider: Optional[str] = None
         # mcp
         self.mcp = FastMCP(name=mcp_server_name)
 
@@ -226,6 +229,45 @@ class MCPServerApp:
                 "`query` must be a list of floats or a list of float lists. "
                 f"Received type: {type(raw_query).__name__}"
             )
+
+        def _infer_provider_from_context(ctx: Optional[Context]) -> Optional[str]:
+            """
+            Infer LLM provider from MCP initialize clientInfo.name.
+            This is best-effort and only used when config provider is set to "auto".
+            """
+            if ctx is None or ctx.request_context is None:
+                return None
+
+            try:
+                session = getattr(ctx.request_context, "session", None)
+                params = getattr(session, "client_params", None)
+                client_info = getattr(params, "clientInfo", None) or getattr(params, "client_info", None)
+                client_name = (getattr(client_info, "name", "") or "").lower()
+            except Exception:
+                return None
+
+            if not client_name:
+                return None
+            if any(token in client_name for token in ("claude", "anthropic")):
+                return "anthropic"
+            if any(token in client_name for token in ("openai", "codex", "chatgpt")):
+                return "openai"
+            if any(token in client_name for token in ("gemini", "google", "antigravity", "openclaw")):
+                return "google"
+            return None
+
+        def _maybe_reload_for_auto_provider(ctx: Optional[Context]) -> None:
+            inferred = _infer_provider_from_context(ctx)
+            if not inferred:
+                return
+            if inferred == self._client_provider_override:
+                return
+
+            self._client_provider_override = inferred
+            logger.info("Auto provider inferred from MCP clientInfo: %s", inferred)
+            refresh = self._init_pipelines()
+            if refresh.get("errors"):
+                logger.warning("Auto provider reload had warnings: %s", refresh["errors"])
 
         # ---------- MCP Tools: Remember (Vault-Secured Retrieval) ---------- #
         @self.mcp.tool(
@@ -429,7 +471,10 @@ class MCPServerApp:
             source: Annotated[str, Field(description="Source of the text (e.g., 'claude_agent', 'slack', 'github')")] = "claude_agent",
             user: Annotated[Optional[str], Field(description="User who authored the text")] = None,
             channel: Annotated[Optional[str], Field(description="Channel or location where the text originated")] = None,
+            ctx: Optional[Context] = None,
         ) -> Dict[str, Any]:
+            _maybe_reload_for_auto_provider(ctx)
+
             if self._scribe is None:
                 return {"ok": False, "error": "Scribe pipeline not initialized. Check Rune configuration."}
 
@@ -529,7 +574,10 @@ class MCPServerApp:
         async def tool_recall(
             query: Annotated[str, Field(description="Natural language question about past decisions or organizational context")],
             topk: Annotated[int, Field(description="Number of results to consider for synthesis")] = 5,
+            ctx: Optional[Context] = None,
         ) -> Dict[str, Any]:
+            _maybe_reload_for_auto_provider(ctx)
+
             if self._retriever is None:
                 return {"ok": False, "error": "Retriever pipeline not initialized. Check Rune configuration."}
 
@@ -677,7 +725,49 @@ class MCPServerApp:
                 agent_dek=self._agent_dek,
             )
 
-            anthropic_key = rune_config.retriever.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY", "")
+            llm_cfg = rune_config.llm
+            configured_llm_provider = (llm_cfg.provider or os.getenv("RUNE_LLM_PROVIDER", "anthropic")).lower()
+            configured_tier2_provider = (llm_cfg.tier2_provider or os.getenv("RUNE_TIER2_LLM_PROVIDER", configured_llm_provider)).lower()
+            anthropic_key = llm_cfg.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY", "")
+            openai_key = llm_cfg.openai_api_key or os.getenv("OPENAI_API_KEY", "")
+            google_key = llm_cfg.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
+
+            def _resolve_provider(configured: str, fallback: str) -> str:
+                if configured == "auto":
+                    if self._client_provider_override in ("anthropic", "openai", "google"):
+                        return self._client_provider_override
+                    env_auto = os.getenv("RUNE_AUTO_LLM_PROVIDER", "").lower()
+                    if env_auto in ("anthropic", "openai", "google"):
+                        return env_auto
+                    return fallback
+                if configured in ("anthropic", "openai", "google"):
+                    return configured
+                return fallback
+
+            llm_provider = _resolve_provider(configured_llm_provider, "anthropic")
+            tier2_provider = _resolve_provider(configured_tier2_provider, llm_provider)
+            self._active_llm_provider = llm_provider
+            self._active_tier2_provider = tier2_provider
+
+            def _provider_key(provider: str) -> str:
+                if provider == "openai":
+                    return openai_key
+                if provider == "google":
+                    return google_key
+                return anthropic_key
+
+            def _provider_model(provider: str, role: str) -> str:
+                if provider == "openai":
+                    if role == "tier2" and llm_cfg.openai_tier2_model:
+                        return llm_cfg.openai_tier2_model
+                    return llm_cfg.openai_model
+                if provider == "google":
+                    if role == "tier2" and llm_cfg.google_tier2_model:
+                        return llm_cfg.google_tier2_model
+                    return llm_cfg.google_model
+                if role == "tier2":
+                    return rune_config.scribe.tier2_model
+                return llm_cfg.anthropic_model
 
             # Scribe pipeline
             pattern_cache = PatternCache(embedding_svc)
@@ -692,15 +782,24 @@ class MCPServerApp:
             )
 
             tier2_filter = None
-            if rune_config.scribe.tier2_enabled and anthropic_key:
+            if rune_config.scribe.tier2_enabled and _provider_key(tier2_provider):
                 tier2_filter = Tier2Filter(
+                    llm_provider=tier2_provider,
                     anthropic_api_key=anthropic_key,
-                    model=rune_config.scribe.tier2_model,
+                    openai_api_key=openai_key,
+                    google_api_key=google_key,
+                    model=_provider_model(tier2_provider, "tier2"),
                 )
 
             llm_extractor = None
-            if anthropic_key:
-                llm_extractor = LLMExtractor(anthropic_api_key=anthropic_key)
+            if _provider_key(llm_provider):
+                llm_extractor = LLMExtractor(
+                    llm_provider=llm_provider,
+                    anthropic_api_key=anthropic_key,
+                    openai_api_key=openai_key,
+                    google_api_key=google_key,
+                    model=_provider_model(llm_provider, "extract"),
+                )
             record_builder = RecordBuilder(llm_extractor=llm_extractor)
 
             self._scribe = {
@@ -718,9 +817,21 @@ class MCPServerApp:
                 result["errors"].append("Vault index name not available — retriever pipeline skipped.")
                 logger.warning("No vault index name — skipping retriever pipeline init")
             else:
-                query_processor = QueryProcessor(anthropic_api_key=anthropic_key)
+                query_processor = QueryProcessor(
+                    llm_provider=llm_provider,
+                    anthropic_api_key=anthropic_key,
+                    openai_api_key=openai_key,
+                    google_api_key=google_key,
+                    model=_provider_model(llm_provider, "query"),
+                )
                 searcher = Searcher(envector_client, embedding_svc, self._vault_index_name, vault_client=self.vault)
-                synthesizer = Synthesizer(anthropic_api_key=anthropic_key)
+                synthesizer = Synthesizer(
+                    llm_provider=llm_provider,
+                    anthropic_api_key=anthropic_key,
+                    openai_api_key=openai_key,
+                    google_api_key=google_key,
+                    model=_provider_model(llm_provider, "synth"),
+                )
 
                 self._retriever = {
                     "query_processor": query_processor,
