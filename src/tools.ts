@@ -14,47 +14,6 @@ export function registerRuneTools(api: OpenClawPluginApi): void {
       if (!isActive()) return null;
 
       return [
-        // ── rune_remember ────────────────────────────────────────────
-        {
-          name: "rune_remember",
-          label: "Rune Remember",
-          description:
-            "Search team organizational memory for past decisions, trade-offs, and context. " +
-            "Use when discussing topics that may have prior team knowledge — architecture decisions, " +
-            "technology choices, lessons learned, customer insights.",
-          parameters: Type.Object({
-            query: Type.String({ description: "Search query for organizational memory" }),
-            topk: Type.Optional(
-              Type.Number({ description: "Number of results to return (default: 5, max: 10)" }),
-            ),
-          }),
-          async execute(_toolCallId: string, params: { query: string; topk?: number }) {
-            const client = getMcpClient();
-            if (!client?.isConnected()) {
-              return {
-                content: [{ type: "text", text: "Rune MCP server not connected." }],
-                isError: true,
-              };
-            }
-
-            try {
-              const result = await client.callTool("remember", {
-                query: params.query,
-                topk: Math.min(params.topk ?? 5, 10),
-              });
-              return {
-                content: result.content ?? [{ type: "text", text: "No results found." }],
-                details: result,
-              };
-            } catch (err) {
-              return {
-                content: [{ type: "text", text: `Rune remember failed: ${String(err)}` }],
-                isError: true,
-              };
-            }
-          },
-        },
-
         // ── rune_capture ─────────────────────────────────────────────
         {
           name: "rune_capture",
@@ -138,6 +97,6 @@ export function registerRuneTools(api: OpenClawPluginApi): void {
         },
       ];
     },
-    { names: ["rune_remember", "rune_capture", "rune_recall"], optional: true },
+    { names: ["rune_capture", "rune_recall"], optional: true },
   );
 }
