@@ -192,20 +192,70 @@ class Searcher:
                 logger.warning("Metadata retrieval failed: %s", metadata_result.get("error"))
                 return []
 
-            # Step 4: Decrypt metadata via Vault
+            # Step 4: Decrypt metadata via Vault (app-layer encryption only)
+            #
+            # Metadata may be in mixed states:
+            #   - App-layer encrypted: JSON envelope {"a": "<agent_id>", "c": "<ciphertext>"}
+            #     Vault holds per-agent DEKs and can decrypt any agent's metadata.
+            #   - Plain JSON string: stored without agent_dek encryption
+            #   - Legacy binary: older records with different encoding
+            #
+            # Only entries with the {"a", "c"} envelope are sent to Vault.
             encrypted_entries = metadata_result.get("results", [])
-            encrypted_blobs = [entry.get("data", "") for entry in encrypted_entries]
 
-            if encrypted_blobs and any(encrypted_blobs):
-                non_empty = [(idx, b) for idx, b in enumerate(encrypted_blobs) if b]
-                decrypted_metadata = await self._vault.decrypt_metadata(
-                    encrypted_metadata_list=[b for _, b in non_empty]
-                )
-                for dec_idx, (entry_idx, _) in enumerate(non_empty):
-                    if dec_idx < len(decrypted_metadata):
-                        encrypted_entries[entry_idx]["metadata"] = decrypted_metadata[dec_idx]
-                for entry in encrypted_entries:
-                    entry.pop("data", None)
+            vault_decrypt_items = []  # (entry_idx, data_string) for Vault
+            for idx, entry in enumerate(encrypted_entries):
+                data = entry.get("data", "")
+                if not data:
+                    continue
+
+                # Check if data is app-layer encrypted (JSON with "a" and "c" keys)
+                try:
+                    parsed = json.loads(data)
+                    if isinstance(parsed, dict) and "a" in parsed and "c" in parsed:
+                        vault_decrypt_items.append((idx, data))
+                    else:
+                        # Plain JSON metadata — use directly
+                        entry["metadata"] = parsed
+                        entry.pop("data", None)
+                except (json.JSONDecodeError, TypeError):
+                    # Not JSON — try base64 decode then JSON parse
+                    import base64
+                    try:
+                        raw = base64.b64decode(data)
+                        parsed = json.loads(raw)
+                        entry["metadata"] = parsed
+                        entry.pop("data", None)
+                    except Exception:
+                        logger.warning("Entry %d: unrecognized metadata format, skipping", idx)
+                        entry["metadata"] = {}
+                        entry.pop("data", None)
+
+            if vault_decrypt_items:
+                try:
+                    # Batch decrypt — Vault resolves per-agent DEKs internally
+                    decrypted_metadata = await self._vault.decrypt_metadata(
+                        encrypted_metadata_list=[data for _, data in vault_decrypt_items]
+                    )
+                    for dec_idx, (entry_idx, _) in enumerate(vault_decrypt_items):
+                        if dec_idx < len(decrypted_metadata):
+                            encrypted_entries[entry_idx]["metadata"] = decrypted_metadata[dec_idx]
+                            encrypted_entries[entry_idx].pop("data", None)
+                except Exception:
+                    # Batch failed — fallback to per-entry decrypt
+                    logger.info("Batch decrypt failed, falling back to per-entry decrypt")
+                    for entry_idx, data in vault_decrypt_items:
+                        try:
+                            single = await self._vault.decrypt_metadata(
+                                encrypted_metadata_list=[data]
+                            )
+                            if single:
+                                encrypted_entries[entry_idx]["metadata"] = single[0]
+                                encrypted_entries[entry_idx].pop("data", None)
+                        except Exception as e:
+                            logger.debug("Entry %d decrypt failed: %s", entry_idx, e)
+                            encrypted_entries[entry_idx]["metadata"] = {}
+                            encrypted_entries[entry_idx].pop("data", None)
 
             return [self._to_search_result(r) for r in encrypted_entries]
 
