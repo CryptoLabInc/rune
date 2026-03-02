@@ -6,10 +6,10 @@
     "name": "Sunchul Jung",
     "email": "zotanika@cryptolab.co.kr"
   },
-  "commands": "./commands/",
+  "commands": "./commands/claude/",
   "agents": [
-    "./agents/scribe.md",
-    "./agents/retriever.md"
+    "./agents/claude/scribe.md",
+    "./agents/claude/retriever.md"
   ],
   "mcpServers": {
     "envector": {
