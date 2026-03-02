@@ -6,9 +6,9 @@ set -e
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_NAME="rune"
-MARKETPLACE="cryptolab-rune"
+MARKETPLACE="cryptolab"
 PLUGIN_KEY="${PLUGIN_NAME}@${MARKETPLACE}"
-VERSION="0.1.1"
+VERSION="0.2.0"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

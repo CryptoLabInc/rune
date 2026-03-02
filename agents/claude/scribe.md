@@ -1,6 +1,6 @@
 ---
 name: scribe
-role: Organizational Context Capture
+# role: Organizational Context Capture
 description: Continuously monitors team communications and artifacts to identify and capture significant decisions, architectural rationale, and institutional knowledge. Converts high-value context into encrypted vector embeddings for organizational memory.
 ---
 
