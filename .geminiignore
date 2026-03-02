@@ -1,0 +1,15 @@
+agents/
+docs/
+patterns/
+scripts/
+examples/
+README.md
+CONTRIBUTING.md
+LICENSE
+AGENT_INTEGRATION.md
+CLAUDE.md
+SKILL.md
+requirements.txt
+rune-one-pager.drawio.png
+.claude/
+.claude-plugin/
