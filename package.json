@@ -1,39 +1,9 @@
 {
   "name": "@cryptolab/rune",
   "version": "0.2.0",
-  "description": "FHE-encrypted organizational memory for teams. Capture and retrieve institutional knowledge with zero-knowledge privacy.",
-  "type": "module",
-  "main": "index.ts",
-  "files": [
-    "index.ts",
-    "src/",
-    "mcp/",
-    "agents/",
-    "patterns/",
-    "scripts/",
-    "config/",
-    "requirements.txt",
-    "openclaw.plugin.json"
-  ],
-  "dependencies": {
-    "@sinclair/typebox": "0.34.48"
-  },
-  "peerDependencies": {
-    "openclaw": "*"
-  },
-  "openclaw": {
-    "extensions": [
-      "./index.ts"
-    ]
-  },
-  "keywords": [
-    "mcp",
-    "fhe",
-    "memory",
-    "gemini",
-    "claude",
-    "antigravity"
-  ],
+  "description": "FHE-encrypted organizational memory for teams",
+  "private": true,
+  "license": "Apache-2.0",
   "author": "Sunchul Jung <zotanika@cryptolab.co.kr>",
-  "license": "Apache-2.0"
+  "keywords": ["mcp", "fhe", "memory", "gemini", "claude"]
 }
