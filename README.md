@@ -61,7 +61,12 @@ git clone https://github.com/CryptoLabInc/rune.git
 cd rune && ./scripts/install-codex.sh
 ```
 
-### Gemini CLI / Other Agents
+### Gemini CLI
+```bash
+gemini extensions install https://github.com/CryptoLabInc/rune
+```
+
+### Other Agents
 See [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md) for Gemini CLI, OpenAI, and custom MCP client setup.
 
 ### After Installation

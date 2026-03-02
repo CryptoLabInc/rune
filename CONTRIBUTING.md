@@ -70,7 +70,6 @@ Feature requests should include:
 ### Prerequisites
 - Git
 - Python 3.12
-- Node.js 18+ (for TypeScript wrapper)
 - Text editor (VS Code recommended)
 - An MCP-compatible agent for testing (Claude Code, Codex CLI, etc.)
 
@@ -105,12 +104,6 @@ Feature requests should include:
 - Keep updated with latest features
 - Include clear examples
 - Update installation instructions if changed
-
-### SKILL.md
-- This is what Claude reads
-- Be precise with instructions
-- Test all commands before documenting
-- Include edge cases
 
 ### Examples
 - Provide realistic scenarios
@@ -233,67 +226,58 @@ Typical response time: 2-5 business days
 
 ```
 rune/
-├── README.md                # Project overview
-├── SKILL.md                 # Claude skill definition
-├── CLAUDE.md                # Project guidelines for Claude
-├── AGENT_INTEGRATION.md     # Multi-agent setup guide
-├── CONTRIBUTING.md          # This file
-├── LICENSE                  # Apache License 2.0
-├── requirements.txt         # Python dependencies
-├── package.json             # TypeScript wrapper metadata (version source)
-├── openclaw.plugin.json     # Plugin metadata
-├── index.ts                 # TypeScript entry point
-├── src/                     # TypeScript wrapper (hooks, commands, tools)
-│   ├── config.ts            # Config reader with mtime caching
-│   ├── hooks.ts             # Hook definitions
-│   ├── commands.ts          # Slash command definitions
-│   ├── tools.ts             # Tool definitions
-│   ├── mcp-client.ts        # MCP client management
-│   └── mcp-service.ts       # MCP service lifecycle
+├── README.md                    # Project overview
+├── CLAUDE.md                    # Claude Code project guidelines
+├── GEMINI.md                    # Gemini CLI context file
+├── CONTRIBUTING.md              # This file
+├── LICENSE                      # Apache License 2.0
+├── requirements.txt             # Python dependencies
+├── package.json                 # Package metadata (version source)
 ├── .claude-plugin/
-│   ├── plugin.json          # Plugin metadata (Claude Code)
-│   └── marketplace.json     # Marketplace listing
+│   ├── plugin.json              # Claude Code plugin manifest
+│   └── marketplace.json         # Marketplace listing
+├── gemini-extension.json        # Gemini CLI extension manifest
+├── hooks/
+│   └── hooks.json               # Gemini lifecycle hooks
 ├── mcp/
 │   ├── server/
-│   │   └── server.py        # MCP server (stdio transport)
-│   └── adapter/             # enVector SDK + Vault adapters
+│   │   └── server.py            # MCP server (stdio transport)
+│   └── adapter/                 # enVector SDK + Vault adapters
 ├── agents/
-│   ├── common/              # Shared modules
-│   │   ├── config.py        # LLMConfig, load/save config
-│   │   ├── llm_client.py    # Multi-provider LLM client
-│   │   ├── llm_utils.py     # JSON parsing utilities
-│   │   ├── embedding_service.py
-│   │   └── schemas.py
-│   ├── scribe/              # Scribe agent (context capture + webhook server)
-│   │   └── handlers/        # Slack, Notion webhook handlers
-│   ├── retriever/           # Retriever agent (context recall)
-│   └── tests/               # Agent tests (pytest)
-├── patterns/                # Capture trigger patterns (en/ko/ja)
-├── commands/                # Claude skill command definitions
-├── scripts/                 # Install, configure, start scripts
-├── config/
-│   ├── config.template.json # Config file template
-│   └── README.md            # Configuration guide
-├── setup/                   # Prerequisites check guide
-└── examples/                # Usage examples
+│   ├── claude/                  # Claude agent specs (.md)
+│   │   ├── scribe.md
+│   │   └── retriever.md
+│   ├── gemini/                  # Gemini agent specs (.md)
+│   │   ├── scribe.md
+│   │   └── retriever.md
+│   ├── common/                  # Shared Python modules
+│   ├── scribe/                  # Scribe pipeline code
+│   ├── retriever/               # Retriever pipeline code
+│   └── tests/                   # Agent tests (pytest)
+├── commands/
+│   ├── claude/                  # Claude commands (.md format)
+│   └── rune/                    # Gemini commands (.toml format)
+├── patterns/                    # Capture trigger patterns (en/ko/ja)
+├── scripts/                     # Install, configure, bootstrap scripts
+├── config/                      # Configuration templates
+└── examples/                    # Usage examples
 ```
 
 ### Key Files
 
-- **SKILL.md**: Core plugin logic that Claude reads
-- **README.md**: User-facing documentation
-- **package.json**: Version and TypeScript metadata
-- **openclaw.plugin.json**: Plugin metadata
+- **CLAUDE.md**: Claude Code project guidelines
+- **GEMINI.md**: Gemini CLI context file
+- **.claude-plugin/plugin.json**: Claude Code plugin manifest
+- **gemini-extension.json**: Gemini CLI extension manifest
 - **mcp/server/server.py**: The MCP server (stdio transport)
 - **agents/common/config.py**: `LLMConfig` dataclass and config schema
 - **agents/common/llm_client.py**: Multi-provider LLM abstraction
-- **config/**: Configuration templates and docs
 
 ## Release Process
 
 Maintainers only:
 
-1. Update version in `package.json` and `openclaw.plugin.json`
+1. Update version in `package.json`, `.claude-plugin/plugin.json`, and `gemini-extension.json`
 2. Update CHANGELOG.md
 3. Run tests: `python -m pytest agents/tests/ -v`
 4. Create git tag: `git tag v0.2.0`
