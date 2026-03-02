@@ -2,7 +2,7 @@
 set -e
 
 # Bootstrap and run the enVector MCP server
-# Called by Claude Code plugin system — creates venv on first run, then execs the server
+# Called by Claude Code / Gemini CLI / Codex — creates venv on first run, then execs the server
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$PLUGIN_DIR/.venv"
