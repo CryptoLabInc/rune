@@ -9,11 +9,27 @@ VENV_DIR="$PLUGIN_DIR/.venv"
 REQUIREMENTS="$PLUGIN_DIR/requirements.txt"
 SERVER="$PLUGIN_DIR/mcp/server/server.py"
 
-# Create venv and install deps if missing
+# Deactivate any active venv to prevent pip shebang contamination.
+# If bootstrap runs inside another venv, `pip install --upgrade pip` rewrites
+# the pip shebang to point at the *outer* venv's python, causing all future
+# pip installs to target the wrong site-packages.
+unset VIRTUAL_ENV 2>/dev/null || true
+
+# Create venv if missing
 if [ ! -f "$VENV_DIR/bin/python3" ]; then
     python3 -m venv "$VENV_DIR" >&2
-    "$VENV_DIR/bin/pip" install --quiet --upgrade pip >&2
-    "$VENV_DIR/bin/pip" install --quiet -r "$REQUIREMENTS" >&2
+    "$VENV_DIR/bin/python3" -m pip install --quiet --upgrade pip >&2
+fi
+
+# Install/update deps when requirements change or previous install was incomplete.
+# .deps_installed stores the checksum of the last successfully installed requirements.
+DEPS_STAMP="$VENV_DIR/.deps_installed"
+REQ_HASH="$(md5sum "$REQUIREMENTS" 2>/dev/null | cut -d' ' -f1)"
+PREV_HASH="$(cat "$DEPS_STAMP" 2>/dev/null)"
+if [ "$REQ_HASH" != "$PREV_HASH" ]; then
+    echo "[rune] Installing/updating dependencies..." >&2
+    "$VENV_DIR/bin/python3" -m pip install --quiet -r "$REQUIREMENTS" >&2
+    echo "$REQ_HASH" > "$DEPS_STAMP"
 fi
 
 # Self-healing: clean up incomplete fastembed model downloads
