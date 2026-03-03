@@ -30,7 +30,7 @@ if MCP_ROOT not in sys.path:
 if PLUGIN_ROOT not in sys.path:
     sys.path.insert(0, PLUGIN_ROOT)
 
-from fastmcp import FastMCP  # pip install fastmcp
+from fastmcp import FastMCP, Context  # pip install fastmcp
 from mcp.types import ToolAnnotations
 from adapter import EnVectorSDKAdapter, EmbeddingAdapter
 from adapter.vault_client import VaultClient, VaultError
@@ -187,8 +187,33 @@ class MCPServerApp:
         self._agent_dek = agent_dek
         self._scribe = scribe_pipeline
         self._retriever = retriever_pipeline
+        self._client_provider_override: Optional[str] = None
+        self._active_llm_provider: Optional[str] = None
+        self._active_tier2_provider: Optional[str] = None
         # mcp
         self.mcp = FastMCP(name=mcp_server_name)
+
+        # ---------- Confidence Calculation (inlined from Synthesizer) ---------- #
+        def _calculate_confidence(results) -> float:
+            """Calculate overall confidence from search results (pure math, no LLM)."""
+            if not results:
+                return 0.0
+            certainty_weights = {
+                "supported": 1.0,
+                "partially_supported": 0.6,
+                "unknown": 0.3,
+            }
+            total_weight = 0.0
+            total_score = 0.0
+            for i, r in enumerate(results[:5]):
+                position_weight = 1.0 / (i + 1)
+                cert_weight = certainty_weights.get(r.certainty, 0.3)
+                weight = position_weight * cert_weight * r.score
+                total_weight += weight
+                total_score += weight
+            if total_weight == 0:
+                return 0.0
+            return round(min(1.0, total_score / 2.0), 2)
 
         # ---------- Common Query Preprocessing ---------- #
         def _preprocess(raw_query: Any) -> Union[List[float], List[List[float]]]:
@@ -227,149 +252,44 @@ class MCPServerApp:
                 f"Received type: {type(raw_query).__name__}"
             )
 
-        # ---------- MCP Tools: Remember (Vault-Secured Retrieval) ---------- #
-        @self.mcp.tool(
-            name="remember",
-            description=(
-                "Recall from shared team memory stored on enVector Cloud. "
-                "Unlike 'search' where the data owner is the local operator, "
-                "'remember' accesses indexes whose decryption key (secret key) is held "
-                "exclusively by a team-shared Rune-Vault server — never loaded into "
-                "this MCP server runtime. This isolation prevents agent tampering "
-                "attacks from indiscriminately decrypting shared vectors. "
-                "Vault enforces access policy (max 10 results per query, audit trail). "
-                "Use this when recalling shared team knowledge: past decisions, "
-                "institutional context, onboarding material, or any collectively "
-                "owned memory. "
-                "Accepts text queries (auto-embedded), vector arrays, or JSON-encoded vectors."
-            ),
-            annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
-        )
-        async def tool_remember(
-            index_name: Annotated[Optional[str], Field(
-                description="index name to remember from. If omitted, the admin-provisioned team index is used."
-            )] = None,
-            query: Annotated[Optional[Union[str, List[float]]], Field(
-                description="single recall query: natural language text or vector (list of floats)"
-            )] = None,
-            topk: Annotated[int, Field(description="number of results to recall (1-10, enforced by Vault policy)")] = 5,
-            request_id: Annotated[str, Field(description="optional correlation ID for audit trail")] = "",
-        ) -> Dict[str, Any]:
+        def _infer_provider_from_context(ctx: Optional[Context]) -> Optional[str]:
             """
-            Recall organizational decisions and context from encrypted memory.
-            This tool accepts a SINGLE query only. For batch queries, use the search tool instead.
-
-            Pipeline:
-            1. Embed query, run encrypted similarity scoring on enVector Cloud → result ciphertext
-            2. Rune-Vault decrypts result ciphertext with secret key, selects top-k (secret key never leaves Vault)
-            3. Retrieve metadata for top-k indices from enVector Cloud
-
-            Args:
-                index_name (str): The name of index to recall from. If omitted, uses the admin-provisioned team index.
-                query (Union[str, List[float]]): Single recall query (text or vector).
-                topk (int): Number of top results (max 10, enforced by Vault).
-                request_id (str): Optional correlation ID for audit trail.
-
-            Returns:
-                Dict[str, Any]: The recalled results and audit information,
+            Infer LLM provider from MCP initialize clientInfo.name.
+            This is best-effort and only used when config provider is set to "auto".
             """
-            # Resolve index_name: explicit > vault default > error
-            if index_name is None:
-                if self._vault_index_name:
-                    index_name = self._vault_index_name
-                else:
-                    return {
-                        "ok": False,
-                        "error": "index_name is required. No team index configured by Vault admin.",
-                    }
-
-            if query is None:
-                return {"ok": False, "error": "query parameter is required."}
-
-            if self.envector is None:
-                return {
-                    "ok": False,
-                    "error": "enVector adapter not available. MCP server started without enVector connection.",
-                }
-
-            if self.vault is None:
-                return {
-                    "ok": False,
-                    "error": "Vault not configured. Set RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN environment variables.",
-                }
-
+            if ctx is None or ctx.request_context is None:
+                return None
 
             try:
-                preprocessed_query = _preprocess(query)
-            except ValueError as exc:
-                return {"ok": False, "error": f"Query preprocessing failed: {exc}"}
+                session = getattr(ctx.request_context, "session", None)
+                params = getattr(session, "client_params", None)
+                client_info = getattr(params, "clientInfo", None) or getattr(params, "client_info", None)
+                client_name = (getattr(client_info, "name", "") or "").lower()
+            except Exception:
+                return None
 
-            if isinstance(preprocessed_query, list) and len(preprocessed_query) > 0 and isinstance(preprocessed_query[0], list):
-                return {
-                    "ok": False,
-                    "error": "Remember tool accepts single query only. Use search tool for batch queries."
-                }
+            if not client_name:
+                return None
+            if any(token in client_name for token in ("claude", "anthropic")):
+                return "anthropic"
+            if any(token in client_name for token in ("openai", "codex", "chatgpt")):
+                return "openai"
+            if any(token in client_name for token in ("gemini", "google", "antigravity", "openclaw")):
+                return "google"
+            return None
 
-            if topk > 10:
-                return {"ok": False, "error": "Policy: max top_k is 10."}
+        def _maybe_reload_for_auto_provider(ctx: Optional[Context]) -> None:
+            inferred = _infer_provider_from_context(ctx)
+            if not inferred:
+                return
+            if inferred == self._client_provider_override:
+                return
 
-            try:
-                # Step 1: encrypted search → result ciphertext
-                scoring_result = self.envector.call_score(
-                    index_name=index_name,
-                    query=[preprocessed_query]
-                )
-                if not scoring_result.get("ok"):
-                    return {"ok": False, "error": scoring_result.get("error"), "request_id": request_id or "N/A"}
-
-                blobs = scoring_result["encrypted_blobs"]
-                if not blobs:
-                    return {"ok": True, "results": [], "request_id": request_id or "N/A"}
-
-                # Step 2: Vault decrypts + top-k
-                vault_result = await self.vault.decrypt_search_results(
-                    encrypted_blob_b64=blobs[0],
-                    top_k=topk,
-                )
-                if not vault_result.ok:
-                    return {"ok": False, "error": f"Vault decryption failed: {vault_result.error}", "request_id": request_id or "N/A"}
-
-                # Step 3: Retrieve encrypted metadata
-                metadata_result = self.envector.call_remind(
-                    index_name=index_name,
-                    indices=vault_result.results,
-                    output_fields=["metadata"]
-                )
-                if not metadata_result.get("ok"):
-                    return {"ok": False, "error": metadata_result.get("error"), "request_id": request_id or "N/A"}
-
-                # Step 4: Decrypt metadata via Vault (MetadataKey never leaves Vault)
-                encrypted_entries = metadata_result.get("results", [])
-                encrypted_blobs = [
-                    entry.get("data", "") for entry in encrypted_entries
-                ]
-                if encrypted_blobs and any(encrypted_blobs):
-                    non_empty = [(idx, b) for idx, b in enumerate(encrypted_blobs) if b]
-                    decrypted_metadata = await self.vault.decrypt_metadata(
-                        encrypted_metadata_list=[b for _, b in non_empty]
-                    )
-                    # Merge decrypted metadata with scores (index-safe)
-                    for dec_idx, (entry_idx, _) in enumerate(non_empty):
-                        if dec_idx < len(decrypted_metadata):
-                            encrypted_entries[entry_idx]["metadata"] = decrypted_metadata[dec_idx]
-                    for entry in encrypted_entries:
-                        entry.pop("data", None)
-
-                return {
-                    "ok": True,
-                    "results": encrypted_entries,
-                    "request_id": request_id or "N/A",
-                }
-
-            except VaultError as e:
-                return {"ok": False, "error": f"Vault error: {e}", "request_id": request_id or "N/A"}
-            except Exception as e:
-                return {"ok": False, "error": str(e), "request_id": request_id or "N/A"}
+            self._client_provider_override = inferred
+            logger.info("Auto provider inferred from MCP clientInfo: %s", inferred)
+            refresh = self._init_pipelines()
+            if refresh.get("errors"):
+                logger.warning("Auto provider reload had warnings: %s", refresh["errors"])
 
         # ---------- MCP Tools: Vault Health Check ---------- #
         @self.mcp.tool(
@@ -417,10 +337,13 @@ class MCPServerApp:
         @self.mcp.tool(
             name="capture",
             description=(
-                "Capture a significant organizational decision into encrypted memory. "
-                "Runs the 3-tier pipeline: Tier 1 embedding similarity detection, "
-                "Tier 2 LLM policy filter (Haiku), Tier 3 structured extraction (Sonnet). "
-                "Only captures text that passes all tiers as significant."
+                "Capture a significant organizational decision into FHE-encrypted team memory. "
+                "Runs a 3-tier pipeline: Tier 1 embedding similarity detection (zero LLM tokens), "
+                "Tier 2 lightweight LLM policy filter (~200 tokens), "
+                "Tier 3 full LLM structured extraction (~500 tokens). "
+                "Only text that passes all tiers is encrypted and stored on enVector Cloud. "
+                "Agent-delegated mode: pass `extracted` JSON to skip Tier 2/3 entirely — "
+                "the calling agent performs evaluation and extraction, MCP server only stores."
             ),
             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
         )
@@ -429,7 +352,11 @@ class MCPServerApp:
             source: Annotated[str, Field(description="Source of the text (e.g., 'claude_agent', 'slack', 'github')")] = "claude_agent",
             user: Annotated[Optional[str], Field(description="User who authored the text")] = None,
             channel: Annotated[Optional[str], Field(description="Channel or location where the text originated")] = None,
+            extracted: Annotated[Optional[str], Field(description="Pre-extracted JSON from calling agent (agent-delegated mode). When provided, Tier 2/3 are skipped.")] = None,
+            ctx: Optional[Context] = None,
         ) -> Dict[str, Any]:
+            _maybe_reload_for_auto_provider(ctx)
+
             if self._scribe is None:
                 return {"ok": False, "error": "Scribe pipeline not initialized. Check Rune configuration."}
 
@@ -439,12 +366,140 @@ class MCPServerApp:
             try:
                 from datetime import datetime, timezone
                 from agents.scribe.record_builder import RawEvent
+                from agents.scribe.llm_extractor import (
+                    ExtractionResult, ExtractedFields, PhaseExtractedFields,
+                )
+                from agents.common.llm_utils import parse_llm_json
 
                 detector = self._scribe["detector"]
                 tier2_filter = self._scribe.get("tier2_filter")
                 record_builder = self._scribe["record_builder"]
                 envector_client = self._scribe["envector_client"]
                 embedding_service = self._scribe["embedding_service"]
+
+                # ===== Agent-delegated mode: extracted JSON provided =====
+                if extracted is not None:
+                    data = parse_llm_json(extracted)
+                    if not data:
+                        return {"ok": False, "error": "Invalid extracted JSON — could not parse."}
+
+                    # Tier 2 check: agent already evaluated
+                    tier2 = data.get("tier2", {})
+                    if not tier2.get("capture", True):
+                        return {
+                            "ok": True,
+                            "captured": False,
+                            "reason": f"Agent rejected: {tier2.get('reason', 'no reason')}",
+                        }
+
+                    # Domain from agent's tier2 evaluation
+                    agent_domain = tier2.get("domain", "general")
+
+                    # Tier 1: still run for detection metadata
+                    detection = detector.detect(text)
+                    if agent_domain and agent_domain != "general":
+                        from dataclasses import replace as dc_replace
+                        detection = dc_replace(detection, domain=agent_domain)
+
+                    # Build ExtractionResult from agent JSON
+                    agent_confidence = data.get("confidence")
+                    if isinstance(agent_confidence, (int, float)):
+                        agent_confidence = max(0.0, min(1.0, float(agent_confidence)))
+                    else:
+                        agent_confidence = None
+
+                    phases_data = data.get("phases")
+                    if phases_data and len(phases_data) > 1:
+                        # Multi-phase or bundle
+                        phases = []
+                        for p in phases_data[:7]:
+                            phases.append(PhaseExtractedFields(
+                                phase_title=str(p.get("phase_title", ""))[:60],
+                                phase_decision=str(p.get("phase_decision", "")),
+                                phase_rationale=str(p.get("phase_rationale", "")),
+                                phase_problem=str(p.get("phase_problem", "")),
+                                alternatives=[str(a) for a in p.get("alternatives", []) if a],
+                                trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
+                                tags=[str(t).lower() for t in p.get("tags", []) if t],
+                            ))
+                        pre_extraction = ExtractionResult(
+                            group_title=str(data.get("group_title", ""))[:60],
+                            group_type=str(data.get("group_type", "phase_chain")),
+                            status_hint=str(data.get("status_hint", "")).lower(),
+                            tags=[str(t).lower() for t in data.get("tags", []) if t],
+                            confidence=agent_confidence,
+                            phases=phases,
+                        )
+                    else:
+                        # Single record (may have phases with 0-1 entries, or flat fields)
+                        if phases_data and len(phases_data) == 1:
+                            p = phases_data[0]
+                            single = ExtractedFields(
+                                title=str(p.get("phase_title", data.get("title", "")))[:60],
+                                rationale=str(p.get("phase_rationale", data.get("rationale", ""))),
+                                problem=str(p.get("phase_problem", data.get("problem", ""))),
+                                alternatives=[str(a) for a in p.get("alternatives", []) if a],
+                                trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
+                                status_hint=str(data.get("status_hint", "")).lower(),
+                                tags=[str(t).lower() for t in p.get("tags", data.get("tags", [])) if t],
+                            )
+                        else:
+                            single = ExtractedFields(
+                                title=str(data.get("title", ""))[:60],
+                                rationale=str(data.get("rationale", "")),
+                                problem=str(data.get("problem", "")),
+                                alternatives=[str(a) for a in data.get("alternatives", []) if a],
+                                trade_offs=[str(t) for t in data.get("trade_offs", []) if t],
+                                status_hint=str(data.get("status_hint", "")).lower(),
+                                tags=[str(t).lower() for t in data.get("tags", []) if t],
+                            )
+                        pre_extraction = ExtractionResult(
+                            group_title=single.title,
+                            status_hint=single.status_hint,
+                            tags=single.tags,
+                            confidence=agent_confidence,
+                            single=single,
+                        )
+
+                    raw_event = RawEvent(
+                        text=text,
+                        user=user or "unknown",
+                        channel=channel or "claude_session",
+                        timestamp=str(datetime.now(timezone.utc).timestamp()),
+                        source=source,
+                    )
+                    records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
+
+                    # Store in enVector with FHE encryption
+                    texts = [r.payload.text for r in records]
+                    metadata = [r.model_dump(mode="json") for r in records]
+                    insert_result = envector_client.insert_with_text(
+                        index_name=self._vault_index_name,
+                        texts=texts,
+                        embedding_service=embedding_service,
+                        metadata=metadata,
+                    )
+
+                    if not insert_result.get("ok"):
+                        return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+
+                    first = records[0]
+                    result = {
+                        "ok": True,
+                        "captured": True,
+                        "record_id": first.id,
+                        "summary": first.title,
+                        "domain": first.domain.value,
+                        "certainty": first.why.certainty.value,
+                        "mode": "agent-delegated",
+                    }
+                    if len(records) > 1:
+                        result["record_count"] = len(records)
+                        result["group_id"] = first.group_id
+                        result["group_type"] = first.group_type or "phase_chain"
+                    return result
+
+                # ===== Standard mode: full 3-tier pipeline =====
 
                 # Tier 1: Embedding similarity detection (0 LLM tokens)
                 detection = detector.detect(text)
@@ -519,17 +574,21 @@ class MCPServerApp:
         @self.mcp.tool(
             name="recall",
             description=(
-                "Search organizational memory for past decisions, context, and insights. "
-                "Parses the query to understand intent, searches encrypted vector memory "
-                "with multi-query expansion, and synthesizes a coherent answer. "
-                "Respects evidence certainty levels in the response."
+                "Search and synthesize answers from FHE-encrypted team memory via Vault-secured pipeline. "
+                "Pipeline: (1) query expansion and intent detection, "
+                "(2) encrypted similarity scoring on enVector Cloud, "
+                "(3) Rune-Vault decrypts result ciphertext (secret key never leaves Vault). "
+                "Use for questions about past decisions, trade-offs, and organizational knowledge."
             ),
             annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
         )
         async def tool_recall(
             query: Annotated[str, Field(description="Natural language question about past decisions or organizational context")],
             topk: Annotated[int, Field(description="Number of results to consider for synthesis")] = 5,
+            ctx: Optional[Context] = None,
         ) -> Dict[str, Any]:
+            _maybe_reload_for_auto_provider(ctx)
+
             if self._retriever is None:
                 return {"ok": False, "error": "Retriever pipeline not initialized. Check Rune configuration."}
 
@@ -539,7 +598,7 @@ class MCPServerApp:
             try:
                 query_processor = self._retriever["query_processor"]
                 searcher = self._retriever["searcher"]
-                synthesizer = self._retriever["synthesizer"]
+                synthesizer = self._retriever.get("synthesizer")
 
                 # Step 1: Parse query (intent detection, entity extraction, query expansion)
                 parsed_query = query_processor.parse(query)
@@ -547,17 +606,58 @@ class MCPServerApp:
                 # Step 2: Search enVector (multi-query expansion, dedup, ranking)
                 results = await searcher.search(parsed_query, topk=topk)
 
-                # Step 3: Synthesize answer (LLM synthesis with certainty respect)
-                answer = synthesizer.synthesize(parsed_query, results)
+                # Step 3: Return results (agent synthesizes) or use server-side synthesizer
+                # Primary path: raw results for agent-side synthesis (no LLM key needed)
+                if synthesizer is None or not synthesizer.has_llm:
+                    confidence = _calculate_confidence(results)
+                    formatted_results = []
+                    for r in results:
+                        entry = {
+                            "record_id": r.record_id,
+                            "title": r.title,
+                            "content": r.payload_text,
+                            "domain": r.domain,
+                            "certainty": r.certainty,
+                            "score": r.score,
+                        }
+                        if r.group_id:
+                            entry["group_id"] = r.group_id
+                            entry["group_type"] = r.group_type
+                            entry["phase_seq"] = r.phase_seq
+                            entry["phase_total"] = r.phase_total
+                        formatted_results.append(entry)
 
+                    sources = [
+                        {
+                            "record_id": r.record_id,
+                            "title": r.title,
+                            "domain": r.domain,
+                            "certainty": r.certainty,
+                            "score": r.score,
+                        }
+                        for r in results[:5]
+                    ]
+
+                    return {
+                        "ok": True,
+                        "found": len(results),
+                        "results": formatted_results,
+                        "confidence": confidence,
+                        "sources": sources,
+                        "synthesized": False,
+                    }
+
+                # Fallback: server-side synthesis when LLM key is available
+                answer = synthesizer.synthesize(parsed_query, results)
                 return {
                     "ok": True,
                     "found": len(results),
                     "answer": answer.answer,
                     "confidence": answer.confidence,
                     "sources": answer.sources,
-                    "warnings": answer.warnings,
-                    "related_queries": answer.related_queries,
+                    "warnings": answer.warnings if answer.warnings else None,
+                    "related_queries": answer.related_queries if answer.related_queries else None,
+                    "synthesized": True,
                 }
 
             except Exception as e:
@@ -677,7 +777,49 @@ class MCPServerApp:
                 agent_dek=self._agent_dek,
             )
 
-            anthropic_key = rune_config.retriever.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY", "")
+            llm_cfg = rune_config.llm
+            configured_llm_provider = (llm_cfg.provider or os.getenv("RUNE_LLM_PROVIDER", "anthropic")).lower()
+            configured_tier2_provider = (llm_cfg.tier2_provider or os.getenv("RUNE_TIER2_LLM_PROVIDER", configured_llm_provider)).lower()
+            anthropic_key = llm_cfg.anthropic_api_key or os.getenv("ANTHROPIC_API_KEY", "")
+            openai_key = llm_cfg.openai_api_key or os.getenv("OPENAI_API_KEY", "")
+            google_key = llm_cfg.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
+
+            def _resolve_provider(configured: str, fallback: str) -> str:
+                if configured == "auto":
+                    if self._client_provider_override in ("anthropic", "openai", "google"):
+                        return self._client_provider_override
+                    env_auto = os.getenv("RUNE_AUTO_LLM_PROVIDER", "").lower()
+                    if env_auto in ("anthropic", "openai", "google"):
+                        return env_auto
+                    return fallback
+                if configured in ("anthropic", "openai", "google"):
+                    return configured
+                return fallback
+
+            llm_provider = _resolve_provider(configured_llm_provider, "anthropic")
+            tier2_provider = _resolve_provider(configured_tier2_provider, llm_provider)
+            self._active_llm_provider = llm_provider
+            self._active_tier2_provider = tier2_provider
+
+            def _provider_key(provider: str) -> str:
+                if provider == "openai":
+                    return openai_key
+                if provider == "google":
+                    return google_key
+                return anthropic_key
+
+            def _provider_model(provider: str, role: str) -> str:
+                if provider == "openai":
+                    if role == "tier2" and llm_cfg.openai_tier2_model:
+                        return llm_cfg.openai_tier2_model
+                    return llm_cfg.openai_model
+                if provider == "google":
+                    if role == "tier2" and llm_cfg.google_tier2_model:
+                        return llm_cfg.google_tier2_model
+                    return llm_cfg.google_model
+                if role == "tier2":
+                    return rune_config.scribe.tier2_model
+                return llm_cfg.anthropic_model
 
             # Scribe pipeline
             pattern_cache = PatternCache(embedding_svc)
@@ -691,16 +833,27 @@ class MCPServerApp:
                 high_confidence_threshold=rune_config.scribe.auto_capture_threshold,
             )
 
+            has_llm_key = bool(_provider_key(llm_provider))
+
             tier2_filter = None
-            if rune_config.scribe.tier2_enabled and anthropic_key:
+            if rune_config.scribe.tier2_enabled and _provider_key(tier2_provider):
                 tier2_filter = Tier2Filter(
+                    llm_provider=tier2_provider,
                     anthropic_api_key=anthropic_key,
-                    model=rune_config.scribe.tier2_model,
+                    openai_api_key=openai_key,
+                    google_api_key=google_key,
+                    model=_provider_model(tier2_provider, "tier2"),
                 )
 
             llm_extractor = None
-            if anthropic_key:
-                llm_extractor = LLMExtractor(anthropic_api_key=anthropic_key)
+            if has_llm_key:
+                llm_extractor = LLMExtractor(
+                    llm_provider=llm_provider,
+                    anthropic_api_key=anthropic_key,
+                    openai_api_key=openai_key,
+                    google_api_key=google_key,
+                    model=_provider_model(llm_provider, "extract"),
+                )
             record_builder = RecordBuilder(llm_extractor=llm_extractor)
 
             self._scribe = {
@@ -711,16 +864,34 @@ class MCPServerApp:
                 "embedding_service": embedding_svc,
             }
             result["scribe"] = True
-            logger.info("Scribe pipeline initialized")
+            if has_llm_key:
+                logger.info("Scribe pipeline initialized (server-side Tier 2/3)")
+            else:
+                logger.info("Scribe pipeline initialized (agent-delegated mode — no LLM API key)")
 
             # Retriever pipeline
             if not self._vault_index_name:
                 result["errors"].append("Vault index name not available — retriever pipeline skipped.")
                 logger.warning("No vault index name — skipping retriever pipeline init")
             else:
-                query_processor = QueryProcessor(anthropic_api_key=anthropic_key)
+                query_processor = QueryProcessor(
+                    llm_provider=llm_provider,
+                    anthropic_api_key=anthropic_key,
+                    openai_api_key=openai_key,
+                    google_api_key=google_key,
+                    model=_provider_model(llm_provider, "query"),
+                )
                 searcher = Searcher(envector_client, embedding_svc, self._vault_index_name, vault_client=self.vault)
-                synthesizer = Synthesizer(anthropic_api_key=anthropic_key)
+
+                synthesizer = None
+                if has_llm_key:
+                    synthesizer = Synthesizer(
+                        llm_provider=llm_provider,
+                        anthropic_api_key=anthropic_key,
+                        openai_api_key=openai_key,
+                        google_api_key=google_key,
+                        model=_provider_model(llm_provider, "query"),
+                    )
 
                 self._retriever = {
                     "query_processor": query_processor,
@@ -728,7 +899,10 @@ class MCPServerApp:
                     "synthesizer": synthesizer,
                 }
                 result["retriever"] = True
-                logger.info("Retriever pipeline initialized")
+                if has_llm_key:
+                    logger.info("Retriever pipeline initialized (server-side synthesis)")
+                else:
+                    logger.info("Retriever pipeline initialized (agent-delegated mode — raw results returned)")
 
         except Exception as e:
             result["errors"].append(str(e))
@@ -900,9 +1074,9 @@ if __name__ == "__main__":
             vault_endpoint=RUNEVAULT_ENDPOINT,
             vault_token=RUNEVAULT_TOKEN,
         )
-        logger.info("Vault client initialized - remember tool available")
+        logger.info("Vault client initialized - recall tool available")
     else:
-        logger.info("Vault not configured - remember tool will be unavailable")
+        logger.info("Vault not configured - recall tool will be unavailable")
 
     # ── Create MCP app (pipelines initialized via _init_pipelines) ──
     app = MCPServerApp(

@@ -534,19 +534,17 @@ class TestQueryProcessorMultilingual:
 
         processor = QueryProcessor()
 
-        # Mock LLM client
-        mock_client = Mock()
-        mock_response = Mock()
-        mock_response.content = [Mock()]
-        mock_response.content[0].text = json.dumps({
+        # Mock the LLMClient
+        mock_llm = Mock()
+        mock_llm.is_available = True
+        mock_llm.generate.return_value = json.dumps({
             "intent": "decision_rationale",
             "english_query": "Why did we choose PostgreSQL?",
             "entities": ["PostgreSQL"],
             "keywords": ["choose", "database", "postgresql"],
             "time_scope": "all_time",
         })
-        mock_client.messages.create.return_value = mock_response
-        processor._llm_client = mock_client
+        processor._llm = mock_llm
 
         return processor
 
@@ -579,7 +577,7 @@ class TestQueryProcessorMultilingual:
         result = mock_llm_processor.parse("왜 PostgreSQL을 선택했나요?")
 
         # LLM should be called
-        mock_llm_processor._llm_client.messages.create.assert_called_once()
+        mock_llm_processor._llm.generate.assert_called_once()
 
         assert result.intent == QueryIntent.DECISION_RATIONALE
         assert "PostgreSQL" in result.entities
@@ -597,11 +595,11 @@ class TestQueryProcessorMultilingual:
         result = mock_llm_processor.parse("Why did we choose PostgreSQL?")
 
         # LLM should NOT be called for English
-        mock_llm_processor._llm_client.messages.create.assert_not_called()
+        mock_llm_processor._llm.generate.assert_not_called()
 
     def test_llm_parse_failure_falls_back(self, mock_llm_processor):
         """Test that LLM failure falls back to regex parsing"""
-        mock_llm_processor._llm_client.messages.create.side_effect = Exception("API error")
+        mock_llm_processor._llm.generate.side_effect = Exception("API error")
 
         result = mock_llm_processor.parse("왜 PostgreSQL을 선택했나요?")
 

@@ -8,10 +8,12 @@ memory, based on natural language policy.
 Token budget: ~200 tokens per call (policy summary + message + response).
 """
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Optional
+
+from ..common.llm_client import LLMClient
+from ..common.llm_utils import parse_llm_json
 
 logger = logging.getLogger("rune.scribe.tier2")
 
@@ -64,25 +66,25 @@ class Tier2Filter:
 
     def __init__(
         self,
+        llm_provider: str = "anthropic",
         anthropic_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        google_api_key: Optional[str] = None,
         model: str = "claude-haiku-4-5-20251001",
     ):
-        self._api_key = anthropic_api_key
+        self._provider = llm_provider
         self._model = model
-        self._client = None
-
-        if anthropic_api_key:
-            try:
-                import anthropic
-                self._client = anthropic.Anthropic(api_key=anthropic_api_key)
-            except ImportError:
-                logger.warning("anthropic package not installed")
-            except Exception as e:
-                logger.warning("Failed to init client: %s", e)
+        self._llm = LLMClient(
+            provider=llm_provider,
+            model=model,
+            anthropic_api_key=anthropic_api_key,
+            openai_api_key=openai_api_key,
+            google_api_key=google_api_key,
+        )
 
     @property
     def is_available(self) -> bool:
-        return self._client is not None
+        return self._llm.is_available
 
     def evaluate(self, text: str, tier1_score: float = 0.0, tier1_pattern: str = "") -> FilterResult:
         """
@@ -108,15 +110,12 @@ class Tier2Filter:
             if tier1_pattern:
                 user_msg += f"\n(Tier 1 matched pattern: \"{tier1_pattern[:80]}\")"
 
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=100,
+            raw = self._llm.generate(
+                user_msg,
                 system=FILTER_POLICY,
-                messages=[{"role": "user", "content": user_msg}],
+                max_tokens=100,
                 timeout=30.0,
             )
-
-            raw = response.content[0].text.strip()
             return self._parse_response(raw)
 
         except Exception as e:
@@ -129,34 +128,13 @@ class Tier2Filter:
 
     def _parse_response(self, raw: str) -> FilterResult:
         """Parse LLM JSON response."""
-        # Strip markdown fences if present
-        text = raw
-        if text.startswith("```"):
-            lines = text.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            text = "\n".join(lines)
-
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                try:
-                    data = json.loads(text[start:end])
-                except json.JSONDecodeError:
-                    return FilterResult(
-                        should_capture=True,
-                        reason="Failed to parse LLM response, defaulting to capture",
-                        raw_response=raw,
-                    )
-            else:
-                return FilterResult(
-                    should_capture=True,
-                    reason="No JSON in LLM response, defaulting to capture",
-                    raw_response=raw,
-                )
-
+        data = parse_llm_json(raw)
+        if not data:
+            return FilterResult(
+                should_capture=True,
+                reason="Failed to parse LLM response, defaulting to capture",
+                raw_response=raw,
+            )
         return FilterResult(
             should_capture=bool(data.get("capture", True)),
             reason=str(data.get("reason", "")),

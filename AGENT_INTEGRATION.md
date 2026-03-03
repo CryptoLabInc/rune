@@ -6,15 +6,18 @@ Rune works with all major AI agents via native MCP (Model Context Protocol) supp
 
 | Agent | Integration | Setup |
 |-------|-------------|-------|
-| **Claude** | MCP Native (stdio) | ⭐ Easy |
-| **Gemini** | MCP Native (stdio) | ⭐ Easy |
+| **Claude Code** | MCP Native (stdio) | ⭐ Easy |
+| **Codex CLI** | MCP Native (stdio) | ⭐ One Command |
+| **Gemini CLI** | MCP Native (stdio) | ⭐ One Command |
 | **OpenAI GPT** | MCP Native (stdio) | ⭐ Easy |
 
 > **Note**: The MCP server uses **stdio transport only**. HTTP/SSE mode is not supported.
 
 ---
 
-## Claude
+---
+
+## Claude Code
 
 ### Automatic Setup (Recommended)
 
@@ -41,11 +44,40 @@ Restart Claude Code → MCP tools auto-load.
 
 ---
 
-## Gemini
+## Codex CLI
 
-**Update 2026**: Gemini has [native MCP support](https://cloud.google.com/blog/products/ai-machine-learning/announcing-official-mcp-support-for-google-services).
+### One-Command Installation
 
-### Option 1: Gemini SDK (Recommended)
+```bash
+cd rune
+./scripts/install-codex.sh
+```
+
+This automatically:
+1. Creates `.venv` and installs Python dependencies
+2. Registers Rune MCP server as `rune` in Codex
+
+### Verify
+
+```bash
+codex mcp list
+# Should show rune
+```
+
+### Configuration
+
+After installation, configure credentials:
+```bash
+cp config/config.template.json ~/.rune/config.json
+# Edit with your vault/envector credentials
+```
+
+
+---
+
+## Gemini CLI
+
+### Option 1: Gemini SDK
 
 ```bash
 pip install google-generativeai mcp
@@ -82,7 +114,7 @@ import asyncio
 asyncio.run(main())
 ```
 
-### Option 2: Gemini CLI (Easiest)
+### Option 2: Gemini CLI MCP Config
 
 ```bash
 npm install -g @google/generative-ai-cli

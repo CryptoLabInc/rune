@@ -1,0 +1,25 @@
+description = "Capture a decision or insight to encrypted organizational memory"
+prompt = """
+You are storing context to Rune's FHE-encrypted organizational memory.
+
+First, read `~/.rune/config.json`. If it is missing or `state` is not `"active"`, respond:
+"Rune is dormant. Run `/rune:configure` and `/rune:activate` first."
+Do NOT attempt any storage.
+
+When active:
+
+1. Take the user's input: {{input}}
+2. Call the `capture` MCP tool with the text. Include source as "gemini_agent".
+3. Confirm what was stored with a brief summary.
+
+Guidelines for what to capture:
+- Architectural decisions and their reasoning
+- Trade-off analyses where a direction was chosen
+- Policy choices (naming conventions, error handling strategies)
+- Post-mortem insights and lessons learned
+
+Do NOT capture:
+- Routine code changes without significant decisions
+- Information already in version control
+- Temporary debugging context
+"""

@@ -36,6 +36,11 @@ vault_keys/
 .env.local
 .env.*.local
 
+# Node.js
+node_modules/
+dist/
+*.tsbuildinfo
+
 # Python virtual environment
 .venv/
 venv/

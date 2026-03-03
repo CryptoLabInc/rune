@@ -204,6 +204,7 @@ class RecordBuilder:
         raw_event: RawEvent,
         detection: DetectionResult,
         language: Optional[LanguageInfo] = None,
+        pre_extraction: Optional[ExtractionResult] = None,
     ) -> List[DecisionRecord]:
         """
         Build one or more Decision Records, splitting into phases if needed.
@@ -216,18 +217,22 @@ class RecordBuilder:
             raw_event: Raw event data
             detection: Detection result from DecisionDetector
             language: Optional detected language info
+            pre_extraction: Pre-built ExtractionResult from calling agent
+                (agent-delegated mode). When provided, LLMExtractor is skipped entirely.
 
         Returns:
             List of DecisionRecords (1 for single, 2-7 for phase chain)
         """
-        # Without LLM, fall back to single record
-        if not self._llm_extractor or not self._llm_extractor.is_available:
-            return [self.build(raw_event, detection, language)]
-
         clean_text, redaction_notes = self._redact_sensitive(raw_event.text)
 
-        # Phase-aware extraction (auto-detects short vs long)
-        extraction: ExtractionResult = self._llm_extractor.extract(clean_text)
+        if pre_extraction is not None:
+            extraction = pre_extraction
+        elif self._llm_extractor and self._llm_extractor.is_available:
+            # Phase-aware extraction (auto-detects short vs long)
+            extraction = self._llm_extractor.extract(clean_text)
+        else:
+            # Without LLM and no pre_extraction, fall back to single record
+            return [self.build(raw_event, detection, language)]
 
         if not extraction.is_multi_phase:
             # Single record — use the single extraction result
@@ -264,7 +269,7 @@ class RecordBuilder:
                 evidence=evidence,
                 tags=fields.tags or self._extract_tags(clean_text, detection),
                 quality=Quality(
-                    scribe_confidence=detection.confidence,
+                    scribe_confidence=extraction.confidence if extraction.confidence is not None else detection.confidence,
                     review_state=ReviewState.UNREVIEWED,
                     review_notes=redaction_notes if redaction_notes else None,
                 ),
@@ -330,7 +335,7 @@ class RecordBuilder:
                 evidence=evidence,
                 tags=phase.tags or extraction.tags or self._extract_tags(clean_text, detection),
                 quality=Quality(
-                    scribe_confidence=detection.confidence,
+                    scribe_confidence=extraction.confidence if extraction.confidence is not None else detection.confidence,
                     review_state=ReviewState.UNREVIEWED,
                     review_notes=redaction_notes if redaction_notes else None,
                 ),

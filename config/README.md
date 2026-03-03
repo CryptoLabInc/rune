@@ -49,7 +49,7 @@ API key for enVector Cloud authentication.
 
 **Example**: `your-envector-api-key`
 
-> **Note**: The index name for team shared memory is managed by the Vault admin and distributed automatically at startup. All tools (`remember`, `capture`, `recall`) use the Vault-provided index name.
+> **Note**: The index name for team shared memory is managed by the Vault admin and distributed automatically at startup. All tools (`capture`, `recall`) use the Vault-provided index name.
 
 ### `state` (required)
 Plugin activation state. Values:
@@ -67,21 +67,18 @@ The config file also supports optional sections for agent configuration:
     "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
   },
   "scribe": {
-    "slack_webhook_port": 8080,
     "similarity_threshold": 0.35,
     "auto_capture_threshold": 0.7,
-    "tier2_enabled": true,
-    "tier2_model": "claude-haiku-4-5-20251001"
+    "tier2_enabled": true
   },
   "retriever": {
     "topk": 10,
-    "confidence_threshold": 0.5,
-    "anthropic_model": "claude-sonnet-4-20250514"
+    "confidence_threshold": 0.5
   }
 }
 ```
 
-All optional sections have sensible defaults. See `agents/common/config.py` for the full schema.
+All optional sections have sensible defaults. The capture pipeline's LLM (Tier 2/3) automatically uses API keys inherited from the host agent's environment (e.g., `ANTHROPIC_API_KEY`). No manual LLM configuration is needed.
 
 ## Manual Configuration
 
@@ -132,6 +129,9 @@ export RUNEVAULT_TOKEN="your-vault-token"
 # enVector Cloud
 export ENVECTOR_ENDPOINT="runestone-xxx.clusters.envector.io"
 export ENVECTOR_API_KEY="your-api-key"
+
+# LLM for capture pipeline (optional — auto-detected from host agent environment)
+# export RUNE_LLM_PROVIDER="anthropic"  # or "openai" or "google"
 ```
 
 The plugin will check environment variables if `~/.rune/config.json` doesn't exist.

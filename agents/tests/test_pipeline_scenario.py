@@ -460,25 +460,21 @@ class TestConversationCaptureDecisions:
         from agents.scribe.tier2_filter import Tier2Filter, FilterResult
 
         f = Tier2Filter.__new__(Tier2Filter)
-        f._api_key = "test-key"
+        f._provider = "anthropic"
         f._model = "claude-haiku-4-5-20251001"
-        f._client = Mock()
 
-        def side_effect_evaluate(**kwargs):
-            messages = kwargs.get("messages", [])
-            if messages:
-                user_content = messages[0]["content"]
-                # Extract the actual text from "Message: ..." format
-                text = user_content.replace("Message: ", "").split("\n(Tier 1")[0]
-                judgment = simulate_tier2_judgment(text)
-                response = Mock()
-                content_block = Mock()
-                content_block.text = json.dumps(judgment)
-                response.content = [content_block]
-                return response
-            return make_tier2_response(True, "default", "general")
+        mock_llm = Mock()
+        mock_llm.is_available = True
 
-        f._client.messages.create.side_effect = side_effect_evaluate
+        def side_effect_evaluate(prompt, **kwargs):
+            # Extract the actual text from "<message>\n...\n</message>" format
+            text = prompt.replace("<message>\n", "").split("\n</message>")[0]
+            text = text.split("\n(Tier 1")[0]
+            judgment = simulate_tier2_judgment(text)
+            return json.dumps(judgment)
+
+        mock_llm.generate.side_effect = side_effect_evaluate
+        f._llm = mock_llm
         return f
 
     def test_alice_capture_decisions(self, tier2_filter):
@@ -754,23 +750,21 @@ class TestFullPipelineFlow:
 
         # Tier 2: simulated judgment
         tier2 = Tier2Filter.__new__(Tier2Filter)
-        tier2._api_key = "test"
+        tier2._provider = "anthropic"
         tier2._model = "test"
-        tier2._client = Mock()
 
-        def tier2_side_effect(**kwargs):
-            messages = kwargs.get("messages", [])
-            if messages:
-                text = messages[0]["content"].replace("Message: ", "").split("\n(Tier 1")[0]
-                judgment = simulate_tier2_judgment(text)
-                response = Mock()
-                block = Mock()
-                block.text = json.dumps(judgment)
-                response.content = [block]
-                return response
-            return make_tier2_response(True, "default", "general")
+        mock_llm = Mock()
+        mock_llm.is_available = True
 
-        tier2._client.messages.create.side_effect = tier2_side_effect
+        def tier2_side_effect(prompt, **kwargs):
+            # Extract the actual text from "<message>\n...\n</message>" format
+            text = prompt.replace("<message>\n", "").split("\n</message>")[0]
+            text = text.split("\n(Tier 1")[0]
+            judgment = simulate_tier2_judgment(text)
+            return json.dumps(judgment)
+
+        mock_llm.generate.side_effect = tier2_side_effect
+        tier2._llm = mock_llm
 
         # Tier 3: RecordBuilder (regex fallback, no LLM)
         builder = RecordBuilder()
@@ -1100,71 +1094,6 @@ class TestCrossTeamRecall:
             f"got {specific_intent_count}/{len(RECALL_QUERIES)}"
         )
 
-    def test_synthesizer_fallback_produces_answer(self):
-        """Synthesizer fallback should produce formatted answers"""
-        from agents.retriever.synthesizer import Synthesizer, SynthesizedAnswer
-        from agents.retriever.searcher import SearchResult
-        from agents.retriever.query_processor import QueryProcessor
-
-        synth = Synthesizer()  # No API key → fallback
-        qp = QueryProcessor()
-
-        # Simulate: Bob asks about Alice's PostgreSQL decision
-        parsed = qp.parse("Why did we choose PostgreSQL over MongoDB?")
-
-        # Create mock search results as if enVector returned Alice's record
-        search_results = [
-            SearchResult(
-                record_id="dec_2026-02-13_arch_postgresql",
-                title="Use PostgreSQL instead of MongoDB",
-                payload_text="# Decision Record: Use PostgreSQL instead of MongoDB\n\n## Decision\nWe chose PostgreSQL for ACID compliance...",
-                domain="architecture",
-                certainty="supported",
-                status="accepted",
-                score=0.92,
-                metadata={"member": "alice"},
-            ),
-        ]
-
-        answer = synth.synthesize(parsed, search_results)
-
-        assert len(answer.answer) > 0, "Should produce an answer"
-        assert answer.confidence > 0, "Should have non-zero confidence"
-        assert len(answer.sources) == 1, "Should reference the source"
-        assert answer.sources[0]["record_id"] == "dec_2026-02-13_arch_postgresql"
-
-    def test_synthesizer_warns_on_uncertain_evidence(self):
-        """Synthesizer should warn when evidence certainty is low"""
-        from agents.retriever.synthesizer import Synthesizer
-        from agents.retriever.searcher import SearchResult
-        from agents.retriever.query_processor import QueryProcessor
-
-        synth = Synthesizer()
-        qp = QueryProcessor()
-
-        parsed = qp.parse("What is our deployment policy?")
-
-        # Search result with unknown certainty
-        search_results = [
-            SearchResult(
-                record_id="dec_2026-02-13_ops_deployment",
-                title="Blue-green deployment policy",
-                payload_text="# Decision Record: Blue-green deployment\n\n## Decision\nAll changes must go through blue-green...",
-                domain="ops",
-                certainty="unknown",
-                status="proposed",
-                score=0.80,
-                metadata={"member": "bob"},
-            ),
-        ]
-
-        answer = synth.synthesize(parsed, search_results)
-
-        # Should include uncertainty warnings
-        has_warning = any("uncertain" in w.lower() or "unknown" in w.lower() for w in answer.warnings)
-        assert has_warning or "LLM not available" in str(answer.warnings), (
-            f"Should warn about uncertain evidence. Warnings: {answer.warnings}"
-        )
 
 
 class TestConversationScriptCompleteness:

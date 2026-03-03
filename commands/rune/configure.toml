@@ -1,0 +1,46 @@
+description = "Set up Rune credentials and write ~/.rune/config.json"
+prompt = """
+You are configuring Rune, an FHE-encrypted organizational memory system.
+
+Collect the following credentials from the user, one at a time:
+
+1. **enVector Endpoint** (required) — e.g. `cluster-abc123.envector.io`
+2. **enVector API Key** (required) — a base64url hash, e.g. `xK9mPqR2vLs-Tj7nWcYdF4b-hGe3iUoAZw1-Bx5kNrQyMa`
+3. **Vault Endpoint** (optional) — e.g. `tcp://vault-myteam.oci.envector.io:50051`
+   - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
+4. **Vault Token** (optional) — a base64url hash, e.g. `dG9rLWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1`
+
+If Vault fields are skipped, note that the plugin will start in dormant state.
+
+After collecting credentials, run these shell commands:
+
+```
+mkdir -p ~/.rune && chmod 700 ~/.rune
+```
+
+Then write `~/.rune/config.json` with this structure (chmod 600 after writing):
+
+```json
+{
+  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>"},
+  "envector": {"endpoint": "<envector_endpoint>", "api_key": "<envector_api_key>"},
+  "state": "dormant",
+  "metadata": {"configVersion": "1.0", "lastUpdated": "<ISO timestamp>"}
+}
+```
+
+If Vault fields were skipped, set their values to empty strings.
+
+After writing the config, show a summary:
+
+```
+Rune Configuration Complete
+============================
+  Config : ~/.rune/config.json
+  State  : dormant (run /rune:activate to enable)
+```
+
+If Vault was not configured, add: "Vault not configured — plugin will start in dormant state."
+
+User input: {{input}}
+"""

@@ -4,7 +4,7 @@ set -e
 # Rune Plugin Installation Script
 # This script sets up the Python environment and dependencies for the plugin
 
-VERSION="0.1.1"
+VERSION="0.2.0"
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Colors
@@ -60,26 +60,10 @@ if [ "$PYTHON_MAJOR" -lt 3 ] || { [ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR"
 fi
 print_info "Python $PYTHON_VERSION detected"
 
-# Create virtual environment
-print_step "Setting up Python virtual environment..."
-cd "$PLUGIN_DIR"
-
-if [ ! -d ".venv" ]; then
-    print_info "Creating virtual environment..."
-    python3 -m venv .venv
-else
-    print_info "Virtual environment already exists"
-fi
-
-# Activate venv
-source .venv/bin/activate
-
-# Install dependencies
-print_step "Installing Python dependencies..."
-print_info "This may take a few minutes..."
-pip install --quiet --upgrade pip
-pip install --quiet -r requirements.txt
-
+# Set up venv and install dependencies via bootstrap-mcp.sh (single source of truth)
+print_step "Setting up Python virtual environment and dependencies..."
+print_info "This may take a few minutes on first run..."
+SETUP_ONLY=1 "$PLUGIN_DIR/scripts/bootstrap-mcp.sh"
 print_info "Dependencies installed successfully!"
 
 # Create config directory

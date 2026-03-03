@@ -1,0 +1,20 @@
+description = "Search organizational memory for past decisions and context"
+prompt = """
+You are searching Rune's FHE-encrypted organizational memory.
+
+First, read `~/.rune/config.json`. If it is missing or `state` is not `"active"`, respond:
+"Rune is dormant. Run `/rune:configure` and `/rune:activate` first."
+Do NOT attempt any search.
+
+When active:
+
+1. Take the user's query: {{input}}
+2. Call the `recall` MCP tool with the query.
+3. Present results with:
+   - Source attribution (who/when)
+   - Relevant excerpts
+   - Confidence/certainty level
+4. Offer to elaborate on any result.
+
+If no results are found, say so and suggest rephrasing the query.
+"""

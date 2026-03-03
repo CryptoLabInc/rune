@@ -2,9 +2,9 @@
 set -e
 
 # Configure Claude MCP Servers
-# Registers Rune's enVector MCP server with Claude Code and Claude Desktop.
+# Registers Rune's enVector MCP server with Claude Desktop.
 #
-# Claude Code:   Uses `claude mcp add --scope user` (official CLI)
+# Claude Code:   Handled natively by plugin.json mcpServers (no action needed)
 # Claude Desktop: JSON deep merge into claude_desktop_config.json
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,50 +24,20 @@ print_warn() {
 CONFIGURED=0
 
 # ============================================================================
-# 1. Claude Code CLI — `claude mcp add --scope user`
+# 1. Claude Code — handled by plugin.json mcpServers (no manual registration needed)
 # ============================================================================
-register_claude_code() {
-    # Unset CLAUDECODE to allow running inside a Claude Code session
-    local CLAUDE_CMD
-    CLAUDE_CMD=$(CLAUDECODE= command -v claude 2>/dev/null || true)
+# Claude Code natively reads mcpServers from .claude-plugin/plugin.json,
+# which launches bootstrap-mcp.sh via ${CLAUDE_PLUGIN_ROOT}. No `claude mcp add`
+# needed — that was causing path conflicts with the plugin system.
 
-    if [ -z "$CLAUDE_CMD" ]; then
-        print_warn "claude CLI not found in PATH — skipping Claude Code registration"
-        return 1
-    fi
-
-    # Remove stale entries first
+# Remove stale `claude mcp add` entries from previous versions
+CLAUDE_CMD=$(CLAUDECODE= command -v claude 2>/dev/null || true)
+if [ -n "$CLAUDE_CMD" ]; then
     for name in envector rune-vault envector-mcp-server; do
         CLAUDECODE= "$CLAUDE_CMD" mcp remove --scope user "$name" 2>/dev/null || true
     done
-
-    # Read Vault credentials from config.json (single source of truth)
-    local RUNE_CONFIG="$HOME/.rune/config.json"
-    local VAULT_ENV_FLAGS=()
-    if [ -f "$RUNE_CONFIG" ]; then
-        local vault_ep vault_tk
-        vault_ep=$(python3 -c "import json; c=json.load(open('$RUNE_CONFIG')); print(c.get('vault',{}).get('endpoint',''))" 2>/dev/null || true)
-        vault_tk=$(python3 -c "import json; c=json.load(open('$RUNE_CONFIG')); print(c.get('vault',{}).get('token',''))" 2>/dev/null || true)
-        [ -n "$vault_ep" ] && VAULT_ENV_FLAGS+=(-e "RUNEVAULT_ENDPOINT=$vault_ep")
-        [ -n "$vault_tk" ] && VAULT_ENV_FLAGS+=(-e "RUNEVAULT_TOKEN=$vault_tk")
-    fi
-
-    # Register envector MCP server (name must precede -e to avoid variadic parsing)
-    CLAUDECODE= "$CLAUDE_CMD" mcp add envector \
-        --scope user --transport stdio \
-        -e ENVECTOR_CONFIG="$HOME/.rune/config.json" \
-        -e ENVECTOR_AUTO_KEY_SETUP=false \
-        -e PYTHONPATH="$PLUGIN_DIR/mcp" \
-        "${VAULT_ENV_FLAGS[@]}" \
-        -- "$PLUGIN_DIR/.venv/bin/python3" \
-        "$PLUGIN_DIR/mcp/server/server.py" \
-        --mode stdio
-
-    print_info "MCP server registered in Claude Code (user scope)"
-    CONFIGURED=$((CONFIGURED + 1))
-}
-
-register_claude_code
+    print_info "Cleaned stale Claude Code MCP entries"
+fi
 
 # ============================================================================
 # 2. Claude Desktop — JSON deep merge (no CLI available)
@@ -192,11 +162,69 @@ if [ -f "$STALE_FILE" ]; then
 fi
 
 # ============================================================================
+# 4. Cleanup stale Rune permissions from settings.local.json
+# ============================================================================
+MARKETPLACE="cryptolab"
+PLUGIN_NAME="rune"
+VERSION=$(python3 -c "import json; print(json.load(open('$PLUGIN_DIR/.claude-plugin/plugin.json'))['version'])")
+STALE_MARKETPLACES="cryptolab-rune"
+
+LOCAL_SETTINGS="$HOME/.claude/settings.local.json"
+if [ -f "$LOCAL_SETTINGS" ]; then
+    python3 -c "
+import json, os, re
+
+path = '$LOCAL_SETTINGS'
+stale_marketplaces = '$STALE_MARKETPLACES'.split()
+marketplace = '$MARKETPLACE'
+plugin_name = '$PLUGIN_NAME'
+current_version = '$VERSION'
+
+with open(path, 'r') as f:
+    data = json.load(f)
+
+perms = data.get('permissions', {})
+allow = perms.get('allow', [])
+
+original_count = len(allow)
+cleaned = []
+for entry in allow:
+    skip = False
+    # Remove entries with old marketplace paths (e.g. /cache/cryptolab-rune/)
+    for sm in stale_marketplaces:
+        if '/cache/' + sm + '/' in entry:
+            skip = True
+            break
+    # Remove entries with old version paths under current marketplace
+    if not skip:
+        prefix = '/cache/' + marketplace + '/' + plugin_name + '/'
+        if prefix in entry:
+            if '/' + current_version + '/' not in entry:
+                skip = True
+    # Remove old MCP tool naming scheme
+    if not skip and entry.startswith('mcp__plugin_rune_envector__'):
+        skip = True
+    if not skip:
+        cleaned.append(entry)
+
+removed = original_count - len(cleaned)
+if removed > 0:
+    perms['allow'] = cleaned
+    data['permissions'] = perms
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(data, f, indent=2)
+        f.write('\n')
+    os.replace(tmp, path)
+    print(f'Removed {removed} stale permission(s)')
+" 2>/dev/null && print_info "Cleaned stale permissions from settings.local.json" || true
+fi
+
+# ============================================================================
 # Summary
 # ============================================================================
 if [ "$CONFIGURED" -eq 0 ]; then
-    print_warn "No Claude configuration targets found"
-    echo "  Register manually: claude mcp add --scope user --transport stdio envector -- $PLUGIN_DIR/.venv/bin/python3 $PLUGIN_DIR/mcp/server/server.py --mode stdio"
+    print_warn "No Claude Desktop configuration found — Claude Code uses plugin.json automatically"
 fi
 
 echo ""

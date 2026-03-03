@@ -1,0 +1,9 @@
+{
+  "name": "@cryptolab/rune",
+  "version": "0.2.0",
+  "description": "FHE-encrypted organizational memory for teams",
+  "private": true,
+  "license": "Apache-2.0",
+  "author": "Sunchul Jung <zotanika@cryptolab.co.kr>",
+  "keywords": ["mcp", "fhe", "memory", "gemini", "claude"]
+}

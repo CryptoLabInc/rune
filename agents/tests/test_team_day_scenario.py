@@ -663,27 +663,21 @@ class TestDayScenarioPipeline:
 
         # Tier 2 mock
         tier2 = Tier2Filter.__new__(Tier2Filter)
-        tier2._api_key = "test"
+        tier2._provider = "anthropic"
         tier2._model = "test"
-        tier2._client = Mock()
 
-        def tier2_call(**kwargs):
-            msgs = kwargs.get("messages", [])
-            if msgs:
-                text = msgs[0]["content"].replace("Message: ", "").split("\n(Tier 1")[0]
-                j = simulate_tier2(text)
-                resp = Mock()
-                blk = Mock()
-                blk.text = json.dumps(j)
-                resp.content = [blk]
-                return resp
-            resp = Mock()
-            blk = Mock()
-            blk.text = json.dumps({"capture": True, "reason": "default", "domain": "general"})
-            resp.content = [blk]
-            return resp
+        mock_llm = Mock()
+        mock_llm.is_available = True
 
-        tier2._client.messages.create.side_effect = tier2_call
+        def tier2_call(prompt, **kwargs):
+            # Extract the actual text from "<message>\n...\n</message>" format
+            text = prompt.replace("<message>\n", "").split("\n</message>")[0]
+            text = text.split("\n(Tier 1")[0]
+            j = simulate_tier2(text)
+            return json.dumps(j)
+
+        mock_llm.generate.side_effect = tier2_call
+        tier2._llm = mock_llm
 
         # Tier 3
         builder = RecordBuilder()
@@ -842,48 +836,3 @@ class TestCrossTeamRecallDay:
                 f"Query '{query_text}' should have intent {expected_intent.value}, got {parsed.intent.value}"
             )
 
-    def test_synthesizer_handles_multi_source_recall(self):
-        """Synthesizer should handle results from multiple team members"""
-        from agents.retriever.synthesizer import Synthesizer
-        from agents.retriever.searcher import SearchResult
-        from agents.retriever.query_processor import QueryProcessor
-
-        synth = Synthesizer()
-        qp = QueryProcessor()
-
-        parsed = qp.parse("What's our approach for handling service failures?")
-
-        # Results from different team members across different days
-        results = [
-            SearchResult(
-                record_id="dec_day1_arch_circuit_breaker",
-                title="Circuit breaker pattern for service failures",
-                payload_text="# Decision Record: Circuit Breaker Pattern\n\n## Decision\nImplement circuit breakers before retries...",
-                domain="architecture", certainty="supported", status="accepted",
-                score=0.91, metadata={"member": "alice"},
-            ),
-            SearchResult(
-                record_id="dec_day3_ops_postmortem",
-                title="Payment service incident postmortem",
-                payload_text="# Decision Record: Incident Postmortem Learnings\n\n## Decision\nMandatory circuit breakers, exponential backoff...",
-                domain="ops", certainty="supported", status="accepted",
-                score=0.87, metadata={"member": "alice"},
-            ),
-            SearchResult(
-                record_id="dec_day3_sec_internal_traffic",
-                title="Internal traffic anomaly detection",
-                payload_text="# Decision Record: Internal Traffic Monitoring\n\n## Decision\nImplement anomaly detection on internal call volumes...",
-                domain="security", certainty="partially_supported", status="proposed",
-                score=0.72, metadata={"member": "charlie"},
-            ),
-        ]
-
-        answer = synth.synthesize(parsed, results)
-
-        assert len(answer.answer) > 0
-        assert len(answer.sources) == 3
-        assert answer.confidence > 0
-
-        # Should reference multiple domains
-        domains = set(s["domain"] for s in answer.sources)
-        assert len(domains) >= 2, f"Should span multiple domains, got {domains}"

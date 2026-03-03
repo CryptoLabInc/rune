@@ -1,0 +1,38 @@
+description = "Check Rune plugin health and configuration status"
+prompt = """
+You are checking the health and status of Rune, an FHE-encrypted organizational memory system.
+
+Follow these steps:
+
+1. Check if `~/.rune/config.json` exists. If not, show "Not configured" and suggest `/rune:configure`.
+
+2. Read the config and display a status report:
+
+```
+Rune Plugin Status
+==================
+State: Active / Dormant
+
+Configuration:
+  Config file   : ~/.rune/config.json
+  Vault Endpoint: <url or "not set">
+  Vault Token   : <masked or "not set">
+  enVector      : <endpoint or "not set">
+  enVector Key  : <masked or "not set">
+
+MCP Tools:
+  capture       : <available / unavailable>
+  recall        : <available / unavailable>
+```
+
+3. Check MCP tool availability by calling the `vault_status` MCP tool. If it responds, tools are available.
+
+4. Add recommendations based on what is missing:
+   - Config missing: "Run `/rune:configure` to set up"
+   - State dormant: "Run `/rune:activate` to enable"
+   - MCP tools unavailable: "MCP server may need restart"
+
+Use checkmarks for present items, X marks for missing ones.
+
+User input: {{input}}
+"""

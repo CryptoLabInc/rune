@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "cryptolab-rune",
+  "name": "cryptolab",
   "owner": {
     "name": "CryptoLabInc",
     "email": "zotanika@cryptolab.co.kr"
@@ -12,7 +12,7 @@
     {
       "name": "rune",
       "description": "FHE-encrypted organizational memory for teams. Capture and retrieve institutional knowledge with zero-knowledge privacy.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "source": "./",
       "author": {
         "name": "Sunchul Jung",
