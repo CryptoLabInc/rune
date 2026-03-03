@@ -111,7 +111,8 @@ flowchart TD
     end
 
     %% Capture flow
-    Agent -- Capture -->|Encrypted Data| Cloud
+    Agent -- "capture" --> Capture
+    Capture -- "|Encrypted Data|" --> Cloud
 
     %% Recall flow (4-step pipeline)
     Agent -- "recall" --> Recall
