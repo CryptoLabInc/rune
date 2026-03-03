@@ -193,6 +193,28 @@ class MCPServerApp:
         # mcp
         self.mcp = FastMCP(name=mcp_server_name)
 
+        # ---------- Confidence Calculation (inlined from Synthesizer) ---------- #
+        def _calculate_confidence(results) -> float:
+            """Calculate overall confidence from search results (pure math, no LLM)."""
+            if not results:
+                return 0.0
+            certainty_weights = {
+                "supported": 1.0,
+                "partially_supported": 0.6,
+                "unknown": 0.3,
+            }
+            total_weight = 0.0
+            total_score = 0.0
+            for i, r in enumerate(results[:5]):
+                position_weight = 1.0 / (i + 1)
+                cert_weight = certainty_weights.get(r.certainty, 0.3)
+                weight = position_weight * cert_weight * r.score
+                total_weight += weight
+                total_score += weight
+            if total_weight == 0:
+                return 0.0
+            return round(min(1.0, total_score / 2.0), 2)
+
         # ---------- Common Query Preprocessing ---------- #
         def _preprocess(raw_query: Any) -> Union[List[float], List[List[float]]]:
             """Convert raw query input (string, ndarray, list) into a valid vector or batch of vectors."""
@@ -424,8 +446,7 @@ class MCPServerApp:
                 "Search and synthesize answers from FHE-encrypted team memory via Vault-secured pipeline. "
                 "Pipeline: (1) query expansion and intent detection, "
                 "(2) encrypted similarity scoring on enVector Cloud, "
-                "(3) Rune-Vault decrypts result ciphertext (secret key never leaves Vault), "
-                "(4) LLM synthesis with source citations and certainty levels. "
+                "(3) Rune-Vault decrypts result ciphertext (secret key never leaves Vault). "
                 "Use for questions about past decisions, trade-offs, and organizational knowledge."
             ),
             annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
@@ -446,7 +467,6 @@ class MCPServerApp:
             try:
                 query_processor = self._retriever["query_processor"]
                 searcher = self._retriever["searcher"]
-                synthesizer = self._retriever["synthesizer"]
 
                 # Step 1: Parse query (intent detection, entity extraction, query expansion)
                 parsed_query = query_processor.parse(query)
@@ -454,17 +474,44 @@ class MCPServerApp:
                 # Step 2: Search enVector (multi-query expansion, dedup, ranking)
                 results = await searcher.search(parsed_query, topk=topk)
 
-                # Step 3: Synthesize answer (LLM synthesis with certainty respect)
-                answer = synthesizer.synthesize(parsed_query, results)
+                # Calculate confidence from results (inline, no LLM needed)
+                confidence = _calculate_confidence(results)
+
+                # Build structured results for the caller (main agent synthesizes)
+                formatted_results = []
+                for r in results:
+                    entry = {
+                        "record_id": r.record_id,
+                        "title": r.title,
+                        "content": r.payload_text,
+                        "domain": r.domain,
+                        "certainty": r.certainty,
+                        "score": r.score,
+                    }
+                    if r.group_id:
+                        entry["group_id"] = r.group_id
+                        entry["group_type"] = r.group_type
+                        entry["phase_seq"] = r.phase_seq
+                        entry["phase_total"] = r.phase_total
+                    formatted_results.append(entry)
+
+                sources = [
+                    {
+                        "record_id": r.record_id,
+                        "title": r.title,
+                        "domain": r.domain,
+                        "certainty": r.certainty,
+                        "score": r.score,
+                    }
+                    for r in results[:5]
+                ]
 
                 return {
                     "ok": True,
                     "found": len(results),
-                    "answer": answer.answer,
-                    "confidence": answer.confidence,
-                    "sources": answer.sources,
-                    "warnings": answer.warnings,
-                    "related_queries": answer.related_queries,
+                    "results": formatted_results,
+                    "confidence": confidence,
+                    "sources": sources,
                 }
 
             except Exception as e:
@@ -510,7 +557,6 @@ class MCPServerApp:
             from agents.scribe.record_builder import RecordBuilder
             from agents.retriever.query_processor import QueryProcessor
             from agents.retriever.searcher import Searcher
-            from agents.retriever.synthesizer import Synthesizer
 
             rune_config = load_rune_config()
             result["state"] = rune_config.state
@@ -684,18 +730,10 @@ class MCPServerApp:
                     model=_provider_model(llm_provider, "query"),
                 )
                 searcher = Searcher(envector_client, embedding_svc, self._vault_index_name, vault_client=self.vault)
-                synthesizer = Synthesizer(
-                    llm_provider=llm_provider,
-                    anthropic_api_key=anthropic_key,
-                    openai_api_key=openai_key,
-                    google_api_key=google_key,
-                    model=_provider_model(llm_provider, "synth"),
-                )
 
                 self._retriever = {
                     "query_processor": query_processor,
                     "searcher": searcher,
-                    "synthesizer": synthesizer,
                 }
                 result["retriever"] = True
                 logger.info("Retriever pipeline initialized")

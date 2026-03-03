@@ -119,6 +119,105 @@ for stale in "$HOME/.claude/mcp_settings.json"; do
     fi
 done
 
+# 4b. Remove ALL Rune-related permissions from settings.local.json
+LOCAL_SETTINGS="$HOME/.claude/settings.local.json"
+if [ -f "$LOCAL_SETTINGS" ]; then
+    python3 -c "
+import json, os
+
+path = '$LOCAL_SETTINGS'
+
+with open(path, 'r') as f:
+    data = json.load(f)
+
+perms = data.get('permissions', {})
+allow = perms.get('allow', [])
+
+original_count = len(allow)
+cleaned = []
+for entry in allow:
+    skip = False
+    # Remove any entry referencing Rune cache paths (any marketplace variant)
+    if '/plugins/cache/' in entry and '/rune/' in entry:
+        skip = True
+    # Remove old MCP tool naming schemes
+    if entry.startswith('mcp__plugin_rune_envector__'):
+        skip = True
+    # Remove current MCP tool permissions
+    if entry.startswith('mcp__envector__'):
+        skip = True
+    if not skip:
+        cleaned.append(entry)
+
+removed = original_count - len(cleaned)
+if removed > 0:
+    perms['allow'] = cleaned
+    data['permissions'] = perms
+    tmp = path + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(data, f, indent=2)
+        f.write('\n')
+    os.replace(tmp, path)
+    print(f'Removed {removed} permission(s)')
+" 2>/dev/null && print_info "Cleaned Rune permissions from settings.local.json" || true
+fi
+
+# 4c. Remove rune@* keys from installed_plugins.json and settings.json
+INSTALLED_FILE="$HOME/.claude/plugins/installed_plugins.json"
+if [ -f "$INSTALLED_FILE" ]; then
+    python3 -c "
+import json
+
+path = '$INSTALLED_FILE'
+with open(path, 'r') as f:
+    data = json.load(f)
+
+plugins = data.get('plugins', {})
+stale_keys = [k for k in plugins if k.startswith('rune@')]
+for k in stale_keys:
+    del plugins[k]
+
+if stale_keys:
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+" 2>/dev/null && print_info "Removed Rune keys from installed_plugins.json" || true
+fi
+
+SETTINGS_FILE="$HOME/.claude/settings.json"
+if [ -f "$SETTINGS_FILE" ]; then
+    python3 -c "
+import json
+
+path = '$SETTINGS_FILE'
+with open(path, 'r') as f:
+    data = json.load(f)
+
+enabled = data.get('enabledPlugins', {})
+stale_keys = [k for k in enabled if k.startswith('rune@')]
+for k in stale_keys:
+    del enabled[k]
+
+if stale_keys:
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+" 2>/dev/null && print_info "Removed Rune keys from settings.json" || true
+fi
+
+# 4d. Remove all Rune cache directories
+CACHE_BASE="$HOME/.claude/plugins/cache"
+if [ -d "$CACHE_BASE" ]; then
+    # Remove any marketplace dir that contains a rune/ subdirectory
+    for mp_dir in "$CACHE_BASE"/*/; do
+        mp_dir="${mp_dir%/}"
+        if [ -d "$mp_dir/rune" ]; then
+            rm -rf "$mp_dir/rune"
+            print_info "Removed cache: $mp_dir/rune"
+            # Remove marketplace dir if now empty
+            rmdir "$mp_dir" 2>/dev/null && print_info "Removed empty: $mp_dir" || true
+        fi
+    done
+fi
+
 # 5. Remove ~/.rune/ directory
 if [ -d "$HOME/.rune" ]; then
     rm -rf "$HOME/.rune"

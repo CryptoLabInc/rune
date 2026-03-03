@@ -8,7 +8,8 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_NAME="rune"
 MARKETPLACE="cryptolab"
 PLUGIN_KEY="${PLUGIN_NAME}@${MARKETPLACE}"
-VERSION="0.2.0"
+VERSION=$(python3 -c "import json; print(json.load(open('$PLUGIN_DIR/.claude-plugin/plugin.json'))['version'])")
+
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -23,16 +24,45 @@ CACHE_DIR="$PLUGINS_DIR/cache/${MARKETPLACE}/${PLUGIN_NAME}/${VERSION}"
 INSTALLED_FILE="$PLUGINS_DIR/installed_plugins.json"
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 
-# ---- 1. Create cache directory with symlink ----
-mkdir -p "$(dirname "$CACHE_DIR")"
+# ---- 1. Copy plugin files into cache ----
+mkdir -p "$CACHE_DIR"
+# Remove stale symlink from previous versions
 if [ -L "$CACHE_DIR" ]; then
     rm "$CACHE_DIR"
+    mkdir -p "$CACHE_DIR"
 fi
-if [ -d "$CACHE_DIR" ]; then
-    rm -rf "$CACHE_DIR"
+rsync -a --delete \
+    --exclude '.venv' \
+    --exclude '.pytest_cache' \
+    --exclude '__pycache__' \
+    --exclude '.DS_Store' \
+    "$PLUGIN_DIR/" "$CACHE_DIR/"
+print_info "Plugin copied: $PLUGIN_DIR → $CACHE_DIR"
+
+# ---- 1b. Remove stale cache directories ----
+STALE_MARKETPLACES=("cryptolab-rune")
+
+# Remove old marketplace directories entirely
+for stale_mp in "${STALE_MARKETPLACES[@]}"; do
+    stale_dir="$PLUGINS_DIR/cache/$stale_mp"
+    if [ -d "$stale_dir" ]; then
+        rm -rf "$stale_dir"
+        print_info "Removed stale cache: $stale_dir"
+    fi
+done
+
+# Remove old version directories under current marketplace
+CURRENT_PLUGIN_CACHE="$PLUGINS_DIR/cache/${MARKETPLACE}/${PLUGIN_NAME}"
+if [ -d "$CURRENT_PLUGIN_CACHE" ]; then
+    for ver_dir in "$CURRENT_PLUGIN_CACHE"/*/; do
+        ver_dir="${ver_dir%/}"
+        ver_name="$(basename "$ver_dir")"
+        if [ "$ver_name" != "$VERSION" ] && [ "$ver_name" != "*" ]; then
+            rm -rf "$ver_dir"
+            print_info "Removed old version cache: $ver_dir"
+        fi
+    done
 fi
-ln -s "$PLUGIN_DIR" "$CACHE_DIR"
-print_info "Plugin linked: $CACHE_DIR → $PLUGIN_DIR"
 
 # ---- 2. Register in installed_plugins.json ----
 if [ ! -f "$INSTALLED_FILE" ]; then
@@ -46,12 +76,19 @@ import json
 
 path = '$INSTALLED_FILE'
 key = '$PLUGIN_KEY'
+stale_marketplaces = ['cryptolab-rune']
 
 with open(path, 'r') as f:
     data = json.load(f)
 
 data.setdefault('version', 2)
 data.setdefault('plugins', {})
+
+# Remove stale plugin keys (e.g. rune@cryptolab-rune)
+for sm in stale_marketplaces:
+    stale_key = 'rune@' + sm
+    if stale_key in data['plugins']:
+        del data['plugins'][stale_key]
 
 data['plugins'][key] = [{
     'scope': 'user',
@@ -76,11 +113,19 @@ import json
 
 path = '$SETTINGS_FILE'
 key = '$PLUGIN_KEY'
+stale_marketplaces = ['cryptolab-rune']
 
 with open(path, 'r') as f:
     data = json.load(f)
 
 data.setdefault('enabledPlugins', {})
+
+# Remove stale enabledPlugins keys (e.g. rune@cryptolab-rune)
+for sm in stale_marketplaces:
+    stale_key = 'rune@' + sm
+    if stale_key in data['enabledPlugins']:
+        del data['enabledPlugins'][stale_key]
+
 data['enabledPlugins'][key] = True
 
 with open(path, 'w') as f:

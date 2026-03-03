@@ -29,9 +29,11 @@ Validate infrastructure and switch to active state.
    - Check Vault connectivity by parsing the scheme from `vault.endpoint`:
      - If `http://` or `https://`: `curl -sf <vault-endpoint>/health`
      - If `tcp://`: extract host and port, then test TCP connectivity:
-       ```bash
-       timeout 5 bash -c 'echo > /dev/tcp/<host>/<port>'
-       ```
+      ```bash
+      bash -c 'echo > /dev/tcp/<host>/<port>' &
+      sleep 5
+      kill $! 2>/dev/null
+      ```
      - Do NOT blindly curl a `tcp://` endpoint — curl does not support the `tcp://` scheme.
    - Check MCP server can import: `$PLUGIN_ROOT/.venv/bin/python3 -c "import mcp"`
 
