@@ -56,6 +56,7 @@ class ExtractionResult:
     group_type: str = ""  # "phase_chain", "bundle", or "" (single)
     status_hint: str = ""
     tags: List[str] = field(default_factory=list)
+    confidence: Optional[float] = None  # Agent-provided confidence (0.0-1.0)
     single: Optional[ExtractedFields] = None
     phases: Optional[List[PhaseExtractedFields]] = None
 

@@ -18,7 +18,7 @@ cd rune && ./scripts/install-codex.sh
 This is the **complete plugin** with everything needed to run Rune locally:
 
 - MCP server with FHE-encrypted vector operations (enVector + Vault integration)
-- Multi-provider LLM support (Anthropic, OpenAI, Google) for capture filtering and recall synthesis
+- Capture filtering and recall via FHE-encrypted pipelines
 - Installation scripts for Claude Code, Codex CLI, and manual setup
 - Agent specifications (Scribe for capture, Retriever for recall)
 
@@ -32,8 +32,8 @@ Rune exposes these tools via MCP (stdio transport). Any MCP-compatible agent can
 
 | Tool | Description |
 |------|-------------|
-| **`capture`** | Capture organizational decisions via 3-tier pipeline (embedding similarity → LLM policy filter → LLM extraction → FHE-encrypted storage) |
-| **`recall`** | Search and synthesize answers from encrypted team memory via Vault-secured pipeline (query expansion → encrypted scoring → Vault decryption → LLM synthesis) |
+| **`capture`** | Capture organizational decisions via FHE-encrypted storage pipeline |
+| **`recall`** | Search encrypted team memory via Vault-secured pipeline (query expansion → encrypted scoring → Vault decryption) |
 | **`vault_status`** | Check Rune-Vault connection status and security mode |
 | **`reload_pipelines`** | Re-read config and reinitialize scribe/retriever pipelines |
 
@@ -45,7 +45,7 @@ capture(text="We chose PostgreSQL over MongoDB for better ACID guarantees and JS
 **Example — recall past context:**
 ```
 recall(query="Why did we choose PostgreSQL?", topk=5)
-→ { answer: "The team chose PostgreSQL for...", sources: [...], confidence: 0.85 }
+→ { found: 3, results: [...], sources: [...] }
 ```
 
 ## Quick Start
@@ -120,7 +120,7 @@ flowchart TD
     Recall -- "1. encrypted similarity scoring" --> Cloud
     Recall -- "2. decrypt result ciphertext<br>(secret key never leaves Vault)" --> Decrypt
     Decrypt -- "indices + similarity values" --> Recall
-    Recall -- "3. retrieve + decrypt metadata<br>4. LLM synthesis" --> Agent
+    Recall -- "3. retrieve + decrypt metadata<br>4. return raw results" --> Agent
 
     %% Styles
     style Cloud fill:#eff,stroke:#333
@@ -132,7 +132,7 @@ flowchart TD
 
 **Data Flow**:
 - **Capture**: Scribe → MCP `capture` → 3-tier pipeline → FHE-encrypted insert → enVector Cloud
-- **Recall**: MCP `recall` → query expansion → encrypted similarity scoring on enVector Cloud → Rune-Vault decrypts result ciphertext (secret key held exclusively by Vault) → retrieve and decrypt metadata → LLM synthesis
+- **Recall**: MCP `recall` → query expansion → encrypted similarity scoring on enVector Cloud → Rune-Vault decrypts result ciphertext (secret key held exclusively by Vault) → retrieve and decrypt metadata → return raw results to agent
 - **Own data search**: MCP `search` → encrypted similarity scoring → MCP server decrypts locally (secret key held by MCP server runtime)
 
 **Key Design**:
@@ -171,26 +171,8 @@ Before installing, you need:
     "endpoint": "runestone-xxx.clusters.envector.io",
     "api_key": "your-api-key"
   },
-  "llm": {
-    "provider": "anthropic",
-    "tier2_provider": "anthropic"
-  },
   "state": "active"
 }
-```
-
-### LLM Provider
-
-The `llm` section controls which LLM provider Scribe/Retriever use for filtering and synthesis.
-
-| Provider | Value | Environment Variable |
-|----------|-------|---------------------|
-| Anthropic | `"anthropic"` | `ANTHROPIC_API_KEY` |
-| OpenAI | `"openai"` | `OPENAI_API_KEY` |
-| Google | `"google"` | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
-| Auto-detect | `"auto"` | Inferred from MCP client identity |
-
-See [config/README.md](config/README.md) for the full schema.
 
 ### Starting the MCP Server
 

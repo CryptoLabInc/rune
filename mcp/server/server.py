@@ -341,7 +341,9 @@ class MCPServerApp:
                 "Runs a 3-tier pipeline: Tier 1 embedding similarity detection (zero LLM tokens), "
                 "Tier 2 lightweight LLM policy filter (~200 tokens), "
                 "Tier 3 full LLM structured extraction (~500 tokens). "
-                "Only text that passes all tiers is encrypted and stored on enVector Cloud."
+                "Only text that passes all tiers is encrypted and stored on enVector Cloud. "
+                "Agent-delegated mode: pass `extracted` JSON to skip Tier 2/3 entirely — "
+                "the calling agent performs evaluation and extraction, MCP server only stores."
             ),
             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
         )
@@ -350,6 +352,7 @@ class MCPServerApp:
             source: Annotated[str, Field(description="Source of the text (e.g., 'claude_agent', 'slack', 'github')")] = "claude_agent",
             user: Annotated[Optional[str], Field(description="User who authored the text")] = None,
             channel: Annotated[Optional[str], Field(description="Channel or location where the text originated")] = None,
+            extracted: Annotated[Optional[str], Field(description="Pre-extracted JSON from calling agent (agent-delegated mode). When provided, Tier 2/3 are skipped.")] = None,
             ctx: Optional[Context] = None,
         ) -> Dict[str, Any]:
             _maybe_reload_for_auto_provider(ctx)
@@ -363,12 +366,140 @@ class MCPServerApp:
             try:
                 from datetime import datetime, timezone
                 from agents.scribe.record_builder import RawEvent
+                from agents.scribe.llm_extractor import (
+                    ExtractionResult, ExtractedFields, PhaseExtractedFields,
+                )
+                from agents.common.llm_utils import parse_llm_json
 
                 detector = self._scribe["detector"]
                 tier2_filter = self._scribe.get("tier2_filter")
                 record_builder = self._scribe["record_builder"]
                 envector_client = self._scribe["envector_client"]
                 embedding_service = self._scribe["embedding_service"]
+
+                # ===== Agent-delegated mode: extracted JSON provided =====
+                if extracted is not None:
+                    data = parse_llm_json(extracted)
+                    if not data:
+                        return {"ok": False, "error": "Invalid extracted JSON — could not parse."}
+
+                    # Tier 2 check: agent already evaluated
+                    tier2 = data.get("tier2", {})
+                    if not tier2.get("capture", True):
+                        return {
+                            "ok": True,
+                            "captured": False,
+                            "reason": f"Agent rejected: {tier2.get('reason', 'no reason')}",
+                        }
+
+                    # Domain from agent's tier2 evaluation
+                    agent_domain = tier2.get("domain", "general")
+
+                    # Tier 1: still run for detection metadata
+                    detection = detector.detect(text)
+                    if agent_domain and agent_domain != "general":
+                        from dataclasses import replace as dc_replace
+                        detection = dc_replace(detection, domain=agent_domain)
+
+                    # Build ExtractionResult from agent JSON
+                    agent_confidence = data.get("confidence")
+                    if isinstance(agent_confidence, (int, float)):
+                        agent_confidence = max(0.0, min(1.0, float(agent_confidence)))
+                    else:
+                        agent_confidence = None
+
+                    phases_data = data.get("phases")
+                    if phases_data and len(phases_data) > 1:
+                        # Multi-phase or bundle
+                        phases = []
+                        for p in phases_data[:7]:
+                            phases.append(PhaseExtractedFields(
+                                phase_title=str(p.get("phase_title", ""))[:60],
+                                phase_decision=str(p.get("phase_decision", "")),
+                                phase_rationale=str(p.get("phase_rationale", "")),
+                                phase_problem=str(p.get("phase_problem", "")),
+                                alternatives=[str(a) for a in p.get("alternatives", []) if a],
+                                trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
+                                tags=[str(t).lower() for t in p.get("tags", []) if t],
+                            ))
+                        pre_extraction = ExtractionResult(
+                            group_title=str(data.get("group_title", ""))[:60],
+                            group_type=str(data.get("group_type", "phase_chain")),
+                            status_hint=str(data.get("status_hint", "")).lower(),
+                            tags=[str(t).lower() for t in data.get("tags", []) if t],
+                            confidence=agent_confidence,
+                            phases=phases,
+                        )
+                    else:
+                        # Single record (may have phases with 0-1 entries, or flat fields)
+                        if phases_data and len(phases_data) == 1:
+                            p = phases_data[0]
+                            single = ExtractedFields(
+                                title=str(p.get("phase_title", data.get("title", "")))[:60],
+                                rationale=str(p.get("phase_rationale", data.get("rationale", ""))),
+                                problem=str(p.get("phase_problem", data.get("problem", ""))),
+                                alternatives=[str(a) for a in p.get("alternatives", []) if a],
+                                trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
+                                status_hint=str(data.get("status_hint", "")).lower(),
+                                tags=[str(t).lower() for t in p.get("tags", data.get("tags", [])) if t],
+                            )
+                        else:
+                            single = ExtractedFields(
+                                title=str(data.get("title", ""))[:60],
+                                rationale=str(data.get("rationale", "")),
+                                problem=str(data.get("problem", "")),
+                                alternatives=[str(a) for a in data.get("alternatives", []) if a],
+                                trade_offs=[str(t) for t in data.get("trade_offs", []) if t],
+                                status_hint=str(data.get("status_hint", "")).lower(),
+                                tags=[str(t).lower() for t in data.get("tags", []) if t],
+                            )
+                        pre_extraction = ExtractionResult(
+                            group_title=single.title,
+                            status_hint=single.status_hint,
+                            tags=single.tags,
+                            confidence=agent_confidence,
+                            single=single,
+                        )
+
+                    raw_event = RawEvent(
+                        text=text,
+                        user=user or "unknown",
+                        channel=channel or "claude_session",
+                        timestamp=str(datetime.now(timezone.utc).timestamp()),
+                        source=source,
+                    )
+                    records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
+
+                    # Store in enVector with FHE encryption
+                    texts = [r.payload.text for r in records]
+                    metadata = [r.model_dump(mode="json") for r in records]
+                    insert_result = envector_client.insert_with_text(
+                        index_name=self._vault_index_name,
+                        texts=texts,
+                        embedding_service=embedding_service,
+                        metadata=metadata,
+                    )
+
+                    if not insert_result.get("ok"):
+                        return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+
+                    first = records[0]
+                    result = {
+                        "ok": True,
+                        "captured": True,
+                        "record_id": first.id,
+                        "summary": first.title,
+                        "domain": first.domain.value,
+                        "certainty": first.why.certainty.value,
+                        "mode": "agent-delegated",
+                    }
+                    if len(records) > 1:
+                        result["record_count"] = len(records)
+                        result["group_id"] = first.group_id
+                        result["group_type"] = first.group_type or "phase_chain"
+                    return result
+
+                # ===== Standard mode: full 3-tier pipeline =====
 
                 # Tier 1: Embedding similarity detection (0 LLM tokens)
                 detection = detector.detect(text)
@@ -467,6 +598,7 @@ class MCPServerApp:
             try:
                 query_processor = self._retriever["query_processor"]
                 searcher = self._retriever["searcher"]
+                synthesizer = self._retriever.get("synthesizer")
 
                 # Step 1: Parse query (intent detection, entity extraction, query expansion)
                 parsed_query = query_processor.parse(query)
@@ -474,44 +606,58 @@ class MCPServerApp:
                 # Step 2: Search enVector (multi-query expansion, dedup, ranking)
                 results = await searcher.search(parsed_query, topk=topk)
 
-                # Calculate confidence from results (inline, no LLM needed)
-                confidence = _calculate_confidence(results)
+                # Step 3: Return results (agent synthesizes) or use server-side synthesizer
+                # Primary path: raw results for agent-side synthesis (no LLM key needed)
+                if synthesizer is None or not synthesizer.has_llm:
+                    confidence = _calculate_confidence(results)
+                    formatted_results = []
+                    for r in results:
+                        entry = {
+                            "record_id": r.record_id,
+                            "title": r.title,
+                            "content": r.payload_text,
+                            "domain": r.domain,
+                            "certainty": r.certainty,
+                            "score": r.score,
+                        }
+                        if r.group_id:
+                            entry["group_id"] = r.group_id
+                            entry["group_type"] = r.group_type
+                            entry["phase_seq"] = r.phase_seq
+                            entry["phase_total"] = r.phase_total
+                        formatted_results.append(entry)
 
-                # Build structured results for the caller (main agent synthesizes)
-                formatted_results = []
-                for r in results:
-                    entry = {
-                        "record_id": r.record_id,
-                        "title": r.title,
-                        "content": r.payload_text,
-                        "domain": r.domain,
-                        "certainty": r.certainty,
-                        "score": r.score,
+                    sources = [
+                        {
+                            "record_id": r.record_id,
+                            "title": r.title,
+                            "domain": r.domain,
+                            "certainty": r.certainty,
+                            "score": r.score,
+                        }
+                        for r in results[:5]
+                    ]
+
+                    return {
+                        "ok": True,
+                        "found": len(results),
+                        "results": formatted_results,
+                        "confidence": confidence,
+                        "sources": sources,
+                        "synthesized": False,
                     }
-                    if r.group_id:
-                        entry["group_id"] = r.group_id
-                        entry["group_type"] = r.group_type
-                        entry["phase_seq"] = r.phase_seq
-                        entry["phase_total"] = r.phase_total
-                    formatted_results.append(entry)
 
-                sources = [
-                    {
-                        "record_id": r.record_id,
-                        "title": r.title,
-                        "domain": r.domain,
-                        "certainty": r.certainty,
-                        "score": r.score,
-                    }
-                    for r in results[:5]
-                ]
-
+                # Fallback: server-side synthesis when LLM key is available
+                answer = synthesizer.synthesize(parsed_query, results)
                 return {
                     "ok": True,
                     "found": len(results),
-                    "results": formatted_results,
-                    "confidence": confidence,
-                    "sources": sources,
+                    "answer": answer.answer,
+                    "confidence": answer.confidence,
+                    "sources": answer.sources,
+                    "warnings": answer.warnings if answer.warnings else None,
+                    "related_queries": answer.related_queries if answer.related_queries else None,
+                    "synthesized": True,
                 }
 
             except Exception as e:
@@ -557,6 +703,7 @@ class MCPServerApp:
             from agents.scribe.record_builder import RecordBuilder
             from agents.retriever.query_processor import QueryProcessor
             from agents.retriever.searcher import Searcher
+            from agents.retriever.synthesizer import Synthesizer
 
             rune_config = load_rune_config()
             result["state"] = rune_config.state
@@ -686,6 +833,8 @@ class MCPServerApp:
                 high_confidence_threshold=rune_config.scribe.auto_capture_threshold,
             )
 
+            has_llm_key = bool(_provider_key(llm_provider))
+
             tier2_filter = None
             if rune_config.scribe.tier2_enabled and _provider_key(tier2_provider):
                 tier2_filter = Tier2Filter(
@@ -697,7 +846,7 @@ class MCPServerApp:
                 )
 
             llm_extractor = None
-            if _provider_key(llm_provider):
+            if has_llm_key:
                 llm_extractor = LLMExtractor(
                     llm_provider=llm_provider,
                     anthropic_api_key=anthropic_key,
@@ -715,7 +864,10 @@ class MCPServerApp:
                 "embedding_service": embedding_svc,
             }
             result["scribe"] = True
-            logger.info("Scribe pipeline initialized")
+            if has_llm_key:
+                logger.info("Scribe pipeline initialized (server-side Tier 2/3)")
+            else:
+                logger.info("Scribe pipeline initialized (agent-delegated mode — no LLM API key)")
 
             # Retriever pipeline
             if not self._vault_index_name:
@@ -731,12 +883,26 @@ class MCPServerApp:
                 )
                 searcher = Searcher(envector_client, embedding_svc, self._vault_index_name, vault_client=self.vault)
 
+                synthesizer = None
+                if has_llm_key:
+                    synthesizer = Synthesizer(
+                        llm_provider=llm_provider,
+                        anthropic_api_key=anthropic_key,
+                        openai_api_key=openai_key,
+                        google_api_key=google_key,
+                        model=_provider_model(llm_provider, "query"),
+                    )
+
                 self._retriever = {
                     "query_processor": query_processor,
                     "searcher": searcher,
+                    "synthesizer": synthesizer,
                 }
                 result["retriever"] = True
-                logger.info("Retriever pipeline initialized")
+                if has_llm_key:
+                    logger.info("Retriever pipeline initialized (server-side synthesis)")
+                else:
+                    logger.info("Retriever pipeline initialized (agent-delegated mode — raw results returned)")
 
         except Exception as e:
             result["errors"].append(str(e))

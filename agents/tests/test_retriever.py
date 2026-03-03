@@ -311,6 +311,210 @@ class TestExpandPhaseChains:
         assert expanded[0].record_id == "dec_standalone"
 
 
+class TestSynthesizer:
+    """Tests for Synthesizer"""
+
+    @pytest.fixture
+    def synthesizer_no_llm(self):
+        from agents.retriever.synthesizer import Synthesizer
+        return Synthesizer(anthropic_api_key=None)
+
+    @pytest.fixture
+    def sample_results(self):
+        from agents.retriever.searcher import SearchResult
+
+        return [
+            SearchResult(
+                record_id="dec_2024-01-01_arch_postgres",
+                title="Adopt PostgreSQL",
+                payload_text="# Decision Record: Adopt PostgreSQL\n\nWe chose PostgreSQL for better JSON support.",
+                domain="architecture",
+                certainty="supported",
+                status="accepted",
+                score=0.85,
+            ),
+            SearchResult(
+                record_id="dec_2024-01-02_arch_redis",
+                title="Use Redis for caching",
+                payload_text="# Decision Record: Use Redis\n\nRedis for caching due to performance.",
+                domain="architecture",
+                certainty="partially_supported",
+                status="accepted",
+                score=0.75,
+            ),
+        ]
+
+    @pytest.fixture
+    def sample_query(self):
+        from agents.retriever.query_processor import QueryProcessor
+
+        processor = QueryProcessor()
+        return processor.parse("Why did we choose PostgreSQL?")
+
+    def test_has_llm_property(self, synthesizer_no_llm):
+        assert synthesizer_no_llm.has_llm is False
+
+    def test_synthesize_no_results(self, synthesizer_no_llm, sample_query):
+        result = synthesizer_no_llm.synthesize(sample_query, [])
+
+        assert "No relevant records found" in result.answer
+        assert result.confidence == 0.0
+        assert len(result.sources) == 0
+
+    def test_synthesize_fallback(self, synthesizer_no_llm, sample_query, sample_results):
+        result = synthesizer_no_llm.synthesize(sample_query, sample_results)
+
+        # Should use fallback formatting
+        assert "Search Results" in result.answer or "PostgreSQL" in result.answer
+        assert len(result.sources) > 0
+        assert any("LLM not available" in w for w in result.warnings)
+
+    def test_confidence_calculation(self, synthesizer_no_llm, sample_query, sample_results):
+        result = synthesizer_no_llm.synthesize(sample_query, sample_results)
+
+        # Should have some confidence based on results
+        assert result.confidence > 0.0
+        assert result.confidence <= 1.0
+
+    def test_sources_extraction(self, synthesizer_no_llm, sample_query, sample_results):
+        result = synthesizer_no_llm.synthesize(sample_query, sample_results)
+
+        assert len(result.sources) == 2
+        assert result.sources[0]["record_id"] == "dec_2024-01-01_arch_postgres"
+        assert result.sources[0]["certainty"] == "supported"
+
+    def test_warnings_for_uncertain_evidence(self, synthesizer_no_llm, sample_query):
+        from agents.retriever.searcher import SearchResult
+
+        uncertain_results = [
+            SearchResult(
+                record_id="dec_1",
+                title="Uncertain decision",
+                payload_text="Some decision",
+                domain="general",
+                certainty="unknown",
+                status="proposed",
+                score=0.7,
+            ),
+        ]
+
+        result = synthesizer_no_llm.synthesize(sample_query, uncertain_results)
+
+        # Should have warning about uncertain/unknown evidence or LLM not available
+        has_warning = any("uncertain" in w.lower() or "unknown" in w.lower() or "LLM" in w for w in result.warnings)
+        assert has_warning
+
+    def test_related_queries_suggestion(self, synthesizer_no_llm, sample_query, sample_results):
+        result = synthesizer_no_llm.synthesize(sample_query, sample_results)
+
+        assert len(result.related_queries) > 0
+
+
+class TestSynthesizerGrouping:
+    """Tests for phase chain / bundle grouping in Synthesizer._format_records_for_prompt"""
+
+    @pytest.fixture
+    def synthesizer_no_llm(self):
+        from agents.retriever.synthesizer import Synthesizer
+        return Synthesizer(anthropic_api_key=None)
+
+    def _make_result(self, record_id, group_id=None, group_type=None, phase_seq=None, phase_total=None, title="Test", score=0.8):
+        from agents.retriever.searcher import SearchResult
+        return SearchResult(
+            record_id=record_id,
+            title=title,
+            payload_text=f"Content of {record_id}",
+            domain="architecture",
+            certainty="supported",
+            status="accepted",
+            score=score,
+            group_id=group_id,
+            group_type=group_type,
+            phase_seq=phase_seq,
+            phase_total=phase_total,
+        )
+
+    def test_phase_chain_grouped_as_single_block(self, synthesizer_no_llm):
+        """Test that phase chain results render as one 'Phase Chain' block"""
+        grp = "grp_2026-01-01_arch_strategy"
+        results = [
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=3, title="Market Analysis"),
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=3, title="Pricing Model"),
+            self._make_result("dec_p2", group_id=grp, group_type="phase_chain", phase_seq=2, phase_total=3, title="Roadmap"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        assert "Phase Chain" in formatted
+        assert "Phase 1/3" in formatted
+        assert "Phase 2/3" in formatted
+        assert "Phase 3/3" in formatted
+        # Should be a single record block, not three separate ones
+        assert formatted.count("Record ") == 1
+
+    def test_bundle_grouped_as_single_block(self, synthesizer_no_llm):
+        """Test that bundle results render as one 'Decision Bundle' block"""
+        grp = "grp_2026-01-01_product_auth"
+        results = [
+            self._make_result("dec_b0", group_id=grp, group_type="bundle", phase_seq=0, phase_total=2, title="Auth Method"),
+            self._make_result("dec_b1", group_id=grp, group_type="bundle", phase_seq=1, phase_total=2, title="Token Storage"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        assert "Decision Bundle" in formatted
+        assert "Facet 1" in formatted
+        assert "Facet 2" in formatted
+        assert formatted.count("Record ") == 1
+
+    def test_standalone_formatted_individually(self, synthesizer_no_llm):
+        """Test that standalone records are formatted individually"""
+        results = [
+            self._make_result("dec_standalone1", title="Choose PostgreSQL"),
+            self._make_result("dec_standalone2", title="Use Redis"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        assert "Choose PostgreSQL" in formatted
+        assert "Use Redis" in formatted
+        assert "Phase Chain" not in formatted
+        assert "Decision Bundle" not in formatted
+        assert formatted.count("Record ") == 2
+
+    def test_mixed_grouped_and_standalone(self, synthesizer_no_llm):
+        """Test mix of grouped and standalone results"""
+        grp = "grp_2026-01-01_arch_mix"
+        results = [
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=2, title="Phase A"),
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=2, title="Phase B"),
+            self._make_result("dec_standalone", title="Standalone Decision"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        assert "Phase Chain" in formatted
+        assert "Standalone Decision" in formatted
+        # 1 grouped block + 1 standalone = 2 record blocks
+        assert formatted.count("Record ") == 2
+
+    def test_phases_ordered_by_phase_seq(self, synthesizer_no_llm):
+        """Test that phases within a group are ordered by phase_seq"""
+        grp = "grp_2026-01-01_arch_order"
+        # Deliberately out of order
+        results = [
+            self._make_result("dec_p2", group_id=grp, group_type="phase_chain", phase_seq=2, phase_total=3, title="Third"),
+            self._make_result("dec_p0", group_id=grp, group_type="phase_chain", phase_seq=0, phase_total=3, title="First"),
+            self._make_result("dec_p1", group_id=grp, group_type="phase_chain", phase_seq=1, phase_total=3, title="Second"),
+        ]
+
+        formatted = synthesizer_no_llm._format_records_for_prompt(results)
+
+        # Phases should appear in seq order
+        pos_first = formatted.index("First")
+        pos_second = formatted.index("Second")
+        pos_third = formatted.index("Third")
+        assert pos_first < pos_second < pos_third
 
 
 class TestQueryProcessorMultilingual:
@@ -412,6 +616,108 @@ class TestQueryProcessorMultilingual:
         assert result.language.is_english is True
 
 
+class TestSynthesizerMultilingual:
+    """Tests for multilingual synthesis"""
+
+    @pytest.fixture
+    def synthesizer_no_llm(self):
+        from agents.retriever.synthesizer import Synthesizer
+        return Synthesizer(anthropic_api_key=None)
+
+    @pytest.fixture
+    def sample_results(self):
+        from agents.retriever.searcher import SearchResult
+
+        return [
+            SearchResult(
+                record_id="dec_2024-01-01_arch_postgres",
+                title="Adopt PostgreSQL",
+                payload_text="# Decision Record: Adopt PostgreSQL\n\nWe chose PostgreSQL for better JSON support.",
+                domain="architecture",
+                certainty="supported",
+                status="accepted",
+                score=0.85,
+            ),
+        ]
+
+    def test_korean_fallback_template(self, synthesizer_no_llm, sample_results):
+        """Test that Korean queries get Korean fallback template"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+        from agents.common.language import LanguageInfo
+
+        query = ParsedQuery(
+            original="왜 PostgreSQL을 선택했나요?",
+            cleaned="왜 postgresql을 선택했나요?",
+            intent=QueryIntent.DECISION_RATIONALE,
+            language=LanguageInfo(code="ko", confidence=0.95, script="Hangul"),
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "검색 결과" in result.answer
+
+    def test_japanese_fallback_template(self, synthesizer_no_llm, sample_results):
+        """Test that Japanese queries get Japanese fallback template"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+        from agents.common.language import LanguageInfo
+
+        query = ParsedQuery(
+            original="なぜPostgreSQLを選んだのですか？",
+            cleaned="なぜpostgresqlを選んだのですか？",
+            intent=QueryIntent.DECISION_RATIONALE,
+            language=LanguageInfo(code="ja", confidence=0.90, script="Kana"),
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "検索結果" in result.answer
+
+    def test_english_fallback_template(self, synthesizer_no_llm, sample_results):
+        """Test that English queries get English fallback template"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+        from agents.common.language import LanguageInfo
+
+        query = ParsedQuery(
+            original="Why did we choose PostgreSQL?",
+            cleaned="why did we choose postgresql?",
+            intent=QueryIntent.DECISION_RATIONALE,
+            language=LanguageInfo(code="en", confidence=0.99, script="Latin"),
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "Search Results" in result.answer
+
+    def test_unknown_language_falls_back_to_english(self, synthesizer_no_llm, sample_results):
+        """Test that unknown language code uses English template"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+        from agents.common.language import LanguageInfo
+
+        query = ParsedQuery(
+            original="Warum haben wir PostgreSQL gewahlt?",
+            cleaned="warum haben wir postgresql gewahlt?",
+            intent=QueryIntent.GENERAL,
+            language=LanguageInfo(code="de", confidence=0.85, script="Latin"),
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "Search Results" in result.answer
+
+    def test_no_language_uses_english_template(self, synthesizer_no_llm, sample_results):
+        """Test that ParsedQuery without language field uses English"""
+        from agents.retriever.query_processor import ParsedQuery, QueryIntent
+
+        query = ParsedQuery(
+            original="Why PostgreSQL?",
+            cleaned="why postgresql?",
+            intent=QueryIntent.GENERAL,
+            language=None,
+        )
+
+        result = synthesizer_no_llm.synthesize(query, sample_results)
+
+        assert "Search Results" in result.answer
 
 
 class TestDisplayTextLocalization:
@@ -490,3 +796,25 @@ class TestDisplayTextLocalization:
         assert "Alternatives Considered" in text
 
 
+class TestFormatAnswerForDisplay:
+    """Tests for answer formatting"""
+
+    def test_format_complete_answer(self):
+        from agents.retriever.synthesizer import SynthesizedAnswer, format_answer_for_display
+
+        answer = SynthesizedAnswer(
+            answer="PostgreSQL was chosen for better JSON support.",
+            confidence=0.85,
+            sources=[
+                {"record_id": "dec_1", "title": "PostgreSQL Decision", "certainty": "supported"}
+            ],
+            related_queries=["What alternatives were considered?"],
+            warnings=["1 record(s) have partial evidence"],
+        )
+
+        formatted = format_answer_for_display(answer)
+
+        assert "PostgreSQL was chosen" in formatted
+        assert "85%" in formatted
+        assert "dec_1" in formatted
+        assert "alternatives" in formatted.lower()

@@ -15,28 +15,6 @@ Rune works with all major AI agents via native MCP (Model Context Protocol) supp
 
 ---
 
-## LLM Provider Configuration
-
-Rune's Scribe (capture) and Retriever (recall) pipelines use a lightweight LLM for filtering and synthesis. The provider is configured in `~/.rune/config.json`:
-
-```json
-{
-  "llm": {
-    "provider": "anthropic",
-    "tier2_provider": "anthropic"
-  }
-}
-```
-
-| Provider | Value | Models |
-|----------|-------|--------|
-| Anthropic | `"anthropic"` | claude-sonnet-4, claude-haiku-4.5 |
-| OpenAI | `"openai"` | gpt-4o-mini |
-| Google | `"google"` | gemini-2.0-flash-exp |
-| Auto-detect | `"auto"` | Inferred from MCP client identity |
-
-API keys are read from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY` / `GEMINI_API_KEY`) or from the `llm` config section. See [config/README.md](config/README.md) for the full schema.
-
 ---
 
 ## Claude Code
@@ -94,11 +72,6 @@ cp config/config.template.json ~/.rune/config.json
 # Edit with your vault/envector credentials
 ```
 
-Set LLM provider to OpenAI (default for Codex):
-```bash
-export RUNE_LLM_PROVIDER="openai"
-export OPENAI_API_KEY="your-key"
-```
 
 ---
 
