@@ -82,6 +82,8 @@ class VaultClient:
         vault_endpoint: str,
         vault_token: str,
         timeout: float = 30.0,
+        ca_cert: Optional[str] = None,
+        tls_disable: bool = False,
     ):
         """
         Initialize Vault client.
@@ -92,10 +94,15 @@ class VaultClient:
                 "http://host:50080/mcp". RUNEVAULT_GRPC_TARGET overrides.
             vault_token: Authentication token for Vault
             timeout: Request timeout in seconds
+            ca_cert: Path to CA certificate PEM file for self-signed certs.
+                None or empty string uses system CA bundle.
+            tls_disable: If True, use insecure plaintext channel (dev only).
         """
         self.vault_endpoint = vault_endpoint.rstrip("/")
         self.vault_token = vault_token
         self.timeout = timeout
+        self._ca_cert = ca_cert
+        self._tls_disable = tls_disable
 
         # Derive gRPC target from endpoint URL or use explicit override
         self._grpc_target = os.getenv("RUNEVAULT_GRPC_TARGET")
@@ -132,16 +139,47 @@ class VaultClient:
         host = parsed.hostname or endpoint.split(":")[0].split("/")[0]
         return f"{host}:50051"
 
+    def _build_tls_credentials(self) -> grpc.ChannelCredentials:
+        """Build TLS channel credentials.
+
+        If _ca_cert is set, reads the PEM file for custom CA verification.
+        Otherwise, uses the system default CA bundle (grpc default).
+        """
+        root_certs = None
+        if self._ca_cert:
+            cert_path = os.path.expanduser(self._ca_cert)
+            if not os.path.isfile(cert_path):
+                raise VaultError(
+                    f"CA certificate file not found: {cert_path}. "
+                    "Check VAULT_CA_CERT or vault.ca_cert in config.json."
+                )
+            with open(cert_path, "rb") as f:
+                root_certs = f.read()
+            logger.info(f"Using custom CA certificate: {cert_path}")
+        else:
+            logger.info("Using system CA bundle for TLS verification")
+        return grpc.ssl_channel_credentials(root_certificates=root_certs)
+
     def _ensure_channel(self):
         """Create the async gRPC channel if not yet created."""
         if self._channel is None:
-            self._channel = grpc.aio.insecure_channel(
-                self._grpc_target,
-                options=[
-                    ("grpc.max_send_message_length", MAX_MESSAGE_LENGTH),
-                    ("grpc.max_receive_message_length", MAX_MESSAGE_LENGTH),
-                ],
-            )
+            options = [
+                ("grpc.max_send_message_length", MAX_MESSAGE_LENGTH),
+                ("grpc.max_receive_message_length", MAX_MESSAGE_LENGTH),
+            ]
+            if self._tls_disable:
+                logger.warning(
+                    "TLS disabled — gRPC traffic is unencrypted. "
+                    "Only use this for local development."
+                )
+                self._channel = grpc.aio.insecure_channel(
+                    self._grpc_target, options=options,
+                )
+            else:
+                credentials = self._build_tls_credentials()
+                self._channel = grpc.aio.secure_channel(
+                    self._grpc_target, credentials, options=options,
+                )
             self._stub = pb2_grpc.VaultServiceStub(self._channel)
 
     async def close(self):
@@ -295,6 +333,8 @@ class VaultClient:
 def create_vault_client(
     vault_endpoint: Optional[str] = None,
     vault_token: Optional[str] = None,
+    ca_cert: Optional[str] = None,
+    tls_disable: bool = False,
 ) -> Optional[VaultClient]:
     """
     Factory function to create Vault client from environment variables.
@@ -303,10 +343,14 @@ def create_vault_client(
     - RUNEVAULT_ENDPOINT: Vault gRPC target (e.g., "vault:50051" or "tcp://host:port")
     - RUNEVAULT_TOKEN: Authentication token for Vault
     - RUNEVAULT_GRPC_TARGET: Optional explicit gRPC target override
+    - VAULT_CA_CERT: Path to CA certificate PEM (for self-signed certs)
+    - VAULT_TLS_DISABLE: Set to "true" to use insecure plaintext channel
 
     Args:
         vault_endpoint: Override for RUNEVAULT_ENDPOINT
         vault_token: Override for RUNEVAULT_TOKEN
+        ca_cert: Override for VAULT_CA_CERT
+        tls_disable: Override for VAULT_TLS_DISABLE
 
     Returns:
         VaultClient if configured, None otherwise
@@ -318,4 +362,12 @@ def create_vault_client(
         logger.info("Rune-Vault not configured (RUNEVAULT_ENDPOINT or RUNEVAULT_TOKEN missing)")
         return None
 
-    return VaultClient(vault_endpoint=endpoint, vault_token=token)
+    resolved_ca_cert = ca_cert or os.getenv("VAULT_CA_CERT") or None
+    resolved_tls_disable = tls_disable or os.getenv("VAULT_TLS_DISABLE", "").lower() == "true"
+
+    return VaultClient(
+        vault_endpoint=endpoint,
+        vault_token=token,
+        ca_cert=resolved_ca_cert,
+        tls_disable=resolved_tls_disable,
+    )

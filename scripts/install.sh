@@ -70,6 +70,8 @@ print_info "Dependencies installed successfully!"
 print_step "Creating configuration directory..."
 mkdir -p ~/.rune
 chmod 700 ~/.rune
+mkdir -p ~/.rune/certs
+chmod 700 ~/.rune/certs
 print_info "Created ~/.rune directory"
 
 # Installation complete

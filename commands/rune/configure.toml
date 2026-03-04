@@ -10,6 +10,17 @@ Collect the following credentials from the user, one at a time:
    - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
 4. **Vault Token** (optional) — a base64url hash, e.g. `dG9rLWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1`
 
+If Vault Endpoint and Token were both provided, ask the TLS question:
+
+**"How does your Vault server handle TLS?"**
+
+1. **Self-signed certificate** — Copy the CA cert PEM to `~/.rune/certs/ca.pem`
+   → config: `ca_cert: "~/.rune/certs/ca.pem"`, `tls_disable: false`
+2. **Public CA (default)** — System CA handles verification
+   → config: `ca_cert: ""`, `tls_disable: false`
+3. **No TLS** — Warning: only for local development, traffic is unencrypted
+   → config: `ca_cert: ""`, `tls_disable: true`
+
 If Vault fields are skipped, note that the plugin will start in dormant state.
 
 After collecting credentials, run these shell commands:
@@ -22,7 +33,7 @@ Then write `~/.rune/config.json` with this structure (chmod 600 after writing):
 
 ```json
 {
-  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>"},
+  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>", "ca_cert": "<ca_cert or empty>", "tls_disable": false},
   "envector": {"endpoint": "<envector_endpoint>", "api_key": "<envector_api_key>"},
   "state": "dormant",
   "metadata": {"configVersion": "1.0", "lastUpdated": "<ISO timestamp>"}
