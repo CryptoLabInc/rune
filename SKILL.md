@@ -26,11 +26,9 @@ description: Encrypted organizational memory workflow for Rune with activation c
    - NO → **Go to Dormant State**
    - YES → Continue to step 3
 
-3. **Infrastructure Validation** (LIGHTWEIGHT CHECK):
-   - Is there a `~/.rune/logs/envector-mcp.log` file?
-   - Is it recent (modified within last 24 hours)?
-   - NO → **Go to Dormant State** (infrastructure likely not running)
-   - YES → **Go to Active State**
+3. **State Check**:
+   - `state` is `"active"` → **Go to Active State**
+   - Otherwise → **Go to Dormant State**
 
 **IMPORTANT**: Do NOT attempt to ping Vault or make network requests during activation check. This wastes tokens. Only check local files.
 

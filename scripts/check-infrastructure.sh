@@ -75,17 +75,6 @@ else
     print_warn "Unknown Vault endpoint scheme: $RUNEVAULT_ENDPOINT, skipping connectivity check"
 fi
 
-# Check if local MCP server is running
-if pgrep -f "mcp/server/server.py" > /dev/null; then
-    print_check "enVector MCP server is running (PID: $(pgrep -f 'mcp/server/server.py'))"
-else
-    print_warn "enVector MCP server is not running locally"
-    echo "  Start with: scripts/start-mcp-servers.sh"
-    # Not failing here, as it can be started later
-fi
-
-# Note: Vault MCP runs on remote server (already checked via HTTP above)
-
 # Check if virtual environment exists
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -d "$PLUGIN_DIR/.venv" ]; then
