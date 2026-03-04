@@ -2,6 +2,14 @@ description = "Capture a decision or insight to encrypted organizational memory"
 prompt = """
 You are storing context to Rune's FHE-encrypted organizational memory.
 
+Cross-agent runtime rule:
+- Before MCP usage, ensure runtime from the single source: `scripts/bootstrap-mcp.sh`.
+- Detect plugin root (search: `$RUNE_PLUGIN_ROOT` > `~/.claude/plugins/cache/*/rune/*/` > `~/.codex/skills/rune` > CWD ancestors).
+- Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`, and start local MCP server if needed.
+
+Codex only:
+- If MCP tool routing is unavailable in Codex, suggest `<plugin_root>/scripts/install-codex.sh`.
+
 First, read `~/.rune/config.json`. If it is missing or `state` is not `"active"`, respond:
 "Rune is dormant. Run `/rune:configure` and `/rune:activate` first."
 Do NOT attempt any storage.

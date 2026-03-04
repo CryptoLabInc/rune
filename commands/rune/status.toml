@@ -4,6 +4,18 @@ You are checking the health and status of Rune, an FHE-encrypted organizational 
 
 Follow these steps:
 
+0. Before any MCP tool call, ensure local runtime is ready (cross-agent common step):
+   - Detect plugin root by finding `scripts/bootstrap-mcp.sh`. Search in order:
+     1. `$RUNE_PLUGIN_ROOT` (if set)
+     2. `~/.claude/plugins/cache/*/rune/*/scripts/bootstrap-mcp.sh`
+     3. `~/.codex/skills/rune/scripts/bootstrap-mcp.sh`
+     4. Current working directory and its parent directories
+   - Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`.
+   - If MCP tooling still appears unavailable, try `<plugin_root>/scripts/start-mcp-servers.sh`.
+
+Codex only:
+- If Codex MCP registration is missing for Rune, suggest running `<plugin_root>/scripts/install-codex.sh`.
+
 1. Check if `~/.rune/config.json` exists. If not, show "Not configured" and suggest `/rune:configure`.
 
 2. Read the config and display a status report:

@@ -2,6 +2,20 @@
 
 Rune works with all major AI agents via native MCP (Model Context Protocol) support.
 
+## Integration Principles
+
+### Cross-agent common (single source of truth)
+
+- Runtime prep (venv/deps/self-healing) must go through `scripts/bootstrap-mcp.sh`.
+- Do not duplicate Python setup logic per agent.
+
+### Agent-specific adapters (thin layer only)
+
+- Codex-only tasks: `codex mcp add/remove/list` registration flows
+- Claude/Gemini/OpenAI tasks: each client's native MCP registration flow
+
+Keep these layers separate to avoid cross-agent drift.
+
 ## Supported Agents
 
 | Agent | Integration | Setup |
@@ -26,7 +40,7 @@ cd rune
 ./scripts/install.sh
 ```
 
-This automatically registers the `envector` MCP server in Claude Code/Desktop.
+This prepares runtime using the shared bootstrap flow for Claude usage.
 
 ### Manual Setup
 
@@ -56,6 +70,15 @@ cd rune
 This automatically:
 1. Creates `.venv` and installs Python dependencies
 2. Registers Rune MCP server as `rune` in Codex
+
+### Codex-only Runtime Ensure
+
+```bash
+cd rune
+./scripts/ensure-codex-ready.sh --register
+```
+
+This is a Codex-only adapter that reuses `bootstrap-mcp.sh` and then ensures Codex MCP registration.
 
 ### Verify
 
@@ -222,11 +245,24 @@ Each agent spawns its own MCP server process. Shared state is maintained via enV
 
 ## Troubleshooting
 
+### Re-run shared bootstrap (all agents)
+```bash
+cd rune
+SETUP_ONLY=1 ./scripts/bootstrap-mcp.sh
+```
+
 ### MCP server won't start
 ```bash
 cd rune
 source .venv/bin/activate
 python mcp/server/server.py --help
+```
+
+### Codex-only registration repair
+```bash
+cd rune
+./scripts/ensure-codex-ready.sh --register
+codex mcp list
 ```
 
 ### Missing environment variables

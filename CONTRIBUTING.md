@@ -45,6 +45,7 @@ Feature requests should include:
    - Follow existing code style
    - Update documentation
    - Test your changes
+   - Pass cross-agent invariant checks (see checklist below)
 
 4. **Commit your changes**
    ```bash
@@ -111,6 +112,18 @@ Feature requests should include:
 - Update when features change
 
 ## Testing
+
+### Cross-Agent Invariant Checklist
+
+Use this checklist for any integration/setup/runtime change:
+
+- [ ] `scripts/bootstrap-mcp.sh` remains the single source of truth for runtime prep (venv/deps/self-heal)
+- [ ] No agent-specific script duplicates bootstrap/setup logic
+- [ ] Agent-specific scripts stay thin adapters (registration/wiring only)
+- [ ] Codex-only commands (`codex mcp ...`) are clearly separated from cross-agent/common instructions
+- [ ] Claude/Gemini/OpenAI instructions do not include Codex-only commands
+- [ ] Non-server callers of `bootstrap-mcp.sh` use `SETUP_ONLY=1` to avoid exec-ing the MCP server process
+- [ ] `SKILL.md`, `commands/rune/*.toml`, and `AGENT_INTEGRATION.md` remain consistent on common vs agent-specific boundaries
 
 ### Manual Testing Checklist
 

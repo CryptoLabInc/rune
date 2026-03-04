@@ -2,6 +2,10 @@ description = "Set up Rune credentials and write ~/.rune/config.json"
 prompt = """
 You are configuring Rune, an FHE-encrypted organizational memory system.
 
+Cross-agent rule:
+- Use `scripts/bootstrap-mcp.sh` as the single runtime setup source.
+- Do not use Codex-specific commands unless explicitly in a "Codex only" step.
+
 Collect the following credentials from the user, one at a time:
 
 1. **enVector Endpoint** (required) — e.g. `cluster-abc123.envector.io`
@@ -11,6 +15,14 @@ Collect the following credentials from the user, one at a time:
 4. **Vault Token** (optional) — a base64url hash, e.g. `dG9rLWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1`
 
 If Vault fields are skipped, note that the plugin will start in dormant state.
+
+Before writing config, ensure local runtime is prepared:
+- Detect plugin root by finding `scripts/bootstrap-mcp.sh`. Search in order:
+  1. `$RUNE_PLUGIN_ROOT` (if set)
+  2. `~/.claude/plugins/cache/*/rune/*/scripts/bootstrap-mcp.sh`
+  3. `~/.codex/skills/rune/scripts/bootstrap-mcp.sh`
+  4. Current working directory and its parent directories
+- Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`.
 
 After collecting credentials, run these shell commands:
 
@@ -41,6 +53,9 @@ Rune Configuration Complete
 ```
 
 If Vault was not configured, add: "Vault not configured — plugin will start in dormant state."
+
+Codex only:
+- Optionally suggest `<plugin_root>/scripts/install-codex.sh` if the user wants automatic Codex MCP registration.
 
 User input: {{input}}
 """
