@@ -8,6 +8,31 @@ PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$PLUGIN_DIR/.venv"
 REQUIREMENTS="$PLUGIN_DIR/requirements.txt"
 SERVER="$PLUGIN_DIR/mcp/server/server.py"
+MODE="run"
+
+for arg in "$@"; do
+    case "$arg" in
+        --local-only) MODE="local-only" ;;
+        --install-deps) MODE="install-deps" ;;
+    esac
+done
+
+# Backward compatibility:
+# - SETUP_ONLY=1 previously meant "prepare runtime", which installed deps.
+# - Keep that behavior unless --local-only is explicitly provided.
+if [ "${SETUP_ONLY:-}" = "1" ] && [ "$MODE" = "run" ]; then
+    MODE="install-deps"
+fi
+
+if [ "$MODE" = "run" ]; then
+    MODE="install-deps"
+fi
+
+if [ ! -w "$PLUGIN_DIR" ]; then
+    echo "[rune] Plugin directory is not writable: $PLUGIN_DIR" >&2
+    echo "[rune] Codex users: grant write access to ~/.codex/skills/rune, then rerun setup." >&2
+    exit 1
+fi
 
 # Deactivate any active venv to prevent pip shebang contamination.
 # If bootstrap runs inside another venv, `pip install --upgrade pip` rewrites
@@ -34,7 +59,9 @@ elif [ -f "$VENV_DIR/bin/pip" ]; then
 fi
 if [ "$NEED_VENV" -eq 1 ]; then
     python3 -m venv "$VENV_DIR" >&2
-    "$VENV_DIR/bin/python3" -m pip install --quiet --upgrade pip >&2
+    if [ "$MODE" = "install-deps" ]; then
+        "$VENV_DIR/bin/python3" -m pip install --quiet --upgrade pip >&2
+    fi
 fi
 
 # Install/update deps when requirements change or previous install was incomplete.
@@ -42,7 +69,7 @@ fi
 DEPS_STAMP="$VENV_DIR/.deps_installed"
 REQ_HASH="$(md5sum "$REQUIREMENTS" 2>/dev/null | cut -d' ' -f1)"
 PREV_HASH="$(cat "$DEPS_STAMP" 2>/dev/null || true)"
-if [ "$REQ_HASH" != "$PREV_HASH" ]; then
+if [ "$MODE" = "install-deps" ] && [ "$REQ_HASH" != "$PREV_HASH" ]; then
     echo "[rune] Installing/updating dependencies..." >&2
     "$VENV_DIR/bin/python3" -m pip install --quiet -r "$REQUIREMENTS" >&2
     echo "$REQ_HASH" > "$DEPS_STAMP"
@@ -69,8 +96,9 @@ elif [ -d "$FASTEMBED_CACHE" ] && \
     done
 fi
 
-# Setup-only mode: install venv/deps then exit (used by install.sh)
+# Setup-only mode: prepare local runtime then exit.
 [ "${SETUP_ONLY:-}" = "1" ] && exit 0
+[ "$MODE" = "local-only" ] && exit 0
 
 # Run the MCP server (exec replaces this shell process)
 export PYTHONPATH="$PLUGIN_DIR/mcp"

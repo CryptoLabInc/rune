@@ -22,8 +22,13 @@ if [ "$REGISTER" -eq 1 ]; then
   echo "[rune] registering MCP for Codex (includes runtime bootstrap)"
   "$PLUGIN_DIR/scripts/install-codex.sh"
 else
-  echo "[rune] ensuring local runtime via bootstrap-mcp.sh"
-  SETUP_ONLY=1 "$PLUGIN_DIR/scripts/bootstrap-mcp.sh"
+  if [ ! -w "$PLUGIN_DIR" ]; then
+    echo "[rune] plugin dir is not writable: $PLUGIN_DIR" >&2
+    echo "[rune] For Codex install, allow write access to this directory and rerun." >&2
+    exit 1
+  fi
+  echo "[rune] checking local runtime (no network install)"
+  "$PLUGIN_DIR/scripts/bootstrap-mcp.sh" --local-only
 fi
 
 echo "[rune] ready"
