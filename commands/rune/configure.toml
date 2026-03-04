@@ -14,11 +14,20 @@ If Vault Endpoint and Token were both provided, ask the TLS question:
 
 **"How does your Vault server handle TLS?"**
 
-1. **Self-signed certificate** — Copy the CA cert PEM to `~/.rune/certs/ca.pem`
+1. **Self-signed certificate** — "My team uses a self-signed CA"
+   - Follow-up: ask for the path to CA certificate PEM file
+   - Support `~` expansion in the path
+   - Copy to `~/.rune/certs/ca.pem` (`mkdir -p ~/.rune/certs && cp <user_path> ~/.rune/certs/ca.pem && chmod 600 ~/.rune/certs/ca.pem`)
+   - If copy fails (file not found, permission denied), show error and ask again
+   - Inform user: "CA certificate copied to ~/.rune/certs/ca.pem"
    → config: `ca_cert: "~/.rune/certs/ca.pem"`, `tls_disable: false`
-2. **Public CA (default)** — System CA handles verification
+
+2. **Public CA (default)** — "Vault uses a publicly-signed certificate (e.g., Let's Encrypt)"
+   - No additional input needed, system CA handles verification
    → config: `ca_cert: ""`, `tls_disable: false`
-3. **No TLS** — Warning: only for local development, traffic is unencrypted
+
+3. **No TLS** — "Connect without TLS (not recommended)"
+   - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
    → config: `ca_cert: ""`, `tls_disable: true`
 
 If Vault fields are skipped, note that the plugin will start in dormant state.
@@ -47,8 +56,9 @@ After writing the config, show a summary:
 ```
 Rune Configuration Complete
 ============================
-  Config : ~/.rune/config.json
-  State  : dormant (run /rune:activate to enable)
+  Config    : ~/.rune/config.json
+  Vault TLS : <enabled (system CA) | enabled (custom CA) | disabled>
+  State     : dormant (run /rune:activate to enable)
 ```
 
 If Vault was not configured, add: "Vault not configured — plugin will start in dormant state."
