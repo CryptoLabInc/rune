@@ -1,3 +1,8 @@
+---
+name: rune
+description: Encrypted organizational memory workflow for Rune with activation checks and /rune command behaviors across MCP-compatible agents.
+---
+
 # Rune - Organizational Memory System
 
 **Context**: This skill provides encrypted organizational memory capabilities using Fully Homomorphic Encryption (FHE). It allows teams to capture, store, and retrieve institutional knowledge while maintaining zero-knowledge privacy. Works with Claude Code, Codex CLI, Gemini CLI, and any MCP-compatible agent.
@@ -139,7 +144,7 @@ Recommendations:
 /rune:recall "Why PostgreSQL?"
 ```
 
-**Note**: In most cases, simply asking Claude naturally ("Why did we choose PostgreSQL?") triggers Retriever automatically — no command needed.
+**Note**: In most cases, simply asking naturally ("Why did we choose PostgreSQL?") triggers Retriever automatically — no command needed.
 
 ### `/rune:activate` (or `/rune:wakeup`)
 **Purpose**: Attempt to activate plugin after infrastructure is ready

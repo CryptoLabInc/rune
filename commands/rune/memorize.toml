@@ -9,17 +9,57 @@ Do NOT attempt any storage.
 When active:
 
 1. Take the user's input: {{input}}
-2. Call the `capture` MCP tool with the text. Include source as "gemini_agent".
+2. Call the `capture` MCP tool with the text.
 3. Confirm what was stored with a brief summary.
 
 Guidelines for what to capture:
-- Architectural decisions and their reasoning
-- Trade-off analyses where a direction was chosen
-- Policy choices (naming conventions, error handling strategies)
-- Post-mortem insights and lessons learned
+
+Business & Strategy:
+- Strategic decisions (market positioning, pricing, partnerships, M&A)
+- Product decisions (feature prioritization, roadmap changes, deprecations)
+- Customer/user insights, behavioral patterns, and feedback-driven pivots
+- Go-to-market, launch, and distribution decisions
+- Vendor/supplier selection and contract terms rationale
+- Organizational restructuring and team topology changes
+
+Engineering & Architecture:
+- Architecture and design decisions with rationale
+- Technology, library, or framework selection and reasoning
+- API design decisions and contract changes
+- Data model, schema, and data pipeline decisions
+- Infrastructure, deployment, scaling, and capacity planning decisions
+- Performance optimization strategies and benchmark results
+- Migration strategies, version upgrade paths, and deprecation plans
+- Critical bug root causes and systemic fixes (not routine patches)
+- Code review decisions that changed design direction or established precedent
+- Testing strategy decisions (coverage targets, framework choices, E2E vs unit boundaries)
+- Build, CI/CD, and release pipeline decisions
+
+Security & Compliance:
+- Security architecture and threat model decisions
+- Authentication/authorization strategy changes
+- Encryption, key management, and data protection decisions
+- Audit findings and remediation strategies
+- Compliance framework adoption (SOC2, HIPAA, ISO 27001, FedRAMP, etc.)
+
+Domain-Specific:
+- Healthcare: PHI handling policies, clinical workflow decisions, HL7/FHIR integration choices, FDA/EMA regulatory strategies
+- Finance: Risk model decisions, transaction processing architecture, reconciliation strategies, regulatory reporting approaches (SEC, FSA, Basel)
+- Defense & Government: Classification handling policies, ITAR/EAR compliance decisions, accreditation strategies (CMMC, NIST 800-171), air-gapped deployment architectures
+- Enterprise: SSO/identity federation decisions, multi-tenancy architecture, SLA commitments, data residency and sovereignty policies
+- AI/ML: Model selection rationale, training data decisions, evaluation criteria, bias mitigation strategies, responsible AI policies
+
+Process & Learning:
+- Trade-off analyses where a direction was committed
+- Policy choices (naming conventions, error handling, coding standards)
+- Post-mortem insights, incident retrospectives, and lessons learned
+- Cross-team agreements, integration contracts, and SLA definitions
+- On-call runbook decisions and escalation policy changes
 
 Do NOT capture:
 - Routine code changes without significant decisions
-- Information already in version control
+- Information already in version control (diffs, commit messages)
 - Temporary debugging context
+- Speculative ideas without a committed direction
+- Raw meeting transcripts (capture decisions extracted from them instead)
 """
