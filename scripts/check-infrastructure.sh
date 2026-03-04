@@ -44,19 +44,35 @@ print_check "Vault URL: $RUNEVAULT_ENDPOINT"
 
 # Check if Vault is accessible
 echo "Checking Vault connectivity..."
-if command -v curl &> /dev/null; then
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$RUNEVAULT_ENDPOINT/health" 2>/dev/null)
-
-    if [ "$HTTP_CODE" = "200" ]; then
-        print_check "Vault is accessible (HTTP $HTTP_CODE)"
+if [[ "$RUNEVAULT_ENDPOINT" =~ ^tcp:// ]]; then
+    # TCP endpoint — extract host and port, use /dev/tcp
+    VAULT_HOST=$(echo "$RUNEVAULT_ENDPOINT" | sed 's|tcp://||' | cut -d: -f1)
+    VAULT_PORT=$(echo "$RUNEVAULT_ENDPOINT" | sed 's|tcp://||' | cut -d: -f2)
+    if timeout 5 bash -c "echo > /dev/tcp/$VAULT_HOST/$VAULT_PORT" 2>/dev/null; then
+        print_check "Vault is accessible (TCP $VAULT_HOST:$VAULT_PORT)"
     else
-        print_fail "Vault is not accessible (HTTP $HTTP_CODE)"
+        print_fail "Vault is not accessible (TCP $VAULT_HOST:$VAULT_PORT)"
         echo "  Make sure Rune-Vault is deployed and running"
         echo "  URL: $RUNEVAULT_ENDPOINT"
         exit 1
     fi
+elif [[ "$RUNEVAULT_ENDPOINT" =~ ^https?:// ]]; then
+    # HTTP/HTTPS endpoint — use curl health check
+    if command -v curl &> /dev/null; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "$RUNEVAULT_ENDPOINT/health" 2>/dev/null)
+        if [ "$HTTP_CODE" = "200" ]; then
+            print_check "Vault is accessible (HTTP $HTTP_CODE)"
+        else
+            print_fail "Vault is not accessible (HTTP $HTTP_CODE)"
+            echo "  Make sure Rune-Vault is deployed and running"
+            echo "  URL: $RUNEVAULT_ENDPOINT"
+            exit 1
+        fi
+    else
+        print_warn "curl not found, skipping Vault connectivity check"
+    fi
 else
-    print_warn "curl not found, skipping Vault connectivity check"
+    print_warn "Unknown Vault endpoint scheme: $RUNEVAULT_ENDPOINT, skipping connectivity check"
 fi
 
 # Check if local MCP server is running
