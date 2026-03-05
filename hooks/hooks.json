@@ -1,4 +1,4 @@
 {
   "$schema": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/hooks/hooks-schema.json",
-  "hooks": []
+  "hooks": {}
 }
