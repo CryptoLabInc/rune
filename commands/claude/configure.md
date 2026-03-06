@@ -1,6 +1,6 @@
 ---
 description: Configure Rune — sets up Python environment, collects credentials, registers MCP servers
-allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(mkdir:*), Bash(chmod:*), Bash(bash:*), Bash(scripts/*), Read, Write
+allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(mkdir:*), Bash(chmod:*), Bash(bash:*), Bash(scripts/*), Read, Write, AskUserQuestion
 ---
 
 # /rune:configure — Full Setup & Configuration
