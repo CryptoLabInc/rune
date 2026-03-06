@@ -756,6 +756,8 @@ class MCPServerApp:
                         rune_config.vault.endpoint,
                         rune_config.vault.token,
                         key_path,
+                        ca_cert=rune_config.vault.ca_cert or None,
+                        tls_disable=rune_config.vault.tls_disable,
                     )
                     if success and vault_key_id:
                         key_id = vault_key_id

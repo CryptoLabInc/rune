@@ -315,7 +315,8 @@ class VaultClient:
         parsed = urlparse(self.vault_endpoint)
         if parsed.scheme in ("http", "https"):
             try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as client:
+                verify = False if self._tls_disable else (self._ca_cert or True)
+                async with httpx.AsyncClient(timeout=httpx.Timeout(5.0), verify=verify) as client:
                     base_url = self.vault_endpoint
                     for suffix in ("/mcp", "/sse"):
                         if base_url.endswith(suffix):
