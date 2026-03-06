@@ -102,6 +102,8 @@ class FakeVaultClient(VaultClient):
         self._grpc_target = "fake-vault:50051"
         self._channel = None
         self._stub = None
+        self._ca_cert = None
+        self._tls_disable = True
 
     async def get_public_key(self) -> dict:
         return {"EncKey.json": "{}", "EvalKey.json": "{}", "index_name": "team-decisions"}

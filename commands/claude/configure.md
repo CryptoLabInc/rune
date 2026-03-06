@@ -1,6 +1,6 @@
 ---
 description: Configure Rune — sets up Python environment, collects credentials, registers MCP servers
-allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(mkdir:*), Bash(chmod:*), Bash(bash:*), Bash(scripts/*), Read, Write
+allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(mkdir:*), Bash(chmod:*), Bash(bash:*), Bash(scripts/*), Read, Write, AskUserQuestion
 ---
 
 # /rune:configure — Full Setup & Configuration
@@ -41,8 +41,28 @@ Ask user for each credential one at a time:
 - **enVector API Key** (required, format: `envector_xxx`)
 - **Vault Endpoint** (optional, format: `tcp://vault-TEAM.oci.envector.io:50051`)
   - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
-  - Example: user enters `0.tcp.jp.ngrok.io:17404` → store as `tcp://0.tcp.jp.ngrok.io:17404`
+  - Example: user enters `vault.example.com:50051` → store as `tcp://vault.example.com:50051`
 - **Vault Token** (optional, format: `evt_xxx`)
+
+If Vault Endpoint and Token were both provided, ask the TLS question:
+
+**"How does your Vault server handle TLS?"**
+
+1. **Self-signed certificate** — "My team uses a self-signed CA (provide CA cert path)"
+   - Follow-up: "Enter the path to your CA certificate PEM file:"
+   - Support `~` expansion in the path
+   - Copy the file to `~/.rune/certs/ca.pem` (`cp <user_path> ~/.rune/certs/ca.pem && chmod 600 ~/.rune/certs/ca.pem`)
+   - If copy fails (file not found, permission denied), show error and ask again
+   - Inform user: "CA certificate copied to ~/.rune/certs/ca.pem"
+   - → config: `ca_cert: "~/.rune/certs/ca.pem"`, `tls_disable: false`
+
+2. **Public CA (default)** — "Vault uses a publicly-signed certificate (e.g., Let's Encrypt)"
+   - No additional input needed, system CA handles verification
+   - → config: `ca_cert: ""`, `tls_disable: false`
+
+3. **No TLS** — "Connect without TLS (not recommended — traffic is unencrypted)"
+   - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
+   - → config: `ca_cert: ""`, `tls_disable: true`
 
 If Vault fields are skipped, note that the plugin will start in dormant state.
 
@@ -55,7 +75,7 @@ mkdir -p ~/.rune && chmod 700 ~/.rune
 Write the config file:
 ```json
 {
-  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>"},
+  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>", "ca_cert": "<ca_cert_path or empty>", "tls_disable": false},
   "envector": {"endpoint": "<envector_endpoint>", "api_key": "<envector_api_key>"},
   "state": "dormant",
   "metadata": {"configVersion": "1.0", "lastUpdated": "<ISO timestamp>", "installedFrom": "<PLUGIN_ROOT>"}
@@ -80,6 +100,7 @@ Rune Configuration Complete
   Plugin    : <PLUGIN_ROOT>
   Python    : <PLUGIN_ROOT>/.venv
   MCP       : registered via claude mcp add (user scope)
+  Vault TLS : <enabled (system CA) | enabled (custom CA: <path>) | disabled>
 
 Next steps:
   1. Restart Claude Code to load the MCP server
