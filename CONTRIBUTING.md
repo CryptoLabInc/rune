@@ -81,19 +81,37 @@ Feature requests should include:
    cd rune
    ```
 
-2. **Install locally**
-   ```bash
-   ./scripts/install.sh
-   ```
-   This sets up the venv, dependencies, and registers MCP servers in Claude Code/Desktop.
+2. **Clean up previous installations (if any)**
 
-3. **Run tests**
+   If you previously installed a versioned (marketplace) Rune plugin, you must remove the cached version first to avoid conflicts:
+   ```bash
+   # Remove Rune configuration
+   rm -rf ~/.rune
+
+   # Remove cached plugin (Claude Code stores installed plugins here)
+   rm -rf ~/.claude/plugins/cache/*/rune
+   ```
+
+3. **Install the local plugin in Claude Code**
+
+   Register your local directory as a marketplace source and install from it:
+   ```bash
+   # Add the local directory as a marketplace (run from the parent of the rune/ plugin directory)
+   claude plugin marketplace add ./rune
+
+   # Install the plugin from the local marketplace
+   claude plugin install rune
+   ```
+
+   This registers the local `rune/` directory so Claude Code loads your development copy instead of the published version.
+
+4. **Run tests**
    ```bash
    source .venv/bin/activate
    python -m pytest agents/tests/ -v
    ```
 
-4. **Test changes in an agent**
+5. **Test changes in an agent**
    - Restart your agent (Claude Code, Codex CLI, etc.)
    - Test plugin functionality with `/rune:status`
    - Verify documentation accuracy
