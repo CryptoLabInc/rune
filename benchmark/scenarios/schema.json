@@ -42,6 +42,13 @@
             "title_keywords": {
               "type": "array",
               "items": { "type": "string" }
+            },
+            "evidence_type": {
+              "type": "string",
+              "enum": ["code_change", "git_bisect", "benchmark", "error_trace", "runtime_observation"]
+            },
+            "has_reusable_insight": {
+              "type": "boolean"
             }
           }
         },
