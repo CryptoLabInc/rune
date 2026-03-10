@@ -7,9 +7,8 @@ Follow these steps:
 0. Ensure local runtime first (cross-agent common step):
    - Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
      1. `$RUNE_PLUGIN_ROOT` (if set)
-     2. `~/.claude/plugins/cache/*/rune/*/scripts/bootstrap-mcp.sh`
-     3. `~/.codex/skills/rune/scripts/bootstrap-mcp.sh`
-     4. Current working directory and its parent directories
+     2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/plugins/cache/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
+     3. Current working directory and its parent directories (project root)
    - Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`.
    - If needed, run `<plugin_root>/scripts/start-mcp-servers.sh`.
 
@@ -25,7 +24,9 @@ Codex only:
 3. Validate infrastructure connectivity:
    - For Vault endpoint, parse the scheme:
      - If `http://` or `https://`: test with `curl -sf <endpoint>/health`
-     - If `tcp://`: extract host and port, test with `timeout 5 bash -c 'echo > /dev/tcp/<host>/<port>'`
+     - If `tcp://`: extract host and port, test with Python (portable, works on macOS zsh and Linux):
+       `python3 -c "import socket; s=socket.socket(); s.settimeout(10); s.connect(('<host>', <port>)); print('OK'); s.close()"`
+       Do NOT use `bash -c 'echo > /dev/tcp/...'` — macOS `/bin/bash` may not support `/dev/tcp`.
      - Do NOT curl a `tcp://` endpoint.
    - Check MCP server is importable: `python3 -c "import mcp"` (try the project venv if available)
 

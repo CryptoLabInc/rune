@@ -520,6 +520,55 @@ This document contains comprehensive trigger phrases that indicate when signific
 
 ---
 
+## Agentic Coding Context
+
+### Root Cause Discovery
+- "The root cause was [X] — here's the fix..."
+- "Found it — the issue was in..."
+- "After bisecting, commit [hash] introduced..."
+- "The stack trace pointed to [X] but the real issue was..."
+- "Traced the bug to [X], the fix is..."
+- "The regression was introduced when [X] changed..."
+- "Memory leak traced to [X] — listeners/handlers never cleaned up"
+- "Race condition: [X] and [Y] both writing to [Z] without locking"
+
+### Performance & Optimization
+- "Before: [metric], After: [metric] — changed [what]"
+- "Profiling showed [X]% of time spent in..."
+- "The bottleneck was [X], replaced with [Y]"
+- "Query went from [X]ms to [Y]ms after adding index on..."
+- "Bundle size reduced from [X] to [Y] by..."
+- "O(n²) → O(n) by switching from [X] to [Y]"
+- "EXPLAIN showed full table scan, added index on..."
+
+### Problem Reframing
+- "I initially thought [X] but it turned out to be [Y]"
+- "The real problem isn't [X], it's [Y]"
+- "Misdiagnosed as [X] — actually [Y] because..."
+- "The error pointed to [X] but the root cause was in [Y]"
+- "Spent hours looking at [X], turns out [Y] was the culprit"
+
+### Architecture Pivot During Implementation
+- "Planned to use [X] but switched to [Y] because..."
+- "The original approach didn't work because..."
+- "[X] approach couldn't handle [constraint], pivoted to [Y]"
+- "Started with [X] but discovered [limitation], rewrote using [Y]"
+
+### Pattern Establishment (from concrete fix)
+- "From now on, always [X] when [Y]"
+- "This pattern should be applied across all [components]"
+- "New team rule: [X] must always [Y]"
+- "Adding this to our checklist: [X]"
+- "Established convention: [X] for all [Y]"
+
+### Non-obvious Dependency
+- "Changing [X] breaks [Y] because..."
+- "Discovered that [A] depends on [B] through..."
+- "[X] silently depends on [Y] — not documented anywhere"
+- "Side effect: modifying [X] triggers [Y] due to [Z]"
+
+---
+
 ## Usage Guidelines
 
 ### High-Priority Triggers (Always Capture)

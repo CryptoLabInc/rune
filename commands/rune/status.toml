@@ -7,9 +7,8 @@ Follow these steps:
 0. Before any MCP tool call, ensure local runtime is ready (cross-agent common step):
    - Detect plugin root by finding `scripts/bootstrap-mcp.sh`. Search in order:
      1. `$RUNE_PLUGIN_ROOT` (if set)
-     2. `~/.claude/plugins/cache/*/rune/*/scripts/bootstrap-mcp.sh`
-     3. `~/.codex/skills/rune/scripts/bootstrap-mcp.sh`
-     4. Current working directory and its parent directories
+     2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/plugins/cache/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
+     3. Current working directory and its parent directories (project root)
    - Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`.
    - If MCP tooling still appears unavailable, try `<plugin_root>/scripts/start-mcp-servers.sh`.
 

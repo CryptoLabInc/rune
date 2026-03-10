@@ -40,6 +40,13 @@ Apply this policy to every candidate message:
 - Customer escalation resolutions or churn analysis insights
 - Research findings, experiment results, or proof-of-concept conclusions
 - Risk assessments with mitigation strategies
+- **Agentic coding discoveries** — significant insights from coding, debugging, or optimization sessions:
+  - Root cause discovery: bug cause identified with fix approach
+  - Performance insight: bottleneck found, optimization applied, before/after impact
+  - Problem reframing: initial assumption proved wrong, real cause discovered
+  - Architecture pivot: planned approach failed, switched to working alternative
+  - Non-obvious dependency: component A unexpectedly affects B
+  - Pattern establishment: team rule derived from a concrete fix
 
 ### DO NOT CAPTURE:
 - Casual conversation, greetings, or social chat
@@ -48,6 +55,14 @@ Apply this policy to every candidate message:
 - Vague opinions without commitment ("maybe we should...")
 - Draft/WIP discussions without conclusions
 - Routine alerts/deployments with no decision or learning attached
+- Routine code changes without significant decisions (type fixes, variable renames, dependency bumps)
+
+### Distillation Rule for Code-Heavy Context
+When capturing from coding sessions, distill the **knowledge essence** — not raw artifacts:
+- WHAT was the insight (1-2 sentences)
+- WHY it matters beyond this session (reusable lesson)
+- EVIDENCE: minimal code snippet, diff hunk, command output, or metric (up to 50 lines)
+Do NOT paste full files, entire diffs, or verbose build logs.
 
 ## Step 2: Structured Extraction (Tier 3)
 
@@ -71,6 +86,16 @@ For a single, self-contained decision:
   "confidence": 0.85
 }
 ```
+
+**Optional fields for code-context captures:**
+```json
+{
+  "evidence_type": "code_change | git_bisect | benchmark | error_trace | runtime_observation",
+  "evidence_snippet": "Minimal proof: diff hunk, error message, or metric (up to 50 lines)",
+  "reusable_insight": "One sentence: the generalizable lesson for the team"
+}
+```
+Include these fields when capturing from coding/debugging/optimization context. Omit for non-code decisions.
 
 ### Format B: Multi-Phase (Phase Chain)
 For a long reasoning process with multiple sequential conclusions:
@@ -137,6 +162,52 @@ For a single decision with rich supporting detail:
   ]
 }
 ```
+
+### Format C variant: Code-Context Bundle
+For code-heavy discoveries, use bundle format with evidence at phase level:
+```json
+{
+  "tier2": {"capture": true, "reason": "...", "domain": "debugging"},
+  "group_title": "Short insight title",
+  "group_type": "bundle",
+  "evidence_type": "code_change",
+  "reusable_insight": "One sentence generalizable lesson",
+  "status_hint": "accepted",
+  "tags": ["debugging", "websocket"],
+  "confidence": 0.85,
+  "phases": [
+    {
+      "phase_title": "Core Insight",
+      "phase_decision": "What was discovered and decided",
+      "phase_rationale": "Why this matters",
+      "phase_problem": "What was failing",
+      "alternatives": [],
+      "trade_offs": [],
+      "tags": []
+    },
+    {
+      "phase_title": "Root Cause",
+      "phase_decision": "Technical explanation",
+      "phase_rationale": "How it was identified",
+      "phase_problem": "",
+      "evidence_snippet": "```diff\n- old code\n+ new code\n```",
+      "alternatives": [],
+      "trade_offs": [],
+      "tags": []
+    },
+    {
+      "phase_title": "Impact",
+      "phase_decision": "Before/after metrics or outcome",
+      "phase_rationale": "",
+      "phase_problem": "",
+      "alternatives": [],
+      "trade_offs": [],
+      "tags": []
+    }
+  ]
+}
+```
+Phases may include `evidence_snippet` (up to 50 lines each). Use 2-5 phases.
 
 ### Rejection Format
 When Step 1 determines the message should NOT be captured:
