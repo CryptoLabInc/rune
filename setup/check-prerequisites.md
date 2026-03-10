@@ -96,7 +96,7 @@ Claude: According to organizational memory from 2 weeks ago:
 
 **Manual override** — only when automatic capture missed something:
 ```
-You: /rune:memorize "All API endpoints must use JWT authentication"
+You: /rune:capture "All API endpoints must use JWT authentication"
 Claude: Stored in organizational memory
 ```
 

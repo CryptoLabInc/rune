@@ -159,7 +159,7 @@ Use this checklist for any integration/setup/runtime change:
 
 4. **Commands**
    - Test `/rune:status` in both states
-   - Test `/rune:memorize` with various inputs
+   - Test `/rune:capture` with various inputs
    - Test `/rune:recall` with various queries
    - Test `/rune:reset` with confirmation
 
