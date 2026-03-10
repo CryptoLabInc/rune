@@ -98,6 +98,32 @@ fi
 
 # Setup-only mode: prepare local runtime then exit.
 [ "${SETUP_ONLY:-}" = "1" ] && exit 0
+
+# Configuration safety net:
+# If ~/.rune/config.json is missing but environment variables are set, generate it.
+CONFIG_FILE="$HOME/.rune/config.json"
+if [ ! -f "$CONFIG_FILE" ] && [ -n "${ENVECTOR_ENDPOINT:-}" ] && [ -n "${ENVECTOR_API_KEY:-}" ]; then
+    mkdir -p "$HOME/.rune" && chmod 700 "$HOME/.rune"
+    cat <<EOF > "$CONFIG_FILE"
+{
+  "vault": {
+    "endpoint": "${RUNEVAULT_ENDPOINT:-${VAULT_ENDPOINT:-}}",
+    "token": "${RUNEVAULT_TOKEN:-${VAULT_TOKEN:-}}"
+  },
+  "envector": {
+    "endpoint": "${ENVECTOR_ENDPOINT}",
+    "api_key": "${ENVECTOR_API_KEY}"
+  },
+  "state": "dormant",
+  "metadata": {
+    "configVersion": "1.1",
+    "lastUpdated": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  }
+}
+EOF
+    chmod 600 "$CONFIG_FILE"
+    echo "[rune] Generated config from environment variables at $CONFIG_FILE" >&2
+fi
 [ "$MODE" = "local-only" ] && exit 0
 
 # Run the MCP server (exec replaces this shell process)

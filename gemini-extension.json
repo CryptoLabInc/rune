@@ -9,29 +9,5 @@
       "args": ["${extensionPath}${/}scripts${/}bootstrap-mcp.sh"],
       "cwd": "${extensionPath}"
     }
-  },
-  "settings": [
-    {
-      "name": "envector_endpoint",
-      "description": "enVector cluster endpoint (e.g. cluster-xxx.envector.io)",
-      "envVar": "ENVECTOR_ENDPOINT"
-    },
-    {
-      "name": "envector_api_key",
-      "description": "enVector API key",
-      "envVar": "ENVECTOR_API_KEY",
-      "sensitive": true
-    },
-    {
-      "name": "vault_endpoint",
-      "description": "Rune-Vault gRPC endpoint (e.g. tcp://vault-TEAM.oci.envector.io:50051)",
-      "envVar": "RUNEVAULT_ENDPOINT"
-    },
-    {
-      "name": "vault_token",
-      "description": "Vault authentication token",
-      "envVar": "RUNEVAULT_TOKEN",
-      "sensitive": true
-    }
-  ]
+  }
 }
