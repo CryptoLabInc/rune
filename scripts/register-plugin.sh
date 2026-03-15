@@ -36,6 +36,8 @@ rsync -a --delete \
     --exclude '.pytest_cache' \
     --exclude '__pycache__' \
     --exclude '.DS_Store' \
+    --exclude 'benchmark' \
+    --exclude 'tmp' \
     "$PLUGIN_DIR/" "$CACHE_DIR/"
 print_info "Plugin copied: $PLUGIN_DIR → $CACHE_DIR"
 

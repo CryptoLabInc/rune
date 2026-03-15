@@ -59,6 +59,19 @@ if ! command -v codex >/dev/null 2>&1; then
 fi
 print_info "codex CLI detected"
 
+# Preflight write permission before any setup/network work.
+if [ ! -w "$PLUGIN_DIR" ]; then
+    echo -e "${RED}✗${NC} Plugin directory is not writable: $PLUGIN_DIR"
+    echo "Codex install requires write access to create: $PLUGIN_DIR/.venv"
+    echo "Grant write access, then rerun this script."
+    exit 1
+fi
+print_info "plugin directory is writable"
+
+# Local-only runtime sanity check first, so permission failures surface early.
+bash "$PLUGIN_DIR/scripts/bootstrap-mcp.sh" --local-only
+print_info "local runtime preflight passed"
+
 # Reuse existing Python setup flow.
 bash "$PLUGIN_DIR/scripts/install.sh"
 

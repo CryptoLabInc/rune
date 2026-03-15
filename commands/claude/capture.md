@@ -1,13 +1,13 @@
 ---
-description: Store organizational context to encrypted memory
+description: Capture organizational context to encrypted memory
 allowed-tools: Bash(python3:*), Bash(cat ~/.rune/*), Read, mcp__plugin_rune_envector__*
 ---
 
-# /rune:memorize — Store Context
+# /rune:capture — Store Context
 
-Manually store organizational context to encrypted memory.
+Capture organizational context to encrypted memory.
 
-The argument `$ARGUMENTS` contains the context to store.
+The argument `$ARGUMENTS` contains the context to capture.
 
 ## Activation Check
 
@@ -17,7 +17,7 @@ The argument `$ARGUMENTS` contains the context to store.
 
 ## When Active
 
-1. Parse `$ARGUMENTS` as the context to memorize.
+1. Parse `$ARGUMENTS` as the context to capture.
 2. Add metadata: timestamp, domain classification (infer from content).
 3. Use the envector MCP tools to embed and store the context.
 4. Confirm what was stored with a brief summary.
@@ -25,5 +25,5 @@ The argument `$ARGUMENTS` contains the context to store.
 ## Example
 
 ```
-/rune:memorize We chose PostgreSQL over MongoDB for better ACID guarantees
+/rune:capture We chose PostgreSQL over MongoDB for better ACID guarantees
 ```

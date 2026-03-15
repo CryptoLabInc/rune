@@ -7,6 +7,20 @@ description: Encrypted organizational memory workflow for Rune with activation c
 
 **Context**: This skill provides encrypted organizational memory capabilities using Fully Homomorphic Encryption (FHE). It allows teams to capture, store, and retrieve institutional knowledge while maintaining zero-knowledge privacy. Works with Claude Code, Codex CLI, Gemini CLI, and any MCP-compatible agent.
 
+## Execution Model (Single Source of Truth)
+
+**Cross-agent invariant**:
+- `scripts/bootstrap-mcp.sh` is the **single source of truth** for local runtime preparation (venv, deps, self-healing).
+- All agent integrations must reuse this bootstrap flow. Do not duplicate dependency/setup logic in agent-specific scripts.
+
+**Agent-specific boundary**:
+- **Common (all agents)**: plugin root detection, runtime bootstrap, local MCP server readiness checks.
+- **Agent-specific (thin adapter only)**:
+  - Codex: `codex mcp add/remove/list` registration actions
+  - Claude/Gemini/others: their native MCP registration mechanism
+
+Keep agent-specific instructions clearly labeled and never mix Codex-only commands into cross-agent/common instructions.
+
 ## Activation State
 
 **IMPORTANT**: This skill has two states based on configuration AND infrastructure availability.
@@ -14,6 +28,16 @@ description: Encrypted organizational memory workflow for Rune with activation c
 ### Activation Check (CRITICAL - Check EVERY Session Start)
 
 **BEFORE doing anything, run this check:**
+
+0. **Local Runtime Check (No Vault network calls)**:
+   - Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
+     1. `$RUNE_PLUGIN_ROOT` environment variable (if set)
+     2. `~/.claude/plugins/cache/*/rune/*/scripts/bootstrap-mcp.sh`
+     3. `~/.codex/skills/rune/scripts/bootstrap-mcp.sh`
+     4. Current working directory and its parent directories
+   - Ensure runtime via:
+     - `SETUP_ONLY=1 scripts/bootstrap-mcp.sh`
+   - If the runtime/bootstrap step fails, treat as **Dormant State** and show setup guidance.
 
 1. **Config File Check**: Does `~/.rune/config.json` exist?
    - NO → **Go to Dormant State**
@@ -30,7 +54,7 @@ description: Encrypted organizational memory workflow for Rune with activation c
    - `state` is `"active"` → **Go to Active State**
    - Otherwise → **Go to Dormant State**
 
-**IMPORTANT**: Do NOT attempt to ping Vault or make network requests during activation check. This wastes tokens. Only check local files.
+**IMPORTANT**: Do NOT attempt to ping Vault or make network requests during activation check. This wastes tokens. Only local runtime/config checks are allowed.
 
 ### If Active ✅
 - All functionality enabled
@@ -131,7 +155,7 @@ Recommendations:
   - Check full status: scripts/check-infrastructure.sh
 ```
 
-### `/rune:memorize <context>`
+### `/rune:capture <context>`
 **Purpose**: Manually store organizational context when Scribe's automatic capture missed it or the user wants to force-store specific information.
 
 **When to use**: Scribe automatically captures significant decisions from conversation (see Automatic Behavior below). This command is an **override** for cases where:
@@ -145,7 +169,7 @@ Recommendations:
 
 **Example**:
 ```
-/rune:memorize "We chose PostgreSQL over MongoDB for better ACID guarantees"
+/rune:capture "We chose PostgreSQL over MongoDB for better ACID guarantees"
 ```
 
 ### `/rune:recall <query>`

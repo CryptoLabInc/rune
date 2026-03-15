@@ -63,7 +63,7 @@ print_info "Python $PYTHON_VERSION detected"
 # Set up venv and install dependencies via bootstrap-mcp.sh (single source of truth)
 print_step "Setting up Python virtual environment and dependencies..."
 print_info "This may take a few minutes on first run..."
-SETUP_ONLY=1 "$PLUGIN_DIR/scripts/bootstrap-mcp.sh"
+SETUP_ONLY=1 "$PLUGIN_DIR/scripts/bootstrap-mcp.sh" --install-deps
 print_info "Dependencies installed successfully!"
 
 # Create config directory

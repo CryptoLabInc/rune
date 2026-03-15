@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Rune Benchmark Scenario",
+  "description": "Schema for rune-bench scenario JSONL files",
+  "oneOf": [
+    { "$ref": "#/$defs/CaptureScenario" },
+    { "$ref": "#/$defs/RecallScenario" },
+    { "$ref": "#/$defs/ExtractionScenario" }
+  ],
+  "$defs": {
+    "CaptureScenario": {
+      "type": "object",
+      "required": ["id", "category", "language", "input", "expected_capture"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^capture/(should_capture|should_not_capture)/"
+        },
+        "language": {
+          "type": "string",
+          "enum": ["en", "ko", "ja", "mixed"]
+        },
+        "input": {
+          "type": "string",
+          "minLength": 10
+        },
+        "expected_capture": {
+          "type": "boolean"
+        },
+        "expected_fields": {
+          "type": "object",
+          "properties": {
+            "domain": { "type": "string" },
+            "status_hint": {
+              "type": "string",
+              "enum": ["proposed", "accepted", "rejected"]
+            },
+            "title_keywords": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "evidence_type": {
+              "type": "string",
+              "enum": ["code_change", "git_bisect", "benchmark", "error_trace", "runtime_observation"]
+            },
+            "has_reusable_insight": {
+              "type": "boolean"
+            }
+          }
+        },
+        "recall_queries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["query", "should_match"],
+            "properties": {
+              "query": { "type": "string" },
+              "should_match": { "type": "boolean" }
+            }
+          }
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "RecallScenario": {
+      "type": "object",
+      "required": ["id", "category", "language", "seed_records", "query"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^recall-[a-z0-9-]+-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^recall/"
+        },
+        "language": {
+          "type": "string",
+          "enum": ["en", "ko", "ja", "mixed"]
+        },
+        "seed_records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["title", "domain", "content"],
+            "properties": {
+              "title": { "type": "string" },
+              "domain": { "type": "string" },
+              "content": { "type": "string" },
+              "status": { "type": "string" },
+              "tags": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "query": { "type": "string" },
+        "expected_match_titles": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "min_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "ExtractionScenario": {
+      "type": "object",
+      "required": ["id", "category", "language", "input", "expected_extraction_type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^extract-[a-z0-9-]+-\\d{3}$"
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^extraction/"
+        },
+        "language": {
+          "type": "string",
+          "enum": ["en", "ko", "ja", "mixed"]
+        },
+        "input": {
+          "type": "string",
+          "minLength": 20
+        },
+        "expected_extraction_type": {
+          "type": "string",
+          "enum": ["single", "phase_chain", "bundle"]
+        },
+        "expected_fields": {
+          "type": "object",
+          "properties": {
+            "title_keywords": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "status_hint": {
+              "type": "string",
+              "enum": ["proposed", "accepted", "rejected"]
+            },
+            "min_alternatives": { "type": "integer", "minimum": 0 },
+            "min_trade_offs": { "type": "integer", "minimum": 0 },
+            "min_phases": { "type": "integer", "minimum": 1 },
+            "max_phases": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}
