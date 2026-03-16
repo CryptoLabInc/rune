@@ -194,6 +194,10 @@ class DecisionRecord(BaseModel):
     phase_seq: Optional[int] = Field(default=None, description="0-indexed position within the group")
     phase_total: Optional[int] = Field(default=None, description="Total number of records in the group")
 
+    # Content preservation
+    original_text: Optional[str] = Field(default=None, description="Original conversation text before extraction")
+    group_summary: Optional[str] = Field(default=None, description="1-line topic summary shared across all phases for semantic anchoring")
+
     quality: Quality = Field(default_factory=Quality)
     payload: Payload = Field(default_factory=Payload)
 

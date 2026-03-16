@@ -41,11 +41,19 @@ In short: if the team is **working toward a decision or exploring a topic** wher
 ```
 mcp__plugin_rune_envector__recall(
     query="<topic, decision context, or question being discussed>",
-    topk=5
+    topk=5,
+    domain="architecture",   # optional: filter by domain
+    status="accepted",       # optional: filter by status
+    since="2026-01-01"       # optional: filter by date
 )
 ```
 
 The query does not need to be a question. Statements and topics work equally well -- the embedding search finds semantically relevant records regardless of grammatical form.
+
+Optional filters narrow results after search:
+- `domain`: Only return records from this domain (e.g. "architecture", "security", "debugging")
+- `status`: Only return records with this status ("accepted", "proposed", "superseded")
+- `since`: Only return records captured after this ISO date
 
 ## Synthesis Rules
 
@@ -76,6 +84,20 @@ Results may include `group_id`, `group_type`, `phase_seq`, and `phase_total` fie
 - **confidence >= 0.6**: Present findings normally
 - **confidence 0.3-0.6**: Add caveat: "Evidence is limited, but..."
 - **confidence < 0.3**: Strong caveat: "Very little evidence was found. The following is tentative..."
+
+### Source Attribution Rule
+
+When presenting findings from organizational memory, ALWAYS:
+
+1. **Prefix with attribution**: Start with "Based on organizational memory:" or "From org memory:"
+2. **State the count**: "Found N relevant record(s) in organizational memory."
+3. **Show confidence**: Indicate confidence level based on similarity scores.
+
+When NO records are found:
+- State explicitly: "No relevant records found in organizational memory. The following is based on general knowledge only — consider using `/rune:capture` to save this discussion if a decision is made."
+
+When results are PARTIAL (confidence < 0.6):
+- Add caveat: "Limited evidence in organizational memory. The following combines what was found with general knowledge."
 
 ### Suggesting Related Queries
 When results partially answer the question, suggest follow-up queries:

@@ -183,6 +183,7 @@ class RecordBuilder:
             ),
             evidence=evidence,
             tags=tags if tags is not None else self._extract_tags(clean_text, detection),
+            original_text=raw_event.text,
             quality=Quality(
                 scribe_confidence=detection.confidence,
                 review_state=ReviewState.UNREVIEWED,
@@ -268,6 +269,7 @@ class RecordBuilder:
                 ),
                 evidence=evidence,
                 tags=fields.tags or self._extract_tags(clean_text, detection),
+                original_text=raw_event.text,
                 quality=Quality(
                     scribe_confidence=extraction.confidence if extraction.confidence is not None else detection.confidence,
                     review_state=ReviewState.UNREVIEWED,
@@ -339,6 +341,8 @@ class RecordBuilder:
                     review_state=ReviewState.UNREVIEWED,
                     review_notes=redaction_notes if redaction_notes else None,
                 ),
+                original_text=raw_event.text,
+                group_summary=getattr(extraction, 'group_summary', None) or None,
                 payload=Payload(format="markdown", text=""),
                 # Group fields (phase_chain or bundle)
                 group_id=group_id,

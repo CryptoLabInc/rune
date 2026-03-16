@@ -4,10 +4,16 @@ Searcher
 Searches organizational memory via enVector.
 Uses the Vault-secured pipeline: scoring → decrypt → metadata.
 Returns Decision Records with their payload.text for synthesis.
+
+v0.3.0: Over-Fetch + Post-Filter architecture.
+Always fetches INTERNAL_FETCH_SIZE results, then applies metadata-based
+filtering, group assembly, and recency weighting before trimming to user's topk.
 """
 
 import json
 import logging
+import math
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 
@@ -16,6 +22,24 @@ from ..common.embedding_service import EmbeddingService
 from .query_processor import ParsedQuery, TimeScope
 
 logger = logging.getLogger("rune.retriever.searcher")
+
+# Over-fetch size: always fetch this many from Vault, then post-filter.
+# This enables metadata filtering, group assembly, and recency weighting
+# on decrypted results before trimming to the user's topk.
+INTERNAL_FETCH_SIZE = 100
+
+# Recency weighting parameters
+HALF_LIFE_DAYS = 90  # Score halves every 90 days
+SIMILARITY_WEIGHT = 0.7  # Weight for vector similarity in blended score
+RECENCY_WEIGHT = 0.3  # Weight for recency in blended score
+
+# Status-based score multipliers
+STATUS_MULTIPLIER = {
+    "accepted": 1.0,
+    "proposed": 0.9,
+    "superseded": 0.5,
+    "reverted": 0.3,
+}
 
 
 @dataclass
@@ -28,6 +52,7 @@ class SearchResult:
     certainty: str
     status: str
     score: float
+    adjusted_score: float = 0.0  # After recency weighting + status penalty
     metadata: Dict[str, Any] = field(default_factory=dict)
     # Group fields (phase_chain or bundle)
     group_id: Optional[str] = None
@@ -58,11 +83,12 @@ class Searcher:
     Uses the Vault-secured pipeline (scoring → decrypt → metadata)
     when a vault_client is provided. Falls back to direct search otherwise.
 
-    Features:
-    - Multi-query expansion for better recall
-    - Time filtering
-    - Deduplication
-    - Result ranking
+    v0.3.0 architecture: Over-Fetch + Post-Filter
+    1. Fetch INTERNAL_FETCH_SIZE results (always 100)
+    2. Assemble groups (phase chains / bundles) from over-fetched set
+    3. Apply metadata filters (domain, status, since)
+    4. Apply recency weighting + status penalty
+    5. Trim to user's topk
     """
 
     def __init__(
@@ -72,15 +98,6 @@ class Searcher:
         index_name: str,
         vault_client=None,
     ):
-        """
-        Initialize searcher.
-
-        Args:
-            envector_client: EnVector client for vector search
-            embedding_service: For embedding queries
-            index_name: enVector index name (provided by Vault)
-            vault_client: VaultClient for Vault-secured search pipeline
-        """
         self._client = envector_client
         self._embedding = embedding_service
         self._index_name = index_name
@@ -90,29 +107,53 @@ class Searcher:
         self,
         query: ParsedQuery,
         topk: Optional[int] = None,
-        expand_phases: bool = True,
+        filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         """
         Search for relevant Decision Records.
 
         Args:
             query: Parsed query from QueryProcessor
-            topk: Number of results (default from config)
-            expand_phases: If True, automatically fetch sibling phases
-                when a phase chain member is found
+            topk: Number of final results to return
+            filters: Optional metadata filters:
+                - domain: str (e.g. "architecture")
+                - status: str (e.g. "accepted")
+                - since: str (ISO date, e.g. "2026-01-01")
 
         Returns:
-            List of SearchResult objects sorted by relevance
+            List of SearchResult objects sorted by adjusted relevance
         """
         topk = topk or 10
 
-        # Search with multiple query expansions for better recall
+        # Step 1: Over-fetch with internal size via multi-query expansion
+        all_results = await self._search_with_expansions(query, INTERNAL_FETCH_SIZE)
+
+        # Step 2: Assemble groups — collect sibling phases from over-fetched set
+        all_results = self._assemble_groups(all_results)
+
+        # Step 3: Apply metadata filters
+        if filters:
+            all_results = self._apply_metadata_filters(all_results, filters)
+
+        # Step 4: Apply time scope filter
+        if query.time_scope != TimeScope.ALL_TIME:
+            all_results = self._filter_by_time(all_results, query.time_scope)
+
+        # Step 5: Apply recency weighting + status penalty
+        all_results = self._apply_recency_weighting(all_results)
+
+        # Step 6: Final trim
+        return all_results[:topk]
+
+    async def _search_with_expansions(
+        self, query: ParsedQuery, fetch_size: int
+    ) -> List[SearchResult]:
+        """Search with multiple query expansions, dedup results."""
         all_results = []
         seen_ids = set()
 
-        for expanded_query in query.expanded_queries[:3]:  # Limit expansions
-            results = await self._search_single(expanded_query, topk)
-
+        for expanded_query in query.expanded_queries[:3]:
+            results = await self._search_single(expanded_query, fetch_size)
             for result in results:
                 if result.record_id not in seen_ids:
                     seen_ids.add(result.record_id)
@@ -120,27 +161,148 @@ class Searcher:
 
         # Also search with original query
         if query.original not in query.expanded_queries:
-            results = await self._search_single(query.original, topk)
+            results = await self._search_single(query.original, fetch_size)
             for result in results:
                 if result.record_id not in seen_ids:
                     seen_ids.add(result.record_id)
                     all_results.append(result)
 
-        # Sort by score
+        # Sort by raw similarity score
         all_results.sort(key=lambda r: r.score, reverse=True)
+        return all_results
 
-        # Apply time filtering if specified
-        if query.time_scope != TimeScope.ALL_TIME:
-            all_results = self._filter_by_time(all_results, query.time_scope)
+    def _assemble_groups(self, results: List[SearchResult]) -> List[SearchResult]:
+        """
+        Assemble group members from over-fetched results.
 
-        # Trim to topk before phase expansion
-        all_results = all_results[:topk]
+        When a phase chain or bundle member is found, collect all sibling
+        phases from the same over-fetched set (no additional search needed).
+        Insert the group at the position of its highest-scored member.
+        """
+        if not results:
+            return results
 
-        # Expand phase chains: fetch sibling phases for any phase results
-        if expand_phases:
-            all_results = await self._expand_phase_chains(all_results)
+        # Separate grouped and standalone results
+        groups: Dict[str, List[SearchResult]] = {}
+        group_best_score: Dict[str, float] = {}
+        standalone = []
 
-        return all_results[:topk]
+        for r in results:
+            if r.is_phase and r.group_id:
+                groups.setdefault(r.group_id, []).append(r)
+                group_best_score[r.group_id] = max(
+                    group_best_score.get(r.group_id, 0.0), r.score
+                )
+            else:
+                standalone.append(r)
+
+        if not groups:
+            return results
+
+        # Sort each group by phase_seq
+        for gid in groups:
+            groups[gid].sort(key=lambda r: r.phase_seq if r.phase_seq is not None else 0)
+
+        # Build final list: interleave groups at their best-score position
+        # Create a unified list of (score, item) where item is either a standalone
+        # result or the first element of a group (which triggers inserting the whole group)
+        assembled = []
+        inserted_groups = set()
+
+        # Merge standalone results with group anchors, sorted by score
+        all_items = []
+        for r in standalone:
+            all_items.append((r.score, "standalone", r))
+        for gid, best_score in group_best_score.items():
+            all_items.append((best_score, "group", gid))
+
+        all_items.sort(key=lambda x: x[0], reverse=True)
+
+        for score, item_type, item in all_items:
+            if item_type == "standalone":
+                assembled.append(item)
+            elif item_type == "group" and item not in inserted_groups:
+                inserted_groups.add(item)
+                assembled.extend(groups[item])
+
+        return assembled
+
+    def _apply_metadata_filters(
+        self, results: List[SearchResult], filters: Dict[str, Any]
+    ) -> List[SearchResult]:
+        """Filter results by metadata fields (post-search)."""
+        filtered = results
+
+        domain = filters.get("domain")
+        if domain:
+            filtered = [r for r in filtered if r.domain == domain]
+
+        status = filters.get("status")
+        if status:
+            filtered = [r for r in filtered if r.status == status]
+
+        since = filters.get("since")
+        if since:
+            filtered = self._filter_since(filtered, since)
+
+        return filtered
+
+    def _filter_since(self, results: List[SearchResult], since_date: str) -> List[SearchResult]:
+        """Filter results after a given ISO date."""
+        filtered = []
+        for r in results:
+            ts_str = r.metadata.get("timestamp")
+            if ts_str:
+                try:
+                    if isinstance(ts_str, str):
+                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    else:
+                        ts = datetime.fromtimestamp(float(ts_str), tz=timezone.utc)
+                    if ts.isoformat() >= since_date:
+                        filtered.append(r)
+                except (ValueError, TypeError):
+                    filtered.append(r)  # Can't parse → include
+            else:
+                filtered.append(r)  # No timestamp → include
+        return filtered
+
+    def _apply_recency_weighting(self, results: List[SearchResult]) -> List[SearchResult]:
+        """
+        Apply time decay and status-based scoring adjustments.
+
+        Blended score: (0.7 * similarity + 0.3 * recency_decay) * status_multiplier
+        """
+        now = datetime.now(timezone.utc)
+
+        for r in results:
+            # Parse timestamp for recency calculation
+            age_days = 0
+            ts_str = r.metadata.get("timestamp")
+            if ts_str:
+                try:
+                    if isinstance(ts_str, str):
+                        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    else:
+                        ts = datetime.fromtimestamp(float(ts_str), tz=timezone.utc)
+                    age_days = max(0, (now - ts).days)
+                except (ValueError, TypeError):
+                    pass
+
+            # Exponential decay: half-life of 90 days
+            decay = 0.5 ** (age_days / HALF_LIFE_DAYS) if HALF_LIFE_DAYS > 0 else 1.0
+
+            # Status multiplier
+            status_mult = STATUS_MULTIPLIER.get(r.status, 1.0)
+
+            # Blended score
+            r.adjusted_score = (SIMILARITY_WEIGHT * r.score + RECENCY_WEIGHT * decay) * status_mult
+
+        results.sort(key=lambda r: r.adjusted_score, reverse=True)
+        return results
+
+    # ================================================================
+    # Low-level search methods (unchanged from v0.2.x)
+    # ================================================================
 
     async def _search_single(self, query_text: str, topk: int) -> List[SearchResult]:
         """Execute a single search query via the appropriate pipeline."""
@@ -320,6 +482,7 @@ class Searcher:
         phase_seq = metadata.get("phase_seq")
         phase_total = metadata.get("phase_total")
 
+        score = raw.get("score", 0.0)
         return SearchResult(
             record_id=record_id,
             title=title,
@@ -327,7 +490,8 @@ class Searcher:
             domain=domain,
             certainty=certainty,
             status=status,
-            score=raw.get("score", 0.0),
+            score=score,
+            adjusted_score=score,  # Will be updated by recency weighting
             metadata=metadata,
             group_id=group_id,
             group_type=group_type,
@@ -335,83 +499,14 @@ class Searcher:
             phase_total=phase_total,
         )
 
-    async def _expand_phase_chains(
-        self,
-        results: List[SearchResult],
-        max_chains: int = 2,
-    ) -> List[SearchResult]:
-        """
-        Expand phase chain results by fetching sibling phases.
-
-        When a search result is part of a phase chain, searches for the
-        group_id to retrieve all sibling phases and inserts them in order.
-
-        Args:
-            results: Current search results
-            max_chains: Max number of chains to expand (cost control)
-
-        Returns:
-            Results with phase chains expanded inline
-        """
-        # Find unique group_ids from phase results
-        seen_groups = set()
-        groups_to_expand = []
-        for r in results:
-            if r.is_phase and r.group_id not in seen_groups:
-                seen_groups.add(r.group_id)
-                groups_to_expand.append(r.group_id)
-
-        if not groups_to_expand:
-            return results
-
-        # Limit expansion for cost control
-        groups_to_expand = groups_to_expand[:max_chains]
-
-        # Fetch siblings for each group
-        group_siblings: Dict[str, List[SearchResult]] = {}
-        existing_ids = {r.record_id for r in results}
-
-        for group_id in groups_to_expand:
-            # Search by group_id (embedded in payload.text)
-            siblings = await self._search_single(f"Group: {group_id}", topk=10)
-            chain = [s for s in siblings if s.group_id == group_id and s.record_id not in existing_ids]
-            # Sort by phase_seq
-            chain.sort(key=lambda s: s.phase_seq if s.phase_seq is not None else 0)
-            group_siblings[group_id] = chain
-
-        # Rebuild result list with chains expanded inline
-        expanded = []
-        expanded_ids = set()
-
-        for r in results:
-            if r.record_id in expanded_ids:
-                continue
-
-            if r.is_phase and r.group_id in group_siblings:
-                # Insert entire chain at this position
-                for sibling in group_siblings[r.group_id]:
-                    if sibling.record_id not in expanded_ids:
-                        expanded.append(sibling)
-                        expanded_ids.add(sibling.record_id)
-                # Remove group from dict so we don't expand again
-                del group_siblings[r.group_id]
-            else:
-                expanded.append(r)
-                expanded_ids.add(r.record_id)
-
-        return expanded
-
     def _filter_by_time(
         self,
         results: List[SearchResult],
         time_scope: TimeScope
     ) -> List[SearchResult]:
         """Filter results by time scope"""
-        from datetime import datetime, timedelta, timezone
-
         now = datetime.now(timezone.utc)
 
-        # Define time ranges
         time_ranges = {
             TimeScope.LAST_WEEK: timedelta(days=7),
             TimeScope.LAST_MONTH: timedelta(days=30),
@@ -426,56 +521,34 @@ class Searcher:
         filtered = []
 
         for result in results:
-            # Try to parse timestamp from metadata
             timestamp_str = result.metadata.get("timestamp")
             if timestamp_str:
                 try:
-                    # Handle ISO format
-                    ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-                    if ts.replace(tzinfo=None) >= cutoff:
+                    if isinstance(timestamp_str, str):
+                        ts = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+                    else:
+                        ts = datetime.fromtimestamp(float(timestamp_str), tz=timezone.utc)
+                    if ts >= cutoff:
                         filtered.append(result)
                 except (ValueError, TypeError):
-                    # If can't parse, include it
                     filtered.append(result)
             else:
-                # No timestamp, include it
                 filtered.append(result)
 
         return filtered
 
     async def search_by_id(self, record_id: str) -> Optional[SearchResult]:
-        """
-        Search for a specific record by ID.
-
-        Useful for retrieving full context of a referenced record.
-        """
-        # Search with the ID as query (will match in payload.text)
+        """Search for a specific record by ID."""
         results = await self._search_single(f"ID: {record_id}", topk=5)
-
-        # Find exact match
         for result in results:
             if result.record_id == record_id:
                 return result
-
         return None
 
-    async def get_related(
-        self,
-        record_id: str,
-        topk: int = 5
-    ) -> List[SearchResult]:
-        """
-        Find records related to a given record.
-
-        Useful for "See also" suggestions.
-        """
-        # First get the record
+    async def get_related(self, record_id: str, topk: int = 5) -> List[SearchResult]:
+        """Find records related to a given record."""
         record = await self.search_by_id(record_id)
         if not record:
             return []
-
-        # Search using its payload.text as query
         results = await self._search_single(record.payload_text[:500], topk + 1)
-
-        # Exclude the original record
         return [r for r in results if r.record_id != record_id][:topk]

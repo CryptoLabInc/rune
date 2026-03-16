@@ -99,10 +99,10 @@ class Tier2Filter:
             FilterResult with capture decision and reasoning
         """
         if not self.is_available:
-            # Fallback: pass through (let Tier 1 decision stand)
+            # Fallback: skip capture to avoid noise (recoverable via /rune:capture)
             return FilterResult(
-                should_capture=True,
-                reason="LLM filter unavailable, defaulting to Tier 1 decision",
+                should_capture=False,
+                reason="LLM filter unavailable, skipping to avoid noise",
             )
 
         try:
@@ -120,10 +120,10 @@ class Tier2Filter:
 
         except Exception as e:
             logger.warning("Evaluation failed: %s", e)
-            # Fallback: pass through
+            # Fallback: skip capture to avoid noise (recoverable via /rune:capture)
             return FilterResult(
-                should_capture=True,
-                reason=f"LLM filter error ({e}), defaulting to capture",
+                should_capture=False,
+                reason=f"LLM filter error ({e}), skipping to avoid noise",
             )
 
     def _parse_response(self, raw: str) -> FilterResult:
@@ -131,12 +131,12 @@ class Tier2Filter:
         data = parse_llm_json(raw)
         if not data:
             return FilterResult(
-                should_capture=True,
-                reason="Failed to parse LLM response, defaulting to capture",
+                should_capture=False,
+                reason="Failed to parse LLM response, skipping to avoid noise",
                 raw_response=raw,
             )
         return FilterResult(
-            should_capture=bool(data.get("capture", True)),
+            should_capture=bool(data.get("capture", False)),
             reason=str(data.get("reason", "")),
             domain=str(data.get("domain", "general")).lower(),
             raw_response=raw,

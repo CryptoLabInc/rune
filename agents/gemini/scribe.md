@@ -253,4 +253,4 @@ capture(
 2. **DO NOT** explore the filesystem or read system files
 3. **DO NOT** capture the same decision twice in one session
 4. Keep reports concise -- one line per capture
-5. When in doubt about whether to capture, err on the side of capturing -- the embedding similarity in Tier 1 provides a safety net
+5. When in doubt about whether to capture, err on the side of NOT capturing -- false negatives are recoverable via manual capture, but false positives erode user trust

@@ -1,13 +1,33 @@
 ---
 description: Configure Rune — sets up Python environment, collects credentials, registers MCP servers
-allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(mkdir:*), Bash(chmod:*), Bash(bash:*), Bash(scripts/*), Read, Write
+allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(mkdir:*), Bash(chmod:*), Bash(bash:*), Bash(scripts/*), Bash(timeout:*), Bash(curl:*), Read, Write, Edit, mcp__envector__reload_pipelines
 ---
 
 # /rune:configure — Full Setup & Configuration
 
-Single entrypoint after `claude plugin install rune`. Handles environment setup, credential collection, config generation, and MCP server registration.
+Single entrypoint after `claude plugin install rune`. Handles environment setup, credential collection, config generation, MCP server registration, and auto-activation.
 
-## Steps
+## Quick Update Mode
+
+If $ARGUMENTS contains any of: `--vault-token`, `--vault-endpoint`, `--envector-endpoint`, `--api-key`:
+
+1. Read existing `~/.rune/config.json`
+   - If not found: respond "Not configured yet. Run `/rune:configure` without arguments first." and stop.
+2. Update only the specified field(s):
+   - `--vault-token <value>` → `vault.token`
+   - `--vault-endpoint <value>` → `vault.endpoint` (auto-prepend `tcp://` if no scheme)
+   - `--envector-endpoint <value>` → `envector.endpoint`
+   - `--api-key <value>` → `envector.api_key`
+3. Write back to `~/.rune/config.json` with `chmod 600`
+4. Update `metadata.lastUpdated` to current ISO timestamp
+5. If state is "active", call `reload_pipelines` MCP tool to apply changes
+6. Show: "Updated [field]. Use `/rune:status` to verify."
+
+Skip all steps below.
+
+---
+
+## Full Setup Steps
 
 ### 1. Detect Plugin Root
 
@@ -70,7 +90,32 @@ Run: `bash $PLUGIN_ROOT/scripts/configure-claude-mcp.sh`
 
 This registers the envector MCP server via `claude mcp add --scope user` (Claude Code) and JSON merge (Claude Desktop).
 
-### 6. Completion
+### 6. Auto-Activate (if Vault configured)
+
+If both Vault endpoint and token were provided in Step 3:
+
+1. Run infrastructure validation:
+   - Check Vault connectivity by parsing the scheme from `vault.endpoint`:
+     - If `http://` or `https://`: `curl -sf <vault-endpoint>/health`
+     - If `tcp://`: extract host and port, then test TCP connectivity:
+       ```bash
+       python3 -c "import socket; s=socket.socket(); s.settimeout(10); s.connect(('<host>', <port>)); print('OK'); s.close()"
+       ```
+   - Check MCP server can import: `$PLUGIN_ROOT/.venv/bin/python3 -c "import mcp"`
+
+2. If all checks pass:
+   - Update `state` to `"active"` in `~/.rune/config.json`
+   - Call `reload_pipelines` MCP tool if available
+   - Show: "Infrastructure validated. Rune is now active."
+
+3. If checks fail:
+   - Keep `state` as `"dormant"`
+   - Show what failed
+   - Suggest: "Run `/rune:activate` after fixing the issues above."
+
+Skip this step if Vault endpoint or token was not provided.
+
+### 7. Completion
 
 Show summary:
 ```
@@ -80,10 +125,8 @@ Rune Configuration Complete
   Plugin    : <PLUGIN_ROOT>
   Python    : <PLUGIN_ROOT>/.venv
   MCP       : registered via claude mcp add (user scope)
-
-Next steps:
-  1. Restart Claude Code to load the MCP server
-  2. After restart, run /rune:activate to validate and enable
+  State     : <active|dormant>
 ```
 
 If Vault was not configured, add: "Vault not configured — plugin will start in dormant state. Reconfigure anytime with `/rune:configure`."
+If auto-activation succeeded, show: "Rune is active. Organizational memory is now online."

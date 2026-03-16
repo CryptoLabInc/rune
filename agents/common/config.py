@@ -15,6 +15,7 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 LOGS_DIR = CONFIG_DIR / "logs"
 KEYS_DIR = CONFIG_DIR / "keys"
 REVIEW_QUEUE_PATH = CONFIG_DIR / "review_queue.json"
+CAPTURE_LOG_PATH = CONFIG_DIR / "capture_log.jsonl"
 
 # Project paths (relative to this file)
 PROJECT_ROOT = Path(__file__).parent.parent.parent  # rune/
@@ -269,6 +270,7 @@ def save_config(config: RuneConfig) -> None:
     as empty strings so that secrets are not persisted to disk.
     """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(str(CONFIG_DIR), 0o700)  # Force 700 regardless of umask
 
     env_sourced = getattr(config, "_env_sourced_keys", set())
 
@@ -331,7 +333,10 @@ def save_config(config: RuneConfig) -> None:
 
 
 def ensure_directories() -> None:
-    """Ensure required directories exist"""
+    """Ensure required directories exist with secure permissions"""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(str(CONFIG_DIR), 0o700)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(str(LOGS_DIR), 0o700)
     KEYS_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(str(KEYS_DIR), 0o700)

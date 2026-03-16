@@ -54,6 +54,7 @@ class ExtractionResult:
     """Result of LLM extraction — may be single, multi-phase, or bundle"""
     group_title: str = ""
     group_type: str = ""  # "phase_chain", "bundle", or "" (single)
+    group_summary: str = ""  # 1-line semantic anchor shared across all phases
     status_hint: str = ""
     tags: List[str] = field(default_factory=list)
     confidence: Optional[float] = None  # Agent-provided confidence (0.0-1.0)

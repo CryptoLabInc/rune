@@ -199,12 +199,17 @@ def render_payload_text(record: "DecisionRecord") -> str:
         tags=tags,
     )
 
-    # Insert phase line after ID line
+    # Insert phase line and group summary after ID line
     if phase_line:
         lines = text.split("\n")
         for i, line in enumerate(lines):
             if line.startswith("ID: "):
-                lines.insert(i + 1, phase_line.lstrip("\n"))
+                insert_pos = i + 1
+                lines.insert(insert_pos, phase_line.lstrip("\n"))
+                # Inject group summary as semantic anchor for all phases
+                group_summary = getattr(record, 'group_summary', None)
+                if group_summary:
+                    lines.insert(insert_pos + 1, f"Group Summary: {group_summary}")
                 break
         text = "\n".join(lines)
 
