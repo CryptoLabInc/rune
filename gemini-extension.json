@@ -10,38 +10,5 @@
       "cwd": "${extensionPath}"
     }
   },
-  "settings": [
-    {
-      "name": "envector_endpoint",
-      "description": "enVector cluster endpoint (e.g. cluster-xxx.envector.io)",
-      "envVar": "ENVECTOR_ENDPOINT"
-    },
-    {
-      "name": "envector_api_key",
-      "description": "enVector API key",
-      "envVar": "ENVECTOR_API_KEY",
-      "sensitive": true
-    },
-    {
-      "name": "vault_endpoint",
-      "description": "Rune-Vault gRPC endpoint (e.g. tcp://vault-TEAM.oci.envector.io:50051)",
-      "envVar": "RUNEVAULT_ENDPOINT"
-    },
-    {
-      "name": "vault_token",
-      "description": "Vault authentication token",
-      "envVar": "RUNEVAULT_TOKEN",
-      "sensitive": true
-    },
-    {
-      "name": "vault_ca_cert",
-      "description": "Path to CA certificate PEM for self-signed Vault TLS (leave empty for system CA)",
-      "envVar": "VAULT_CA_CERT"
-    },
-    {
-      "name": "vault_tls_disable",
-      "description": "Set to 'true' to connect to Vault without TLS (dev only, not recommended)",
-      "envVar": "VAULT_TLS_DISABLE"
-    }
-  ]
+  "settings": []
 }
