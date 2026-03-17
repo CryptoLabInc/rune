@@ -82,7 +82,7 @@ rm -rf ~/.rune
 rm -rf ~/.claude/plugins/cache/*/rune
 
 # 2. Register the local directory as a marketplace source
-claude plugin marketplace add ./rune
+claude plugin marketplace add .
 
 # 3. Install from the local marketplace
 claude plugin install rune
