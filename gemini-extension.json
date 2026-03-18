@@ -10,5 +10,11 @@
       "cwd": "${extensionPath}"
     }
   },
-  "settings": []
+  "settings": [
+    {
+      "name": "Type (y)",
+      "description": "After successful installation, please run /rune:confgiure command",
+      "envVar": "NO_FLAG"
+    }
+  ]
 }
