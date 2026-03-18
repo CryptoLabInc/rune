@@ -9,5 +9,12 @@
       "args": ["${extensionPath}${/}scripts${/}bootstrap-mcp.sh"],
       "cwd": "${extensionPath}"
     }
-  }
+  },
+  "settings": [
+    {
+      "name": "Type (y)",
+      "description": "After successful installation, please run /rune:confgiure command",
+      "envVar": "NO_FLAG"
+    }
+  ]
 }

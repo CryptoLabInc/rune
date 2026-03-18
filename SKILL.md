@@ -86,18 +86,41 @@ If in Active state but operations fail:
 **Purpose**: Configure plugin credentials
 
 **Steps**:
-1. Ask user for Vault Endpoint (the Vault gRPC endpoint provided by your team admin)
-2. Ask user for Vault Token (authentication token provided by your team admin)
-3. Ask user for enVector Endpoint (e.g., `runestone-xxx.clusters.envector.io`)
-4. Ask user for enVector API Key
-5. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
+1. Ask user for enVector Endpoint (required, e.g., `cluster-xxx.envector.io`)
+2. Ask user for enVector API Key (required, e.g., `envector_xxx`)
+3. Ask user for Vault Endpoint (optional, e.g., `tcp://vault-TEAM.oci.envector.io:50051`)
+   - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
+4. Ask user for Vault Token (optional, e.g., `evt_xxx`)
+5. If Vault Endpoint and Token were both provided, ask the TLS question:
+
+   **"How does your Vault server handle TLS?"**
+
+   1. **Self-signed certificate** — "My team uses a self-signed CA (provide CA cert path)"
+      - Follow-up: "Enter the path to your CA certificate PEM file:"
+      - Support `~` expansion in the path
+      - Copy the file to `~/.rune/certs/ca.pem` (`mkdir -p ~/.rune/certs && cp <user_path> ~/.rune/certs/ca.pem && chmod 600 ~/.rune/certs/ca.pem`)
+      - If copy fails (file not found, permission denied), show error and ask again
+      - Inform user: "CA certificate copied to ~/.rune/certs/ca.pem"
+      - → config: `ca_cert: "~/.rune/certs/ca.pem"`, `tls_disable: false`
+
+   2. **Public CA (default)** — "Vault uses a publicly-signed certificate (e.g., Let's Encrypt)"
+      - No additional input needed, system CA handles verification
+      - → config: `ca_cert: ""`, `tls_disable: false`
+
+   3. **No TLS** — "Connect without TLS (not recommended — traffic is unencrypted)"
+      - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
+      - → config: `ca_cert: ""`, `tls_disable: true`
+
+   If Vault fields are skipped, note that the plugin will start in dormant state.
+
+6. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
    - If validation fails: Create config with `state: "dormant"`, warn user
-   - If validation passes: Continue to step 6
-6. Create `~/.rune/config.json` with proper structure
-7. Set state based on validation:
+   - If validation passes: Continue to step 7
+7. Create `~/.rune/config.json` with proper structure
+8. Set state based on validation:
    - Infrastructure ready: `state: "active"`
    - Infrastructure not ready: `state: "dormant"`
-8. Confirm configuration and show next steps if dormant
+9. Confirm configuration and show next steps if dormant
 
 ### `/rune:status`
 **Purpose**: Check plugin activation status and infrastructure health
