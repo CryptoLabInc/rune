@@ -97,7 +97,7 @@ Feature requests should include:
 
    Register your local directory as a marketplace source and install from it:
    ```bash
-   # Add the local directory as a marketplace (run from the parent of the rune/ plugin directory)
+   # Add the local directory as a marketplace
    claude plugin marketplace add ./
 
    # Install the plugin from the local marketplace
