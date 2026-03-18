@@ -70,6 +70,8 @@ class EnVectorClient:
             # Ensure key directory exists
             self._key_path.mkdir(parents=True, exist_ok=True)
 
+            logger.info("Initializing EnVectorSDKAdapter with key_id=%s, key_path=%s", self._key_id, self._key_path)
+
             self._adapter = EnVectorSDKAdapter(
                 address=self._address,
                 key_id=self._key_id,
@@ -193,17 +195,19 @@ class EnVectorClient:
         Returns:
             Result dict with ok/error status
         """
+        logger.info("[INSERT WITH TEXT 1] Embedding and inserting %d texts into index %s", len(texts), index_name)
         # Generate embeddings
         vectors = embedding_service.embed(texts)
-
+        logger.info("[INSERT WITH TEXT 2] Generated embeddings for %d texts", len(texts))
         # Add text to metadata if not provided
         if metadata is None:
             metadata = [{"text": t} for t in texts]
+            logger.info("[INSERT WITH TEXT 3] Embedding and inserting %d texts into index %s", len(texts), index_name)
         else:
             for i, meta in enumerate(metadata):
                 if "text" not in meta:
                     meta["text"] = texts[i]
-
+        logger.info("[INSERT WITH TEXT 4] Embedding and inserting %d texts into index %s", len(texts), index_name)
         return self.insert(index_name, vectors, metadata)
 
     def score(
