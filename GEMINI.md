@@ -56,8 +56,7 @@ To ensure consistent behavior across different environments, follow these rules 
 When executing setup or maintenance tasks, you MUST detect the Rune plugin root using this **STRICT** priority order. **DO NOT use `find` or slow recursive searches.** Immediately check these paths in order:
 1. **Direct Path (Primary)**: `~/.gemini/extensions/rune/` (If `<plugin_root>/scripts/bootstrap-mcp.sh` exists here, STOP searching and use this).
 2. **Environment Variable**: `$RUNE_PLUGIN_ROOT` (if set).
-3. **Cache Path**: `~/.gemini/plugins/cache/*/rune/*/`
-4. **Local Workspace**: Current working directory.
+3. **Local Workspace**: Current working directory.
 
 **Mandate**: Use the first valid path found. DO NOT explore the filesystem beyond these direct checks.
 
