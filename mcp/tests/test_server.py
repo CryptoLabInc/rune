@@ -263,3 +263,90 @@ async def test_reload_pipelines_without_active_config(mcp_server):
         assert data is not None
         assert data.get("scribe_initialized") is False
         assert data.get("retriever_initialized") is False
+
+
+# ----------- Diagnostic Tool Tests ----------- #
+
+@pytest.mark.asyncio
+async def test_tools_list_contains_diagnostics(mcp_server_with_vault):
+    async with Client(mcp_server_with_vault) as client:
+        tools = await client.list_tools()
+        names = [t.name for t in tools]
+        assert "diagnostics" in names
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_with_vault(mcp_server_with_vault):
+    async with Client(mcp_server_with_vault) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        vault = data.get("vault", {})
+        assert vault.get("configured") is True
+        assert vault.get("healthy") is True
+        assert vault.get("endpoint") == "http://fake-vault:50080"
+
+        keys = data.get("keys", {})
+        assert "enc_key_loaded" in keys
+        assert "key_id" in keys
+        assert "agent_dek_loaded" in keys
+
+        pipelines = data.get("pipelines", {})
+        assert "scribe" in pipelines
+        assert "retriever" in pipelines
+
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is True
+        assert envector.get("latency_ms") is not None
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_without_vault(mcp_server):
+    async with Client(mcp_server) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        vault = data.get("vault", {})
+        assert vault.get("configured") is False
+        assert vault.get("healthy") is False
+
+        keys = data.get("keys", {})
+        assert keys.get("enc_key_loaded") is False
+        assert keys.get("agent_dek_loaded") is False
+
+        pipelines = data.get("pipelines", {})
+        assert pipelines.get("scribe") is False
+        assert pipelines.get("retriever") is False
+
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is True
+        assert envector.get("latency_ms") is not None
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_no_envector(mcp_server_degraded):
+    async with Client(mcp_server_degraded) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        vault = data.get("vault", {})
+        assert vault.get("configured") is False
+        assert vault.get("healthy") is False
+
+        keys = data.get("keys", {})
+        assert keys.get("enc_key_loaded") is False
+        assert keys.get("agent_dek_loaded") is False
+
+        pipelines = data.get("pipelines", {})
+        assert pipelines.get("scribe") is False
+        assert pipelines.get("retriever") is False
+
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is False
+
