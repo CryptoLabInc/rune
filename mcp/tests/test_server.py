@@ -350,3 +350,51 @@ async def test_diagnostics_no_envector(mcp_server_degraded):
         envector = data.get("envector", {})
         assert envector.get("reachable") is False
 
+
+# ----------- Error Response Tests ----------- #
+
+@pytest.mark.asyncio
+async def test_capture_returns_structured_error_when_pipeline_not_ready(mcp_server):
+    async with Client(mcp_server) as client:
+        result = await client.call_tool("capture", {"text": "test decision"})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        assert data.get("ok") is False
+        error = data.get("error")
+        assert isinstance(error, dict), f"Expected structured error dict, got: {type(error)}"
+        assert error.get("code") == "PIPELINE_NOT_READY"
+        assert error.get("retryable") is False
+        assert "Scribe" in error.get("message", "")
+
+
+@pytest.mark.asyncio
+async def test_recall_returns_structured_error_when_pipeline_not_ready(mcp_server):
+    async with Client(mcp_server) as client:
+        result = await client.call_tool("recall", {"query": "test query"})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        assert data.get("ok") is False
+        error = data.get("error")
+        assert isinstance(error, dict), f"Expected structured error dict, got: {type(error)}"
+        assert error.get("code") == "PIPELINE_NOT_READY"
+        assert error.get("retryable") is False
+        assert "Retriever" in error.get("message", "")
+
+
+@pytest.mark.asyncio
+async def test_recall_returns_structured_error_for_invalid_topk(mcp_server_with_vault):
+    async with Client(mcp_server_with_vault) as client:
+        result = await client.call_tool("recall", {"query": "test", "topk": 100})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        assert data.get("ok") is False
+        error = data.get("error")
+        assert isinstance(error, dict), f"Expected structured error dict, got: {type(error)}"
+        assert error.get("code") in ("PIPELINE_NOT_READY", "INVALID_INPUT")
+        assert isinstance(error.get("retryable"), bool)
