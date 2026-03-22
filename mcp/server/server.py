@@ -354,6 +354,90 @@ class MCPServerApp:
                     "error": f"Vault health check failed: {e}"
                 }
 
+        # ---------- MCP Tools: Diagnostics ---------- #
+        @self.mcp.tool(
+            name="diagnostics",
+            description=(
+                "System health check tool for the Rune."
+                "Reporst status of Vault connection, encryption keys, "
+                "pipeline initialization, and enVector cloud reachability."
+            ),
+            annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
+        )
+        async def tool_diagnostics() -> Dict[str, Any]:
+            """
+            Returns diagnostic reports about Rune subsystems"
+
+            Returns:
+                Dict with subsystem health information
+            """
+            import time
+
+            report: Dict[str, Any] = {"ok": True}
+
+            # Vault connection
+            vault_info: Dict[str, Any] = {
+                "configured": self.vault is not None,
+                "healthy": False,
+                "endpoint": None,
+            }
+
+            if self.vault is not None:
+                vault_info["endpoint"] = getattr(self.vault, "vault_endpoint", "unknown")
+                try:
+                    vault_info["healthy"] = await self.vault.health_check()
+                except Exception as e:
+                    vault_info["healthy"] = False
+                    vault_info["error"] = str(e)
+            report["vault"] = vault_info
+
+            # Encryption Keys
+            key_id = self._key_id
+            enc_key_loaded = False
+            if key_id and self._key_path:
+                enc_key_file = os.path.join(self._key_path, key_id, "EncKey.json")
+                enc_key_loaded = os.path.exists(enc_key_file)
+
+            keys_info: Dict[str, Any] = {
+                "enc_key_loaded": enc_key_loaded,
+                "key_id": key_id,
+                "agent_dek_loaded": self._agent_dek is not None,
+            }
+            report["keys"] = keys_info
+
+            # Pipelines
+            pipelines_info: Dict[str, Any] = {
+                "scribe": self._scribe is not None,
+                "retriever": self._retriever is not None,
+                "llm_provider": self._active_llm_provider,
+            }
+            report["pipelines"] = pipelines_info
+
+            # enVector Cloud
+            envector_info: Dict[str, Any] = {
+                "reachable": False,
+                "latency_ms": None,
+            }
+
+            if self.envector is not None:
+                try:
+                    t0 = time.monotonic()
+                    self.envector.invoke_get_index_list()
+                    latency = (time.monotonic() - t0) * 1000
+                    envector_info["reachable"] = True
+                    envector_info["latency_ms"] = round(latency, 1)
+                except Exception as e:
+                    envector_info["error"] = str(e)
+            report["envector"] = envector_info
+
+            # Result
+            if self.vault is not None and not vault_info["healthy"]:
+                report["ok"] = False
+            if not enc_key_loaded:
+                report["ok"] = False
+
+            return report
+
         # ---------- MCP Tools: Capture (Scribe Pipeline) ---------- #
         @self.mcp.tool(
             name="capture",
