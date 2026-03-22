@@ -56,6 +56,11 @@ from fastmcp import FastMCP, Context  # pip install fastmcp
 from mcp.types import ToolAnnotations
 from adapter import EnVectorSDKAdapter, EmbeddingAdapter
 from adapter.vault_client import VaultClient, VaultError
+from server.errors import (
+    RuneError, VaultConnectionError, VaultDecryptionError,
+    EnvectorConnectionError, EnvectorInsertError,
+    PipelineNotReadyError, InvalidInputError, make_error,
+)
 
 
 # ---------- Capture Log ---------- #
@@ -423,11 +428,9 @@ class MCPServerApp:
                     "team_index_name": self._vault_index_name,
                 }
             except Exception as e:
-                return {
-                    "ok": False,
-                    "vault_configured": True,
-                    "error": f"Vault health check failed: {e}"
-                }
+                err = make_error(VaultConnectionError(f"Vault health check failed: {e}"))
+                err["vault_configured"] = True
+                return err
 
         # ---------- MCP Tools: Diagnostics ---------- #
         @self.mcp.tool(
@@ -538,10 +541,14 @@ class MCPServerApp:
             _maybe_reload_for_auto_provider(ctx)
 
             if self._scribe is None:
-                return {"ok": False, "error": "Scribe pipeline not initialized. Check Rune configuration."}
+                return make_error(PipelineNotReadyError(
+                    "Scribe pipeline not initialized. Run reload_pipelines or check Rune configuration."
+                ))
 
             if not self._vault_index_name:
-                return {"ok": False, "error": "No index name available. Vault must provide a team index name."}
+                return make_error(PipelineNotReadyError(
+                    "No index name available. Vault must provide a team index name."
+                ))
 
             try:
                 from datetime import datetime, timezone
@@ -749,9 +756,18 @@ class MCPServerApp:
                 _append_capture_log(first.id, first.title, first.domain.value, "standard")
                 return result
 
+            except VaultError as e:
+                logger.error(f"Capture failed (Vault): {e}", exc_info=True)
+                return make_error(VaultDecryptionError(str(e)))
+            except (ConnectionError, OSError) as e:
+                logger.error(f"Capture failed (network): {e}", exc_info=True)
+                return make_error(EnvectorConnectionError(str(e)))
+            except ValueError as e:
+                logger.error(f"Capture failed (input): {e}", exc_info=True)
+                return make_error(InvalidInputError(str(e)))
             except Exception as e:
                 logger.error(f"Capture failed: {e}", exc_info=True)
-                return {"ok": False, "error": str(e)}
+                return make_error(e)
 
         # ---------- MCP Tools: Recall (Retriever Pipeline) ---------- #
         @self.mcp.tool(
@@ -776,10 +792,12 @@ class MCPServerApp:
             _maybe_reload_for_auto_provider(ctx)
 
             if self._retriever is None:
-                return {"ok": False, "error": "Retriever pipeline not initialized. Check Rune configuration."}
+                return make_error(PipelineNotReadyError(
+                    "Retriever pipeline not initialized. Run reload_pipelines or check Rune configuration."
+                ))
 
             if topk > 50:
-                return {"ok": False, "error": "topk must be 50 or less."}
+                return make_error(InvalidInputError("topk must be 50 or less."))
 
             try:
                 query_processor = self._retriever["query_processor"]
@@ -853,9 +871,18 @@ class MCPServerApp:
                     "synthesized": True,
                 }
 
+            except VaultError as e:
+                logger.error(f"Recall failed (Vault): {e}", exc_info=True)
+                return make_error(VaultDecryptionError(str(e)))
+            except (ConnectionError, OSError) as e:
+                logger.error(f"Recall failed (network): {e}", exc_info=True)
+                return make_error(EnvectorConnectionError(str(e)))
+            except ValueError as e:
+                logger.error(f"Recall failed (input): {e}", exc_info=True)
+                return make_error(InvalidInputError(str(e)))
             except Exception as e:
                 logger.error(f"Recall failed: {e}", exc_info=True)
-                return {"ok": False, "error": str(e)}
+                return make_error(e)
 
         # ---------- MCP Tools: Reload Pipelines ---------- #
         @self.mcp.tool(
@@ -1177,8 +1204,11 @@ class MCPServerApp:
                 else:
                     logger.info("Retriever pipeline initialized (agent-delegated mode — raw results returned)")
 
+        except VaultError as e:
+            result["errors"].append({"code": "VAULT_CONNECTION_ERROR", "message": str(e), "retryable": True})
+            logger.warning(f"Pipeline init failed (Vault): {e}")
         except Exception as e:
-            result["errors"].append(str(e))
+            result["errors"].append({"code": "INTERNAL_ERROR", "message": str(e), "retryable": False})
             logger.warning(f"Pipeline init failed: {e}")
 
         return result
