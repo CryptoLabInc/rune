@@ -14,11 +14,33 @@ Expected MCP Tool Return Format:
 import argparse
 import logging
 from typing import Union, List, Dict, Any, Optional, Annotated
+from datetime import datetime, timezone
 import numpy as np
 import os, sys, signal
 import json
 
 logger = logging.getLogger("rune.mcp")
+
+
+class _SensitiveFilter(logging.Filter):
+    """Sanitize potential secrets from log messages."""
+    import re
+    _PATTERNS = [
+        re.compile(r'(sk-|pk-|api_|envector_|evt_)[a-zA-Z0-9_-]{10,}'),
+        re.compile(r'(token|key|secret|password)["\s:=]+[a-zA-Z0-9_-]{20,}', re.IGNORECASE),
+    ]
+
+    def filter(self, record):
+        import re
+        msg = record.getMessage()
+        for pat in self._PATTERNS:
+            msg = pat.sub(lambda m: m.group()[:8] + '***', msg)
+        record.msg = msg
+        record.args = ()
+        return True
+
+
+logger.addFilter(_SensitiveFilter())
 from pydantic import Field
 
 # Add parent directory (rune/mcp/) to sys.path so `from adapter import ...` works
@@ -34,6 +56,59 @@ from fastmcp import FastMCP, Context  # pip install fastmcp
 from mcp.types import ToolAnnotations
 from adapter import EnVectorSDKAdapter, EmbeddingAdapter
 from adapter.vault_client import VaultClient, VaultError
+
+
+# ---------- Capture Log ---------- #
+CAPTURE_LOG_PATH = os.path.join(os.path.expanduser("~"), ".rune", "capture_log.jsonl")
+
+
+def _append_capture_log(record_id: str, title: str, domain: str, mode: str, action: str = "captured"):
+    """Append a capture event to the local JSONL log (atomic, secure permissions)."""
+    try:
+        entry = json.dumps({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "action": action,
+            "id": record_id,
+            "title": title,
+            "domain": domain,
+            "mode": mode,
+        }, ensure_ascii=False)
+        fd = os.open(CAPTURE_LOG_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a") as f:
+            f.write(entry + "\n")
+    except Exception as e:
+        logger.debug("Capture log write failed: %s", e)
+
+
+def _read_capture_log(limit: int = 20, domain: str = None, since: str = None) -> list:
+    """Read capture log entries in reverse chronological order."""
+    if not os.path.exists(CAPTURE_LOG_PATH):
+        return []
+    try:
+        with open(CAPTURE_LOG_PATH, "r") as f:
+            lines = f.readlines()
+    except Exception:
+        return []
+
+    entries = []
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if domain and entry.get("domain") != domain:
+            continue
+        if since:
+            entry_ts = entry.get("ts", "")
+            if entry_ts < since:
+                continue
+        entries.append(entry)
+        if len(entries) >= limit:
+            break
+    return entries
 
 
 async def _async_fetch_keys_from_vault(
@@ -530,6 +605,7 @@ class MCPServerApp:
                         pre_extraction = ExtractionResult(
                             group_title=str(data.get("group_title", ""))[:60],
                             group_type=str(data.get("group_type", "phase_chain")),
+                            group_summary=str(data.get("reusable_insight", "") or data.get("group_title", ""))[:200],
                             status_hint=str(data.get("status_hint", "")).lower(),
                             tags=[str(t).lower() for t in data.get("tags", []) if t],
                             confidence=agent_confidence,
@@ -602,6 +678,7 @@ class MCPServerApp:
                         result["record_count"] = len(records)
                         result["group_id"] = first.group_id
                         result["group_type"] = first.group_type or "phase_chain"
+                    _append_capture_log(first.id, first.title, first.domain.value, "agent-delegated")
                     return result
 
                 # ===== Standard mode: full 3-tier pipeline =====
@@ -669,6 +746,7 @@ class MCPServerApp:
                     result["record_count"] = len(records)
                     result["group_id"] = first.group_id
                     result["group_type"] = first.group_type or "phase_chain"
+                _append_capture_log(first.id, first.title, first.domain.value, "standard")
                 return result
 
             except Exception as e:
@@ -690,6 +768,9 @@ class MCPServerApp:
         async def tool_recall(
             query: Annotated[str, Field(description="Natural language question about past decisions or organizational context")],
             topk: Annotated[int, Field(description="Number of results to consider for synthesis")] = 5,
+            domain: Annotated[Optional[str], Field(description="Filter by domain (e.g. 'architecture', 'security')")] = None,
+            status: Annotated[Optional[str], Field(description="Filter by status (e.g. 'accepted', 'proposed')")] = None,
+            since: Annotated[Optional[str], Field(description="Filter records after this ISO date (e.g. '2026-01-01')")] = None,
             ctx: Optional[Context] = None,
         ) -> Dict[str, Any]:
             _maybe_reload_for_auto_provider(ctx)
@@ -708,8 +789,15 @@ class MCPServerApp:
                 # Step 1: Parse query (intent detection, entity extraction, query expansion)
                 parsed_query = query_processor.parse(query)
 
-                # Step 2: Search enVector (multi-query expansion, dedup, ranking)
-                results = await searcher.search(parsed_query, topk=topk)
+                # Step 2: Search enVector (over-fetch, post-filter, recency weighting)
+                filters = {}
+                if domain:
+                    filters["domain"] = domain
+                if status:
+                    filters["status"] = status
+                if since:
+                    filters["since"] = since
+                results = await searcher.search(parsed_query, topk=topk, filters=filters or None)
 
                 # Step 3: Return results (agent synthesizes) or use server-side synthesizer
                 # Primary path: raw results for agent-side synthesis (no LLM key needed)
@@ -788,6 +876,84 @@ class MCPServerApp:
                 "retriever_initialized": result["retriever"],
                 "errors": result["errors"] if result["errors"] else None,
             }
+
+        # ---------- MCP Tools: Capture History ---------- #
+        @self.mcp.tool(
+            name="capture_history",
+            description=(
+                "View recent capture history from the local log. "
+                "Returns captured decision records in reverse chronological order. "
+                "Use to check what has been captured, verify captures, or find record IDs for deletion."
+            ),
+            annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
+        )
+        async def tool_capture_history(
+            limit: Annotated[int, Field(description="Number of recent captures to return")] = 20,
+            domain: Annotated[Optional[str], Field(description="Filter by domain (e.g. 'architecture', 'security')")] = None,
+            since: Annotated[Optional[str], Field(description="Filter captures after this ISO date (e.g. '2026-03-01')")] = None,
+        ) -> Dict[str, Any]:
+            entries = _read_capture_log(limit=min(limit, 100), domain=domain, since=since)
+            return {
+                "ok": True,
+                "count": len(entries),
+                "entries": entries,
+            }
+
+        # ---------- MCP Tools: Delete Capture (Soft-Delete) ---------- #
+        @self.mcp.tool(
+            name="delete_capture",
+            description=(
+                "Soft-delete a captured decision record by marking its status as 'reverted'. "
+                "The record remains in storage but is heavily demoted in search results (0.3x score). "
+                "Use capture_history to find record IDs."
+            ),
+            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True)
+        )
+        async def tool_delete_capture(
+            record_id: Annotated[str, Field(description="The record ID to soft-delete (e.g. dec_20260316_arch_abc)")],
+        ) -> Dict[str, Any]:
+            if self._retriever is None or self._scribe is None:
+                return {"ok": False, "error": "Pipelines not initialized. Is Rune active?"}
+
+            try:
+                searcher = self._retriever["searcher"]
+
+                # Search for the record by ID
+                from agents.retriever.query_processor import ParsedQuery, TimeScope
+                target = await searcher.search_by_id(record_id)
+                if not target:
+                    return {"ok": False, "error": f"Record '{record_id}' not found in search results."}
+
+                # Update status to reverted in metadata
+                metadata = target.metadata
+                metadata["status"] = "reverted"
+
+                # Re-insert with updated metadata
+                envector_client = self._scribe["envector_client"]
+                embedding_service = self._scribe["embedding_service"]
+
+                insert_result = envector_client.insert_with_text(
+                    index_name=self._vault_index_name,
+                    texts=[target.payload_text],
+                    embedding_service=embedding_service,
+                    metadata=[metadata],
+                )
+
+                if not insert_result.get("ok"):
+                    return {"ok": False, "error": f"Re-insert failed: {insert_result.get('error')}"}
+
+                _append_capture_log(record_id, target.title, target.domain, "soft-delete", action="deleted")
+                return {
+                    "ok": True,
+                    "deleted": True,
+                    "record_id": record_id,
+                    "title": target.title,
+                    "method": "soft-delete (status=reverted)",
+                }
+
+            except Exception as e:
+                logger.error(f"Delete failed: {e}", exc_info=True)
+                return {"ok": False, "error": str(e)}
 
     def _init_pipelines(self) -> Dict[str, Any]:
         """

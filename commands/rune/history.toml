@@ -1,0 +1,42 @@
+description = "View recent capture history"
+prompt = """
+You are viewing capture history from Rune's FHE-encrypted organizational memory.
+
+Cross-agent runtime rule:
+- Before MCP usage, ensure runtime from the single source: `scripts/bootstrap-mcp.sh`.
+- Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
+  1. `$RUNE_PLUGIN_ROOT` (if set)
+  2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/plugins/cache/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
+  3. Current working directory and its parent directories (project root)
+- Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`, and start local MCP server if needed.
+
+Codex only:
+- If MCP tool routing is unavailable in Codex, suggest `<plugin_root>/scripts/install-codex.sh`.
+
+Follow these steps:
+
+1. Call the `capture_history` MCP tool with parameters from the input:
+   - `--domain <domain>` -> filter by domain
+   - `--since <YYYY-MM-DD>` -> filter by date
+   - `--limit <N>` -> number of results (default 20)
+   - No arguments -> show last 20 captures
+
+2. Display results as a table:
+
+```
+Recent Captures
+===============
+Timestamp            | Record ID                         | Title                    | Domain
+2026-03-16T10:00:00Z | dec_20260316_arch_abc             | JWT Auth Migration       | security
+2026-03-15T14:30:00Z | dec_20260315_debug_xyz            | Connection Pool Fix      | debugging
+...
+```
+
+3. If no entries found:
+   - "No captures recorded yet. Rune captures decisions automatically during conversations."
+
+4. Show tip at the bottom:
+   - "Use `/rune:delete <record_id>` to remove a capture."
+
+User input: {{input}}
+"""

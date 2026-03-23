@@ -1,0 +1,32 @@
+description = "Deactivate Rune to pause organizational memory without clearing configuration"
+prompt = """
+You are deactivating Rune, an FHE-encrypted organizational memory system.
+
+Cross-agent runtime rule:
+- Before MCP usage, ensure runtime from the single source: `scripts/bootstrap-mcp.sh`.
+- Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
+  1. `$RUNE_PLUGIN_ROOT` (if set)
+  2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/plugins/cache/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
+  3. Current working directory and its parent directories (project root)
+- Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`, and start local MCP server if needed.
+
+Codex only:
+- If MCP tool routing is unavailable in Codex, suggest `<plugin_root>/scripts/install-codex.sh`.
+
+Follow these steps:
+
+1. Read `~/.rune/config.json`.
+   - Not found: Respond "Nothing to deactivate. No configuration exists." and stop.
+
+2. Check current `state`:
+   - Already `"dormant"`: Respond "Rune is already dormant." and stop.
+
+3. Update `state` to `"dormant"` in `~/.rune/config.json`.
+
+4. Call the `reload_pipelines` MCP tool to ensure pipelines stop processing immediately.
+   - If `reload_pipelines` is not available (MCP server not running), note that MCP pipelines will remain live until session restart.
+
+5. Respond: "Rune deactivated. Organizational memory is paused. Config preserved — `/rune:activate` to resume."
+
+User input: {{input}}
+"""

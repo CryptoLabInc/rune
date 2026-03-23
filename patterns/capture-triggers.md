@@ -601,6 +601,137 @@ This document contains comprehensive trigger phrases that indicate when signific
 
 ---
 
+## Negative Decisions (Deciding NOT to do something)
+
+- "We decided not to use X"
+- "X is off the table"
+- "We're not going with X"
+- "Ruled out X"
+- "X won't work for us because..."
+- "We chose to avoid X"
+- "After consideration, we're dropping X"
+- "We're removing X from the roadmap"
+- "X is a no-go because..."
+
+### Korean (부정적 의사결정)
+- "X는 쓰지 않기로 했다"
+- "X는 빼기로 했어"
+- "X는 안 되겠다"
+- "X는 포기하자"
+- "X는 제외하기로"
+- "이건 좀 어려울 것 같습니다" (완곡한 거부)
+
+### Japanese (否定的意思決定)
+- "Xは使わないことにした"
+- "Xは見送ることにしました"
+- "Xは採用しない方向で"
+- "Xは難しいと判断しました"
+
+---
+
+## Status Quo Decisions (Deciding to keep things as they are)
+
+- "Let's keep it as is"
+- "No change for now"
+- "We'll stick with the current approach"
+- "Decided to maintain the status quo"
+- "Not worth changing at this point"
+- "Current solution is good enough"
+- "Let's revisit this later but keep the current setup"
+- "If it ain't broke, don't fix it"
+
+### Korean (현상 유지 결정)
+- "일단 이대로 간다"
+- "지금은 바꾸지 말자"
+- "현재 방식 유지하기로"
+- "굳이 바꿀 필요 없을 것 같다"
+- "나중에 다시 논의합시다" (보류 결정)
+- "좀 더 생각해 봅시다" (합의 유보)
+
+### Japanese (現状維持の決定)
+- "このままでいこう"
+- "現状維持で"
+- "今は変えなくていい"
+- "検討します" (事実上の保留)
+- "もう少し考えさせてください"
+
+---
+
+## Experiments & Hypotheses (Deciding to try something)
+
+- "Let's try X and see"
+- "We'll experiment with..."
+- "Running a proof of concept for..."
+- "Hypothesis: if we..."
+- "Let's prototype this and evaluate"
+- "Testing whether X improves..."
+- "Let's spike on X for a day"
+- "We'll A/B test this approach"
+
+### Korean (실험/가설)
+- "한번 해보자"
+- "일단 시도해 보고 판단하자"
+- "PoC 한번 만들어 보자"
+- "이게 되는지 테스트해 보자"
+- "스파이크로 확인해 보자"
+
+### Japanese (実験・仮説)
+- "試してみよう"
+- "まずPoCを作ろう"
+- "やってみて判断しよう"
+- "仮説を検証しよう"
+
+---
+
+## Constraint Discovery (Learning why something doesn't work)
+
+- "Turns out X doesn't work because..."
+- "We found a limitation in..."
+- "The reason X fails is..."
+- "Discovered that X can't handle..."
+- "Hit a wall with X"
+- "X has an undocumented limitation"
+- "We learned the hard way that..."
+- "Gotcha: X doesn't support..."
+
+### Korean (제약 조건 발견)
+- "X가 안 되는 이유가 있었어"
+- "알고 보니 X에 제약이 있더라"
+- "X에서 막혔다"
+- "X가 생각보다 안 되네"
+- "삽질 끝에 알아낸 건데..."
+
+### Japanese (制約条件の発見)
+- "Xがうまくいかない理由がわかった"
+- "Xに制約があることが判明した"
+- "Xでハマった"
+- "Xは想定外の制限があった"
+
+---
+
+## Alternative Rejection (Why an option was rejected)
+
+- "We also considered Y but rejected it because..."
+- "Y was ruled out due to..."
+- "Evaluated Y, but it doesn't meet..."
+- "Y looked promising but failed on..."
+- "Between X and Y, we dropped Y because..."
+- "The runner-up was Y, but..."
+- "We benchmarked Y and it fell short on..."
+
+### Korean (대안 거부 이유)
+- "Y도 검토했지만 Z 때문에 탈락"
+- "Y도 봤는데 별로였어"
+- "Y는 좋아 보이지만 Z가 문제"
+- "Y를 벤치마크했는데 성능이 부족했어"
+
+### Japanese (代替案の棄却理由)
+- "Yも検討したがZの理由で不採用"
+- "Yは有望だったがZで脱落"
+- "Yをベンチマークしたが性能不足"
+
+---
+
 ## Implementation Notes
 
 **For Claude**: When you detect these trigger phrases:

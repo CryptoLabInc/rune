@@ -1,6 +1,6 @@
 {
   "name": "@cryptolab/rune",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "FHE-encrypted organizational memory for teams",
   "private": true,
   "license": "Apache-2.0",
