@@ -224,7 +224,9 @@ class RecordBuilder:
         Returns:
             List of DecisionRecords (1 for single, 2-7 for phase chain)
         """
+        MAX_INPUT_CHARS = 12_000  # ~3k tokens — guard against huge inputs
         clean_text, redaction_notes = self._redact_sensitive(raw_event.text)
+        clean_text = clean_text[:MAX_INPUT_CHARS]
 
         if pre_extraction is not None:
             extraction = pre_extraction

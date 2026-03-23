@@ -128,24 +128,24 @@ class Searcher:
         # Step 1: Search with multi-query expansion (respects Vault's topk limit)
         all_results = await self._search_with_expansions(query, topk)
 
-        # Step 2: Assemble groups from already-fetched results
+        # Step 2: Expand phase chains for groups with missing siblings
+        all_results = await self._expand_phase_chains(all_results)
+
+        # Step 3: Assemble groups (order by phase_seq, interleave with standalone)
         all_results = self._assemble_groups(all_results)
 
-        # Step 3: Best-effort metadata filters (client-side, on returned results)
+        # Step 4: Best-effort metadata filters (client-side, on complete results)
         # NOTE: This may reduce result count below topk. Full support
         # requires Vault-side filtering with internal over-fetch.
         if filters:
             all_results = self._apply_metadata_filters(all_results, filters)
 
-        # Step 4: Time scope filter
+        # Step 5: Time scope filter
         if query.time_scope != TimeScope.ALL_TIME:
             all_results = self._filter_by_time(all_results, query.time_scope)
 
-        # Step 5: Recency weighting (re-ranks returned results, no security issue)
+        # Step 6: Recency weighting (re-ranks returned results, no security issue)
         all_results = self._apply_recency_weighting(all_results)
-
-        # Step 6: Expand phase chains for any groups with missing siblings
-        all_results = await self._expand_phase_chains(all_results)
 
         return all_results[:topk]
 
