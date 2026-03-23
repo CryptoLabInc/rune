@@ -5,7 +5,7 @@ Searches organizational memory via enVector.
 Uses the Vault-secured pipeline: scoring → decrypt → metadata.
 Returns Decision Records with their payload.text for synthesis.
 
-v0.3.0 changes:
+v0.2.4 changes:
 - Recency weighting on returned results (benign re-ranking)
 - Group assembly from already-fetched results (no over-fetch)
 - Client-side metadata filters (best-effort on returned top-k)
@@ -84,7 +84,7 @@ class Searcher:
     Security model: the client NEVER requests more than the user's topk
     from Vault. Over-fetch + post-filter must happen Vault-side.
 
-    v0.3.0 client-side enhancements (on already-returned results only):
+    v0.2.4 client-side enhancements (on already-returned results only):
     - Assemble groups from results already in the result set
     - Apply recency weighting (re-ranking, not filtering)
     - Best-effort metadata filters (reduces result count, not ideal)
