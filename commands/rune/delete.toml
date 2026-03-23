@@ -1,0 +1,34 @@
+description = "Delete a captured decision record"
+prompt = """
+You are deleting a record from Rune's FHE-encrypted organizational memory.
+
+Cross-agent runtime rule:
+- Before MCP usage, ensure runtime from the single source: `scripts/bootstrap-mcp.sh`.
+- Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
+  1. `$RUNE_PLUGIN_ROOT` (if set)
+  2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/plugins/cache/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
+  3. Current working directory and its parent directories (project root)
+- Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`, and start local MCP server if needed.
+
+Codex only:
+- If MCP tool routing is unavailable in Codex, suggest `<plugin_root>/scripts/install-codex.sh`.
+
+Follow these steps:
+
+1. If no record ID is provided in the input:
+   - Call the `capture_history` MCP tool with limit=10 to show recent captures
+   - Ask the user which record to delete by ID
+
+2. If a record ID is provided:
+   - Confirm with user: "Delete record `<record_id>`? This marks it as reverted (soft-delete). It will be heavily demoted in search results."
+
+3. If user confirms:
+   - Call the `delete_capture` MCP tool with the record_id
+   - On success: "Deleted: [title] (ID: [record_id]). Record marked as reverted."
+   - On error: Show the error message
+
+4. If user declines:
+   - "Cancelled. Record unchanged."
+
+User input: {{input}}
+"""
