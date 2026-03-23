@@ -1,7 +1,9 @@
 {
   "vault": {
     "endpoint": "VAULT_GRPC_ENDPOINT",
-    "token": "VAULT_TOKEN"
+    "token": "VAULT_TOKEN",
+    "ca_cert": "",
+    "tls_disable": false
   },
   "envector": {
     "endpoint": "ENVECTOR_ENDPOINT",

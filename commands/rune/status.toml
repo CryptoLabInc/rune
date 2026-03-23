@@ -7,7 +7,7 @@ Follow these steps:
 0. Before any MCP tool call, ensure local runtime is ready (cross-agent common step):
    - Detect plugin root by finding `scripts/bootstrap-mcp.sh`. Search in order:
      1. `$RUNE_PLUGIN_ROOT` (if set)
-     2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/plugins/cache/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
+     2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/extensions/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
      3. Current working directory and its parent directories (project root)
    - Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`.
    - If MCP tooling still appears unavailable, try `<plugin_root>/scripts/start-mcp-servers.sh`.
@@ -17,7 +17,11 @@ Codex only:
 
 1. Check if `~/.rune/config.json` exists. If not, show "Not configured" and suggest `/rune:configure`.
 
-2. Read the config and display a status report:
+2. Read the config and display the basic configuration section.
+
+3. Call the `diagnostics` MCP tool to get health data. If `diagnostics` is unavailable, fall back to `vault_status`.
+
+4. Display a status report using the diagnostics response:
 
 ```
 Rune Plugin Status
@@ -31,19 +35,30 @@ Configuration:
   enVector      : <endpoint or "not set">
   enVector Key  : <masked or "not set">
 
+System Health (from diagnostics):
+  Vault         : healthy / unreachable
+  Encryption Key: loaded (key_id: <id>) / not loaded
+  Agent DEK     : loaded / not loaded
+  Scribe        : ready / not initialized
+  Retriever     : ready / not initialized
+  LLM Provider  : <provider or "none">
+  enVector Cloud: reachable (<latency>ms) / unreachable
+
 MCP Tools:
   capture       : <available / unavailable>
   recall        : <available / unavailable>
+  diagnostics   : <available / unavailable>
 ```
 
-3. Check MCP tool availability by calling the `vault_status` MCP tool. If it responds, tools are available.
-
-4. Add recommendations based on what is missing:
+5. Add recommendations based on what is missing:
    - Config missing: "Run `/rune:configure` to set up"
    - State dormant: "Run `/rune:activate` to enable"
-   - MCP tools unavailable: "MCP server may need restart"
+   - Keys not loaded: "Check Vault connection — keys are fetched from Vault at startup"
+   - Pipelines not initialized: "Run `reload_pipelines` or restart the MCP server"
+   - enVector unreachable: "Check network connectivity and enVector endpoint in config"
 
-Use checkmarks for present items, X marks for missing ones.
+Use checkmarks for healthy items, X marks for issues.
 
 User input: {{input}}
 """
+

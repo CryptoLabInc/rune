@@ -72,6 +72,24 @@ In the Codex CLI session:
 $ gemini extensions install https://github.com/CryptoLabInc/rune
 ```
 
+### Local Development (from source)
+
+If you're developing or testing a local copy of the plugin:
+
+```bash
+# 1. If you previously installed a versioned plugin, clean up first
+rm -rf ~/.rune
+rm -rf ~/.claude/plugins/cache/*/rune
+
+# 2. Register the local directory as a marketplace source
+claude plugin marketplace add ./
+
+# 3. Install from the local marketplace
+claude plugin install rune
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full development setup instructions.
+
 ### Other Agents
 See [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md) for Gemini CLI, OpenAI, and custom MCP client setup.
 

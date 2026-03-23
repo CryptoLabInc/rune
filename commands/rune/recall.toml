@@ -6,7 +6,7 @@ Cross-agent runtime rule:
 - Before MCP usage, ensure runtime from the single source: `scripts/bootstrap-mcp.sh`.
 - Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
   1. `$RUNE_PLUGIN_ROOT` (if set)
-  2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/plugins/cache/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
+  2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/extensions/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
   3. Current working directory and its parent directories (project root)
 - Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`, and start local MCP server if needed.
 

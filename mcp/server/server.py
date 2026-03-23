@@ -111,7 +111,13 @@ def _read_capture_log(limit: int = 20, domain: str = None, since: str = None) ->
     return entries
 
 
-async def _async_fetch_keys_from_vault(vault_endpoint: str, vault_token: str, key_base_path: str) -> tuple:
+async def _async_fetch_keys_from_vault(
+    vault_endpoint: str,
+    vault_token: str,
+    key_base_path: str,
+    ca_cert: str = None,
+    tls_disable: bool = False,
+) -> tuple:
     """
     Async core: fetches public keys (EncKey, EvalKey) and per-agent metadata
     DEK from Rune-Vault via gRPC.
@@ -124,11 +130,18 @@ async def _async_fetch_keys_from_vault(vault_endpoint: str, vault_token: str, ke
         vault_token: Authentication token
         key_base_path: Root key directory (e.g. ~/.rune/keys).
             Keys are saved under key_base_path/<key_id>/.
+        ca_cert: Path to CA certificate PEM for self-signed certs.
+        tls_disable: If True, use insecure plaintext channel.
 
     Returns:
         tuple: (success, index_name, key_id, agent_id, agent_dek_bytes)
     """
-    client = VaultClient(vault_endpoint=vault_endpoint, vault_token=vault_token)
+    client = VaultClient(
+        vault_endpoint=vault_endpoint,
+        vault_token=vault_token,
+        ca_cert=ca_cert,
+        tls_disable=tls_disable,
+    )
     try:
         bundle = await client.get_public_key()
 
@@ -181,7 +194,13 @@ async def _async_fetch_keys_from_vault(vault_endpoint: str, vault_token: str, ke
         await client.close()
 
 
-def fetch_keys_from_vault(vault_endpoint: str, vault_token: str, key_base_path: str) -> tuple:
+def fetch_keys_from_vault(
+    vault_endpoint: str,
+    vault_token: str,
+    key_base_path: str,
+    ca_cert: str = None,
+    tls_disable: bool = False,
+) -> tuple:
     """
     Fetches public keys from Rune-Vault. Safe to call from both sync (main)
     and async (reload_pipelines) contexts.
@@ -190,6 +209,8 @@ def fetch_keys_from_vault(vault_endpoint: str, vault_token: str, key_base_path: 
         vault_endpoint: Rune-Vault endpoint URL
         vault_token: Authentication token for Vault
         key_base_path: Root key directory (e.g. ~/.rune/keys)
+        ca_cert: Path to CA certificate PEM for self-signed certs.
+        tls_disable: If True, use insecure plaintext channel.
 
     Returns:
         tuple: (success, index_name, key_id, agent_id, agent_dek_bytes)
@@ -202,12 +223,12 @@ def fetch_keys_from_vault(vault_endpoint: str, vault_token: str, key_base_path: 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
                 asyncio.run,
-                _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path),
+                _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable),
             )
             return future.result(timeout=30)
     except RuntimeError:
         return asyncio.run(
-            _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path)
+            _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable)
         )
 
 class MCPServerApp:
@@ -407,6 +428,90 @@ class MCPServerApp:
                     "vault_configured": True,
                     "error": f"Vault health check failed: {e}"
                 }
+
+        # ---------- MCP Tools: Diagnostics ---------- #
+        @self.mcp.tool(
+            name="diagnostics",
+            description=(
+                "System health check tool for the Rune."
+                "Reporst status of Vault connection, encryption keys, "
+                "pipeline initialization, and enVector cloud reachability."
+            ),
+            annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
+        )
+        async def tool_diagnostics() -> Dict[str, Any]:
+            """
+            Returns diagnostic reports about Rune subsystems"
+
+            Returns:
+                Dict with subsystem health information
+            """
+            import time
+
+            report: Dict[str, Any] = {"ok": True}
+
+            # Vault connection
+            vault_info: Dict[str, Any] = {
+                "configured": self.vault is not None,
+                "healthy": False,
+                "endpoint": None,
+            }
+
+            if self.vault is not None:
+                vault_info["endpoint"] = getattr(self.vault, "vault_endpoint", "unknown")
+                try:
+                    vault_info["healthy"] = await self.vault.health_check()
+                except Exception as e:
+                    vault_info["healthy"] = False
+                    vault_info["error"] = str(e)
+            report["vault"] = vault_info
+
+            # Encryption Keys
+            key_id = self._key_id
+            enc_key_loaded = False
+            if key_id and self._key_path:
+                enc_key_file = os.path.join(self._key_path, key_id, "EncKey.json")
+                enc_key_loaded = os.path.exists(enc_key_file)
+
+            keys_info: Dict[str, Any] = {
+                "enc_key_loaded": enc_key_loaded,
+                "key_id": key_id,
+                "agent_dek_loaded": self._agent_dek is not None,
+            }
+            report["keys"] = keys_info
+
+            # Pipelines
+            pipelines_info: Dict[str, Any] = {
+                "scribe": self._scribe is not None,
+                "retriever": self._retriever is not None,
+                "llm_provider": self._active_llm_provider,
+            }
+            report["pipelines"] = pipelines_info
+
+            # enVector Cloud
+            envector_info: Dict[str, Any] = {
+                "reachable": False,
+                "latency_ms": None,
+            }
+
+            if self.envector is not None:
+                try:
+                    t0 = time.monotonic()
+                    self.envector.invoke_get_index_list()
+                    latency = (time.monotonic() - t0) * 1000
+                    envector_info["reachable"] = True
+                    envector_info["latency_ms"] = round(latency, 1)
+                except Exception as e:
+                    envector_info["error"] = str(e)
+            report["envector"] = envector_info
+
+            # Result
+            if self.vault is not None and not vault_info["healthy"]:
+                report["ok"] = False
+            if not enc_key_loaded:
+                report["ok"] = False
+
+            return report
 
         # ---------- MCP Tools: Capture (Scribe Pipeline) ---------- #
         @self.mcp.tool(
@@ -901,6 +1006,8 @@ class MCPServerApp:
                         rune_config.vault.endpoint,
                         rune_config.vault.token,
                         key_path,
+                        ca_cert=rune_config.vault.ca_cert or None,
+                        tls_disable=rune_config.vault.tls_disable,
                     )
                     if success and vault_key_id:
                         key_id = vault_key_id
@@ -1145,6 +1252,7 @@ if __name__ == "__main__":
     ENCRYPTED_QUERY = args.encrypted_query
 
     # ── Load ~/.rune/config.json if ENVECTOR_CONFIG is set ──
+    _vault_cfg = {}  # populated from config file if available
     _config_path = os.getenv("ENVECTOR_CONFIG")
     if _config_path:
         _config_path = os.path.expanduser(_config_path)
@@ -1176,6 +1284,11 @@ if __name__ == "__main__":
     RUNEVAULT_ENDPOINT = os.getenv("RUNEVAULT_ENDPOINT", None)
     RUNEVAULT_TOKEN = os.getenv("RUNEVAULT_TOKEN", None)
 
+    VAULT_CA_CERT = os.getenv("VAULT_CA_CERT") or _vault_cfg.get("ca_cert", "") or None
+    VAULT_TLS_DISABLE = os.getenv("VAULT_TLS_DISABLE", "").lower() == "true"
+    if not VAULT_TLS_DISABLE:
+        VAULT_TLS_DISABLE = bool(_vault_cfg.get("tls_disable", False))
+
     VAULT_CONFIGURED = bool(RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN)
     VAULT_KEYS_LOADED = False
     VAULT_INDEX_NAME = None
@@ -1191,6 +1304,8 @@ if __name__ == "__main__":
         success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek = fetch_keys_from_vault(
             RUNEVAULT_ENDPOINT, RUNEVAULT_TOKEN,
             ENVECTOR_KEY_PATH,
+            ca_cert=VAULT_CA_CERT,
+            tls_disable=VAULT_TLS_DISABLE,
         )
         if success and vault_key_id:
             ENVECTOR_KEY_ID = vault_key_id
@@ -1239,6 +1354,8 @@ if __name__ == "__main__":
         vault_client = VaultClient(
             vault_endpoint=RUNEVAULT_ENDPOINT,
             vault_token=RUNEVAULT_TOKEN,
+            ca_cert=VAULT_CA_CERT,
+            tls_disable=VAULT_TLS_DISABLE,
         )
         logger.info("Vault client initialized - recall tool available")
     else:

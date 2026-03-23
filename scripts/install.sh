@@ -70,6 +70,8 @@ print_info "Dependencies installed successfully!"
 print_step "Creating configuration directory..."
 mkdir -p ~/.rune
 chmod 700 ~/.rune
+mkdir -p ~/.rune/certs
+chmod 700 ~/.rune/certs
 print_info "Created ~/.rune directory"
 
 # Installation complete
@@ -82,6 +84,6 @@ echo ""
 echo "Next steps:"
 echo "  1. Configure credentials: /rune:configure"
 echo "  2. Start MCP servers: scripts/start-mcp-servers.sh"
-echo "  3. Restart Claude"
+echo "  3. Restart the agent session"
 echo ""
 print_info "Setup complete! 🎉"

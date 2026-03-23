@@ -14,12 +14,32 @@ Collect the following credentials from the user, one at a time:
    - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
 4. **Vault Token** (optional) — a base64url hash, e.g. `dG9rLWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1`
 
+If Vault Endpoint and Token were both provided, ask the TLS question:
+
+**"How does your Vault server handle TLS?"**
+
+1. **Self-signed certificate** — "My team uses a self-signed CA"
+   - Follow-up: ask for the path to CA certificate PEM file
+   - Support `~` expansion in the path
+   - Copy to `~/.rune/certs/ca.pem` (`mkdir -p ~/.rune/certs && cp <user_path> ~/.rune/certs/ca.pem && chmod 600 ~/.rune/certs/ca.pem`)
+   - If copy fails (file not found, permission denied), show error and ask again
+   - Inform user: "CA certificate copied to ~/.rune/certs/ca.pem"
+   → config: `ca_cert: "~/.rune/certs/ca.pem"`, `tls_disable: false`
+
+2. **Public CA (default)** — "Vault uses a publicly-signed certificate (e.g., Let's Encrypt)"
+   - No additional input needed, system CA handles verification
+   → config: `ca_cert: ""`, `tls_disable: false`
+
+3. **No TLS** — "Connect without TLS (not recommended)"
+   - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
+   → config: `ca_cert: ""`, `tls_disable: true`
+
 If Vault fields are skipped, note that the plugin will start in dormant state.
 
 Before writing config, ensure local runtime is prepared:
 - Detect plugin root by finding `scripts/bootstrap-mcp.sh`. Search in order:
   1. `$RUNE_PLUGIN_ROOT` (if set)
-  2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/plugins/cache/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
+  2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/extensions/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
   3. Current working directory and its parent directories (project root)
 - Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`.
 
@@ -33,7 +53,7 @@ Then write `~/.rune/config.json` with this structure (chmod 600 after writing):
 
 ```json
 {
-  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>"},
+  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>", "ca_cert": "<ca_cert or empty>", "tls_disable": false},
   "envector": {"endpoint": "<envector_endpoint>", "api_key": "<envector_api_key>"},
   "state": "dormant",
   "metadata": {"configVersion": "1.0", "lastUpdated": "<ISO timestamp>"}
@@ -47,8 +67,9 @@ After writing the config, show a summary:
 ```
 Rune Configuration Complete
 ============================
-  Config : ~/.rune/config.json
-  State  : dormant (run /rune:activate to enable)
+  Config    : ~/.rune/config.json
+  Vault TLS : <enabled (system CA) | enabled (custom CA) | disabled>
+  State     : dormant (run /rune:activate to enable)
 ```
 
 If Vault was not configured, add: "Vault not configured — plugin will start in dormant state."

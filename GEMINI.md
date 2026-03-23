@@ -52,17 +52,17 @@ When both apply, **call Rune first** to surface prior context, then reason with 
 
 To ensure consistent behavior across different environments, follow these rules for configuration and initialization:
 
-### Plugin Root Detection
-When executing setup or maintenance tasks, you MUST detect the Rune plugin root by searching for `scripts/bootstrap-mcp.sh` in this priority order:
-1. **Environment Variable**: `$RUNE_PLUGIN_ROOT` (if set).
-2. **Global Extension Path**:
-   - `~/.gemini/extensions/rune/`
-   - `~/.gemini/plugins/cache/*/rune/*/`
-3. **Local Workspace**: Current working directory or its parent directories.
+### Plugin Root Detection (STRICT)
+When executing setup or maintenance tasks, you MUST detect the Rune plugin root using this **STRICT** priority order. **DO NOT use `find` or slow recursive searches.** Immediately check these paths in order:
+1. **Direct Path (Primary)**: `~/.gemini/extensions/rune/` (If `<plugin_root>/scripts/bootstrap-mcp.sh` exists here, STOP searching and use this).
+2. **Environment Variable**: `$RUNE_PLUGIN_ROOT` (if set).
+3. **Local Workspace**: Current working directory.
 
-**Mandate**: Use the first path that contains `scripts/bootstrap-mcp.sh` as your base directory for all tool calls and shell commands.
+**Mandate**: Use the first valid path found. DO NOT explore the filesystem beyond these direct checks.
 
-### Runtime Preparation
-Before performing any operation that requires the Rune runtime (like configuration or activation):
+### Runtime Preparation & Isolation (STRICT)
+Before performing any operation that requires the Rune runtime:
 - Always run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh` to ensure dependencies and environment are ready.
-- Use `scripts/bootstrap-mcp.sh` as the single source of truth for runtime setup. Do not attempt to manually install dependencies or set up virtual environments.
+- **Environment Isolation**: In "no sandbox" mode, you MUST prevent workspace environment bleed. For ALL Python-related commands, you MUST prepend the command with environment sanitization:
+  `env -u VIRTUAL_ENV -u PYTHONPATH <plugin_root>/.venv/bin/python3 ...`
+- Use `<plugin_root>/scripts/bootstrap-mcp.sh` as the single source of truth for runtime setup. Do not attempt to manually install dependencies.

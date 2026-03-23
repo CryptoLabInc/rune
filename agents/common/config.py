@@ -28,6 +28,8 @@ class VaultConfig:
     """Rune-Vault configuration"""
     endpoint: str = ""
     token: str = ""
+    ca_cert: str = ""        # Path to CA cert PEM. Empty = system CA.
+    tls_disable: bool = False
 
 
 @dataclass
@@ -98,6 +100,8 @@ def _parse_vault_config(data: dict) -> VaultConfig:
     return VaultConfig(
         endpoint=vault_data.get("endpoint") or vault_data.get("url", ""),
         token=vault_data.get("token", ""),
+        ca_cert=vault_data.get("ca_cert", ""),
+        tls_disable=vault_data.get("tls_disable", False),
     )
 
 
@@ -218,6 +222,10 @@ def load_config() -> RuneConfig:
         config.vault.endpoint = os.getenv("RUNEVAULT_ENDPOINT")
     if os.getenv("RUNEVAULT_TOKEN"):
         config.vault.token = os.getenv("RUNEVAULT_TOKEN")
+    if os.getenv("VAULT_CA_CERT"):
+        config.vault.ca_cert = os.getenv("VAULT_CA_CERT")
+    if os.getenv("VAULT_TLS_DISABLE", "").lower() == "true":
+        config.vault.tls_disable = True
 
     if os.getenv("ENVECTOR_ENDPOINT"):
         config.envector.endpoint = os.getenv("ENVECTOR_ENDPOINT")
@@ -298,6 +306,8 @@ def save_config(config: RuneConfig) -> None:
         "vault": {
             "endpoint": config.vault.endpoint,
             "token": config.vault.token,
+            "ca_cert": config.vault.ca_cert,
+            "tls_disable": config.vault.tls_disable,
         },
         "envector": {
             "endpoint": config.envector.endpoint,
