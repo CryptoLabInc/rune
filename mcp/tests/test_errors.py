@@ -76,7 +76,7 @@ class TestMakeError:
         assert result["error"]["retryable"] is False
 
     def test_invalid_input_error(self):
-        result = make_error(InvalidInputError("topk must be 50 or less"))
+        result = make_error(InvalidInputError("topk must be 10 or less"))
         assert result["ok"] is False
         assert result["error"]["code"] == "INVALID_INPUT"
         assert result["error"]["retryable"] is False
