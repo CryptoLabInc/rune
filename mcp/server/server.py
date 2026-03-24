@@ -800,8 +800,8 @@ class MCPServerApp:
                     "Retriever pipeline not initialized. Run reload_pipelines or check Rune configuration."
                 ))
 
-            if topk > 50:
-                return make_error(InvalidInputError("topk must be 50 or less."))
+            if topk > 10:
+                return make_error(InvalidInputError("topk must be 10 or less."))
 
             try:
                 query_processor = self._retriever["query_processor"]
