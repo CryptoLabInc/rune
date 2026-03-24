@@ -48,14 +48,20 @@ unset VIRTUAL_ENV 2>/dev/null || true
 NEED_VENV=0
 if [ ! -f "$VENV_DIR/bin/python3" ]; then
     NEED_VENV=1
-elif [ -f "$VENV_DIR/bin/pip" ]; then
-    PIP_SHEBANG="$(head -1 "$VENV_DIR/bin/pip")"
-    case "$PIP_SHEBANG" in
-        *"$VENV_DIR"*) ;;  # shebang points here — OK
-        *) echo "[rune] Contaminated venv detected (pip shebang: $PIP_SHEBANG) — rebuilding..." >&2
-           rm -rf "$VENV_DIR"
-           NEED_VENV=1 ;;
-    esac
+else
+    # Check pip or pip3 — some systems only create one of the two
+    _PIP_BIN=""
+    [ -f "$VENV_DIR/bin/pip" ]  && _PIP_BIN="$VENV_DIR/bin/pip"
+    [ -z "$_PIP_BIN" ] && [ -f "$VENV_DIR/bin/pip3" ] && _PIP_BIN="$VENV_DIR/bin/pip3"
+    if [ -n "$_PIP_BIN" ]; then
+        PIP_SHEBANG="$(head -1 "$_PIP_BIN")"
+        case "$PIP_SHEBANG" in
+            *"$VENV_DIR"*) ;;  # shebang points here — OK
+            *) echo "[rune] Contaminated venv detected ($_PIP_BIN shebang: $PIP_SHEBANG) — rebuilding..." >&2
+               rm -rf "$VENV_DIR"
+               NEED_VENV=1 ;;
+        esac
+    fi
 fi
 if [ "$NEED_VENV" -eq 1 ]; then
     python3 -m venv "$VENV_DIR" >&2

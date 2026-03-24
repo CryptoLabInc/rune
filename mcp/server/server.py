@@ -47,10 +47,14 @@ from pydantic import Field
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 MCP_ROOT = os.path.dirname(CURRENT_DIR)
 PLUGIN_ROOT = os.path.dirname(MCP_ROOT)  # rune/ root for `from agents import ...`
-if MCP_ROOT not in sys.path:
-    sys.path.insert(0, MCP_ROOT)
-if PLUGIN_ROOT not in sys.path:
-    sys.path.insert(0, PLUGIN_ROOT)
+# Re-insert paths to take precedence over the script dir
+for _p in (MCP_ROOT, PLUGIN_ROOT):
+    try:
+        sys.path.remove(_p)
+    except ValueError:
+        pass
+sys.path[0:0] = [PLUGIN_ROOT, MCP_ROOT]
+del _p
 
 from fastmcp import FastMCP, Context  # pip install fastmcp
 from mcp.types import ToolAnnotations
