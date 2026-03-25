@@ -355,12 +355,16 @@ async def _synthesize_results(query: str, results: list) -> Optional[str]:
     google_key = (llm_cfg.google_api_key if llm_cfg else None) or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 
     llm_provider = (
-        (llm_cfg.tier2_provider or llm_cfg.provider) if llm_cfg else None
-    ) or os.getenv("RUNE_TIER2_LLM_PROVIDER") or os.getenv("RUNE_LLM_PROVIDER", "anthropic")
+        (llm_cfg.provider) if llm_cfg else None
+    ) or os.getenv("RUNE_LLM_PROVIDER", "anthropic")
     llm_provider = llm_provider.lower()
 
-    # Use the fast tier2 model (Haiku) — synthesis is cheaper than extraction
-    model = (config.scribe.tier2_model if config else None) or "claude-haiku-4-5-20251001"
+    if llm_provider == "google":
+        model = (llm_cfg.google_model if llm_cfg else None) or "gemini-2.0-flash-exp"
+    elif llm_provider == "openai":
+        model = (llm_cfg.openai_model if llm_cfg else None) or "gpt-4o-mini"
+    else:
+        model = (llm_cfg.anthropic_model if llm_cfg else None) or "claude-haiku-4-5-20251001"
 
     llm = LLMClient(
         provider=llm_provider,
@@ -374,36 +378,33 @@ async def _synthesize_results(query: str, results: list) -> Optional[str]:
         logger.info("[synthesize] LLM unavailable — skipping synthesis")
         return None
 
-    # Build results block for the prompt
+    # Build results block — use full payload_text for each record
     records_text = []
     for r in results:
-        clean = _re.sub(r"# Decision Record:.*?(?=\n\n|\Z)", "", r.payload_text or "", flags=_re.DOTALL).strip()
-        snippet = (clean or r.payload_text or "")[:500]
-        records_text.append(
-            f"[{r.record_id}]  Title: {r.title}  Domain: {r.domain}  "
-            f"Certainty: {r.certainty}  Score: {r.score:.2f}\n{snippet}"
-        )
+        records_text.append(r.payload_text.strip())
 
     prompt = (
         f'A user asked: "{query}"\n\n'
-        f"Relevant records from organizational memory:\n\n"
+        f"Here are the relevant organisational memory records:\n\n"
         + "\n\n---\n\n".join(records_text)
-        + "\n\nSynthesize these records into a clear, concise answer (2-4 sentences max).\n"
-        "Rules:\n"
-        "- Cite record IDs in brackets, e.g. [dec_2024-01-15_arch_postgres]\n"
-        "- Match tone to certainty: 'supported' → confident, 'partially_supported' → hedged, 'unknown' → caveated\n"
-        "- If multiple records are phases of the same decision, consolidate into one mention\n"
-        "- Do NOT fabricate — only use information present in the records\n"
-        "- If records are not relevant to the query, say so briefly\n\n"
-        "Answer:"
+        + "\n\nWrite a short, plain-English summary (3-5 sentences) that directly answers the user's question "
+        "using only the information in these records. "
+        "Do not use bullet points or headers — just clear readable prose. "
+        "If multiple records say the same thing, consolidate them into one statement. "
+        "Do not fabricate anything not present in the records.\n\n"
+        "Summary:"
     )
+
+    logger.info("[synthesize] Provider: %s  Model: %s", llm_provider, model)
+    logger.info("[synthesize] Records passed to LLM (%d):\n%s", len(results), "\n---\n".join(f"  [{r.record_id}] score={r.score:.2f} certainty={r.certainty}\n  {r.title}" for r in results))
+    logger.info("[synthesize] Full prompt sent to LLM:\n%s", prompt)
 
     loop = asyncio.get_event_loop()
     try:
         answer = await loop.run_in_executor(
-            None, lambda: llm.generate(prompt, max_tokens=350, timeout=20.0)
+            None, lambda: llm.generate(prompt, max_tokens=500, timeout=20.0)
         )
-        logger.info("[synthesize] Synthesis complete (%d chars)", len(answer))
+        logger.info("[synthesize] LLM response:\n%s", answer)
         return answer
     except Exception as e:
         logger.warning("[synthesize] LLM synthesis failed: %s", e)
@@ -465,9 +466,15 @@ async def _force_recall(query: str, user: str, channel: str, thread_ts: Optional
         for i, r in enumerate(results, 1):
             logger.info("[force_recall]  %d. [%.2f] %s", i, r.score, r.title)
 
-        # Filter out anomalous scores (>1.0 means bad vector) and low relevance
+        # Filter out anomalous scores, low relevance, unknown certainty, and empty records
         MIN_SCORE = 0.4
-        filtered = [r for r in results if 0.0 < r.score <= 1.0 and r.score >= MIN_SCORE]
+        filtered = [
+            r for r in results
+            if 0.0 < r.score <= 1.0
+            and r.score >= MIN_SCORE
+            and r.certainty != "unknown"
+            and (r.payload_text or "").strip()
+        ]
         filtered = filtered[:5]
 
         logger.info("[force_recall] After filtering (score 0.4–1.0): %d results", len(filtered))

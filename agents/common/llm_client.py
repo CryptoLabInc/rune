@@ -133,6 +133,21 @@ class LLMClient:
                 generation_config={"max_output_tokens": max_tokens},
                 request_options={"timeout": timeout},
             )
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                finish = None
+                try:
+                    finish = response.candidates[0].finish_reason.name
+                except Exception:
+                    pass
+                logger.info(
+                    "[gemini] tokens — prompt: %d  output: %d  total: %d  max_allowed: %d  finish: %s",
+                    getattr(usage, "prompt_token_count", 0),
+                    getattr(usage, "candidates_token_count", 0),
+                    getattr(usage, "total_token_count", 0),
+                    max_tokens,
+                    finish,
+                )
             return response.text.strip()
 
         raise RuntimeError(f"Unsupported LLM provider: {self.provider}")
