@@ -91,6 +91,8 @@ class RuneConfig:
     scribe: ScribeConfig = field(default_factory=ScribeConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     state: str = "dormant"  # "active" or "dormant"
+    dormant_reason: str = ""  # raeson why plugin entered dormant state (e.g., "vault_unreachable", "user_deactivated")
+    dormant_since: str = ""   # Timestamp of when dormant state was entered
     _env_sourced_keys: set = field(default_factory=set, repr=False)
 
 
@@ -214,6 +216,8 @@ def load_config() -> RuneConfig:
             config.scribe = _parse_scribe_config(data)
             config.retriever = _parse_retriever_config(data)
             config.state = data.get("state", "dormant")
+            config.dormant_reason = data.get("dormant_reason", "")
+            config.dormant_since = data.get("dormant_since", "")
         except (json.JSONDecodeError, IOError) as e:
             print(f"[Config] Warning: Failed to load config file: {e}")
 
@@ -334,6 +338,13 @@ def save_config(config: RuneConfig) -> None:
         },
         "state": config.state,
     }
+
+    # Include dormant metadata
+    if config.state == "dormant":
+        if config.dormant_reason:
+            data["dormant_reason"] = config.dormant_reason
+        if config.dormant_since:
+            data["dormant_since"] = config.dormant_since
 
     with open(CONFIG_PATH, "w") as f:
         json.dump(data, f, indent=2)

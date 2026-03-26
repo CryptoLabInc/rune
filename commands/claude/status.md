@@ -21,6 +21,8 @@ Read `~/.rune/config.json` and show a status report.
 Rune Plugin Status
 ==================
 State: Active / Dormant
+Dormant Reason: <reason>  (only when dormant with a reason)
+Dormant Since:  <timestamp>  (only when dormant with a timestamp)
 
 Configuration:
   [check] Config file: ~/.rune/config.json
@@ -45,4 +47,13 @@ Recommendations:
 ```
 
 Use checkmarks for healthy items, X marks for issues.
+
+**Dormant Reason Display**: When `dormant_reason` is present in config or diagnostics, translate reason code into a user-friendly message:
+- `vault_unreachable`: "Vault server could not be reached. Check if it's running and the endpoint is correct."
+- `vault_token_invalid`: "Vault token was rejected. Token may be expired — run `/rune:configure` to update."
+- `envector_unreachable`: "enVector Cloud could not be reached. Check network and endpoint."
+- `envector_key_invalid`: "enVector API key was rejected. Run `/rune:configure` to update."
+- `pipeline_init_failed`: "Pipeline initialization failed. Run `/rune:activate` to retry."
+- `user_deactivated`: "Manually deactivated by user via `/rune:deactivate`."
+- Other/unknown: show raw reason string with "Run `/rune:activate` to retry."
 
