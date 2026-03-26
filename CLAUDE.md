@@ -30,7 +30,7 @@ Use `rune:scribe` (or `capture` MCP tool) when:
 | Need | Use | NOT |
 |------|-----|-----|
 | Search organizational memory | `rune:retriever` / `recall` MCP tool | Explore agent (no MCP access) |
-| Capture decisions | `rune:scribe` / `capture` MCP tool | Writing Python scripts to `/tmp` |
+| Capture decisions | `rune:scribe` / `capture` MCP tool (agent-delegated: pass `extracted` JSON) | Writing Python scripts to `/tmp` |
 | Search this codebase | Explore agent / Glob / Grep | `recall` (that's for decisions, not code) |
 | Brainstorm from scratch | `superpowers:brainstorming` | `recall` (nothing to recall yet) |
 

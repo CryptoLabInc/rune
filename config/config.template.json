@@ -10,8 +10,9 @@
     "api_key": "ENVECTOR_API_KEY"
   },
   "scribe": {
-    "tier2_enabled": true,
-    "tier2_model": "claude-haiku-4-5-20251001"
+    "tier2_enabled": false,
+    "tier2_model": "claude-haiku-4-5-20251001",
+    "_comment": "tier2_enabled defaults to false. Set true only if you have LLM API keys and prefer server-side evaluation over agent-delegated mode."
   },
   "retriever": {
     "topk": 10,

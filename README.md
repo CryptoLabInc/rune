@@ -32,7 +32,7 @@ Rune exposes these tools via MCP (stdio transport). Any MCP-compatible agent can
 
 | Tool | Description |
 |------|-------------|
-| **`capture`** | Capture organizational decisions via FHE-encrypted storage pipeline |
+| **`capture`** | Capture organizational decisions via FHE-encrypted storage. Primary: agent-delegated mode (pass `extracted` JSON). Legacy fallback: server-side 3-tier pipeline |
 | **`recall`** | Search encrypted team memory via Vault-secured pipeline (query expansion → encrypted scoring → Vault decryption) |
 | **`vault_status`** | Check Rune-Vault connection status and security mode |
 | **`reload_pipelines`** | Re-read config and reinitialize scribe/retriever pipelines |

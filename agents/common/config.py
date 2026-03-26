@@ -67,7 +67,7 @@ class ScribeConfig:
     slack_webhook_port: int = 8080
     similarity_threshold: float = 0.35  # Tier 1: wider net (Tier 2 LLM handles precision)
     auto_capture_threshold: float = 0.7
-    tier2_enabled: bool = True  # Tier 2: Haiku-based policy filter
+    tier2_enabled: bool = False  # Legacy: only enable if API keys configured
     tier2_model: str = "claude-haiku-4-5-20251001"
     patterns_path: str = str(PATTERNS_DIR / "capture-triggers.md")
     slack_signing_secret: str = ""
@@ -130,7 +130,7 @@ def _parse_scribe_config(data: dict) -> ScribeConfig:
         slack_webhook_port=scribe_data.get("slack_webhook_port", 8080),
         similarity_threshold=scribe_data.get("similarity_threshold", 0.35),
         auto_capture_threshold=scribe_data.get("auto_capture_threshold", 0.7),
-        tier2_enabled=scribe_data.get("tier2_enabled", True),
+        tier2_enabled=scribe_data.get("tier2_enabled", False),
         tier2_model=scribe_data.get("tier2_model", "claude-haiku-4-5-20251001"),
         patterns_path=scribe_data.get("patterns_path", str(PATTERNS_DIR / "capture-triggers.md")),
         slack_signing_secret=scribe_data.get("slack_signing_secret", ""),

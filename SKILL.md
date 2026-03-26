@@ -163,6 +163,8 @@ Recommendations:
 - The user wants to store something that isn't part of the current conversation
 - Bulk-importing existing documentation
 
+**Mode**: Agent-delegated (primary) — the calling agent evaluates significance and extracts structured fields, passing them as `extracted` JSON to the `capture` MCP tool. The server stores the encrypted record without additional LLM calls. If `extracted` is omitted and API keys are configured, falls back to a legacy 3-tier server-side pipeline.
+
 **Behavior**:
 - If dormant: Prompt user to configure first
 - If active: Store context to organizational memory with timestamp and metadata
