@@ -545,12 +545,10 @@ class MCPServerApp:
             name="capture",
             description=(
                 "Capture a significant organizational decision into FHE-encrypted team memory. "
-                "Runs a 3-tier pipeline: Tier 1 embedding similarity detection (zero LLM tokens), "
-                "Tier 2 lightweight LLM policy filter (~200 tokens), "
-                "Tier 3 full LLM structured extraction (~500 tokens). "
-                "Only text that passes all tiers is encrypted and stored on enVector Cloud. "
-                "Agent-delegated mode: pass `extracted` JSON to skip Tier 2/3 entirely — "
-                "the calling agent performs evaluation and extraction, MCP server only stores."
+                "PRIMARY: Agent-delegated mode — pass `extracted` JSON with the agent's own "
+                "evaluation and extraction. The MCP server stores it without additional LLM calls. "
+                "LEGACY: If `extracted` is omitted and API keys are configured, falls back to "
+                "a 3-tier server-side pipeline (pattern detection → LLM filter → LLM extraction)."
             ),
             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
         )
@@ -588,7 +586,9 @@ class MCPServerApp:
                 envector_client = self._scribe["envector_client"]
                 embedding_service = self._scribe["embedding_service"]
 
-                # ===== Agent-delegated mode: extracted JSON provided =====
+                # ===== PRIMARY: Agent-delegated mode =====
+                # The calling agent (Claude/Gemini/Codex) has already evaluated and
+                # extracted the decision.  We just validate, build records, and store.
                 if extracted is not None:
                     data = parse_llm_json(extracted)
                     if not data:
@@ -714,7 +714,9 @@ class MCPServerApp:
                     _append_capture_log(first.id, first.title, first.domain.value, "agent-delegated")
                     return result
 
-                # ===== Legacy: Standard 3-tier pipeline (requires API keys) =====
+                # ===== FALLBACK: Legacy 3-tier pipeline (requires API keys) =====
+                # Retained for backward compatibility.  New integrations should use
+                # agent-delegated mode above.
                 raw_event = RawEvent(
                     text=text,
                     user=user or "unknown",
