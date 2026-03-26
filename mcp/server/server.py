@@ -714,36 +714,7 @@ class MCPServerApp:
                     _append_capture_log(first.id, first.title, first.domain.value, "agent-delegated")
                     return result
 
-                # ===== Standard mode: full 3-tier pipeline =====
-
-                # Tier 1: Embedding similarity detection (0 LLM tokens)
-                detection = detector.detect(text)
-                if not detection.is_significant:
-                    return {
-                        "ok": True,
-                        "captured": False,
-                        "reason": f"Not significant (confidence: {detection.confidence:.2f}, threshold: {detector.threshold})",
-                    }
-
-                # Tier 2: LLM policy filter (~200 tokens)
-                if tier2_filter and tier2_filter.is_available:
-                    filter_result = tier2_filter.evaluate(
-                        text,
-                        tier1_score=detection.confidence,
-                        tier1_pattern=detection.matched_pattern or "",
-                    )
-                    if not filter_result.should_capture:
-                        return {
-                            "ok": True,
-                            "captured": False,
-                            "reason": f"Tier 2 rejected: {filter_result.reason}",
-                        }
-                    # Update domain from Tier 2 if available
-                    if filter_result.domain and filter_result.domain != "general":
-                        from dataclasses import replace
-                        detection = replace(detection, domain=filter_result.domain)
-
-                # Tier 3: Structured extraction + record building (~500 tokens)
+                # ===== Legacy: Standard 3-tier pipeline (requires API keys) =====
                 raw_event = RawEvent(
                     text=text,
                     user=user or "unknown",
@@ -751,36 +722,15 @@ class MCPServerApp:
                     timestamp=str(datetime.now(timezone.utc).timestamp()),
                     source=source,
                 )
-                records = record_builder.build_phases(raw_event, detection)
-
-                # Store in enVector with FHE encryption
-                texts = [r.payload.text for r in records]
-                metadata = [r.model_dump(mode="json") for r in records]
-                insert_result = envector_client.insert_with_text(
-                    index_name=self._vault_index_name,
-                    texts=texts,
+                return await self._legacy_standard_capture(
+                    text=text,
+                    raw_event=raw_event,
+                    detector=detector,
+                    tier2_filter=tier2_filter,
+                    record_builder=record_builder,
+                    envector_client=envector_client,
                     embedding_service=embedding_service,
-                    metadata=metadata,
                 )
-
-                if not insert_result.get("ok"):
-                    return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
-
-                first = records[0]
-                result = {
-                    "ok": True,
-                    "captured": True,
-                    "record_id": first.id,
-                    "summary": first.title,
-                    "domain": first.domain.value,
-                    "certainty": first.why.certainty.value,
-                }
-                if len(records) > 1:
-                    result["record_count"] = len(records)
-                    result["group_id"] = first.group_id
-                    result["group_type"] = first.group_type or "phase_chain"
-                _append_capture_log(first.id, first.title, first.domain.value, "standard")
-                return result
 
             except VaultError as e:
                 logger.error(f"Capture failed (Vault): {e}", exc_info=True)
@@ -1007,6 +957,85 @@ class MCPServerApp:
             except Exception as e:
                 logger.error(f"Delete failed: {e}", exc_info=True)
                 return {"ok": False, "error": str(e)}
+
+    async def _legacy_standard_capture(
+        self,
+        text: str,
+        raw_event,
+        detector,
+        tier2_filter,
+        record_builder,
+        envector_client,
+        embedding_service,
+    ) -> Dict[str, Any]:
+        """Standard 3-tier capture pipeline (legacy).
+
+        Requires API keys for Tier 2 (LLM filter) and Tier 3 (LLM extraction).
+        Retained for backward compatibility with deployments that have
+        ANTHROPIC_API_KEY configured and prefer server-side evaluation.
+
+        Most deployments should use agent-delegated mode instead — pass
+        the ``extracted`` parameter to let the calling agent handle
+        evaluation and extraction.
+        """
+        # Tier 1: Embedding similarity detection (0 LLM tokens)
+        detection = detector.detect(text)
+        if not detection.is_significant:
+            return {
+                "ok": True,
+                "captured": False,
+                "reason": f"Not significant (confidence: {detection.confidence:.2f}, threshold: {detector.threshold})",
+            }
+
+        # Tier 2: LLM policy filter (~200 tokens)
+        if tier2_filter and tier2_filter.is_available:
+            filter_result = tier2_filter.evaluate(
+                text,
+                tier1_score=detection.confidence,
+                tier1_pattern=detection.matched_pattern or "",
+            )
+            if not filter_result.should_capture:
+                return {
+                    "ok": True,
+                    "captured": False,
+                    "reason": f"Tier 2 rejected: {filter_result.reason}",
+                }
+            # Update domain from Tier 2 if available
+            if filter_result.domain and filter_result.domain != "general":
+                from dataclasses import replace
+                detection = replace(detection, domain=filter_result.domain)
+
+        # Tier 3: Structured extraction + record building (~500 tokens)
+        records = record_builder.build_phases(raw_event, detection)
+
+        # Store in enVector with FHE encryption
+        texts = [r.payload.text for r in records]
+        metadata = [r.model_dump(mode="json") for r in records]
+        insert_result = envector_client.insert_with_text(
+            index_name=self._vault_index_name,
+            texts=texts,
+            embedding_service=embedding_service,
+            metadata=metadata,
+        )
+
+        if not insert_result.get("ok"):
+            return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+
+        first = records[0]
+        result = {
+            "ok": True,
+            "captured": True,
+            "record_id": first.id,
+            "summary": first.title,
+            "domain": first.domain.value,
+            "certainty": first.why.certainty.value,
+        }
+        if len(records) > 1:
+            result["record_count"] = len(records)
+            result["group_id"] = first.group_id
+            result["group_type"] = first.group_type or "phase_chain"
+        _append_capture_log(first.id, first.title, first.domain.value, "standard")
+        return result
 
     def _init_pipelines(self) -> Dict[str, Any]:
         """
