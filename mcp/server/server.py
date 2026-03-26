@@ -67,6 +67,26 @@ from server.errors import (
 )
 
 
+def _detection_from_agent_data(
+    domain: str = "general",
+    confidence: float = 0.0,
+    category: str = "",
+) -> "DetectionResult":
+    """Build DetectionResult from agent-provided metadata.
+
+    In agent-delegated mode the calling agent has already evaluated
+    significance.  We construct a minimal DetectionResult so that
+    RecordBuilder can consume it without running the pattern detector.
+    """
+    from agents.scribe.detector import DetectionResult
+    return DetectionResult(
+        is_significant=True,  # Agent said capture=true
+        confidence=confidence,
+        domain=domain,
+        category=category or domain,
+    )
+
+
 # ---------- Capture Log ---------- #
 CAPTURE_LOG_PATH = os.path.join(os.path.expanduser("~"), ".rune", "capture_log.jsonl")
 
@@ -586,18 +606,20 @@ class MCPServerApp:
                     # Domain from agent's tier2 evaluation
                     agent_domain = tier2.get("domain", "general")
 
-                    # Tier 1: still run for detection metadata
-                    detection = detector.detect(text)
-                    if agent_domain and agent_domain != "general":
-                        from dataclasses import replace as dc_replace
-                        detection = dc_replace(detection, domain=agent_domain)
-
-                    # Build ExtractionResult from agent JSON
+                    # Parse confidence from agent JSON
                     agent_confidence = data.get("confidence")
                     if isinstance(agent_confidence, (int, float)):
                         agent_confidence = max(0.0, min(1.0, float(agent_confidence)))
                     else:
                         agent_confidence = None
+
+                    # Build detection from agent data — no detector needed
+                    detection = _detection_from_agent_data(
+                        domain=agent_domain,
+                        confidence=float(agent_confidence) if agent_confidence is not None else 0.0,
+                    )
+
+                    # Build ExtractionResult from agent JSON
 
                     phases_data = data.get("phases")
                     if phases_data and len(phases_data) > 1:

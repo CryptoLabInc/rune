@@ -397,6 +397,44 @@ class TestExtractedJSONParsing:
         assert error is None
         assert result.confidence is None
 
+    def test_agent_delegated_without_detector(self):
+        """Agent-delegated mode should not require DecisionDetector."""
+        from agents.scribe.detector import DetectionResult
+        from agents.scribe.record_builder import RecordBuilder, RawEvent
+        from agents.scribe.llm_extractor import ExtractionResult, ExtractedFields
+
+        builder = RecordBuilder()
+        raw = RawEvent(
+            text="We decided to use PostgreSQL over MongoDB",
+            user="dev", channel="eng", timestamp="1711000000", source="claude_agent",
+        )
+        # Construct DetectionResult from agent data, no PatternCache needed
+        detection = DetectionResult(
+            is_significant=True,
+            confidence=0.85,
+            domain="architecture",
+            category="architecture",
+        )
+        pre_extraction = ExtractionResult(
+            group_title="Use PostgreSQL over MongoDB",
+            status_hint="accepted",
+            tags=["database", "architecture"],
+            confidence=0.85,
+            single=ExtractedFields(
+                title="Use PostgreSQL over MongoDB",
+                rationale="Better ACID compliance for financial data",
+                problem="Need reliable database for transactions",
+                alternatives=["MongoDB"],
+                trade_offs=["Less flexible schema"],
+                status_hint="accepted",
+                tags=["database"],
+            ),
+        )
+        records = builder.build_phases(raw, detection, pre_extraction=pre_extraction)
+        assert len(records) == 1
+        assert records[0].domain.value == "architecture"
+        assert records[0].quality.scribe_confidence == 0.85
+
     def test_single_phase_treated_as_single(self):
         """Test that phases with 1 element is treated as single record"""
         extracted = json.dumps({
