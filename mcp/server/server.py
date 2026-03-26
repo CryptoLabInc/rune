@@ -580,11 +580,11 @@ class MCPServerApp:
                 )
                 from agents.common.llm_utils import parse_llm_json
 
-                detector = self._scribe["detector"]
-                tier2_filter = self._scribe.get("tier2_filter")
                 record_builder = self._scribe["record_builder"]
                 envector_client = self._scribe["envector_client"]
                 embedding_service = self._scribe["embedding_service"]
+                detector = self._scribe.get("detector")
+                tier2_filter = self._scribe.get("tier2_filter")
 
                 # ===== PRIMARY: Agent-delegated mode =====
                 # The calling agent (Claude/Gemini/Codex) has already evaluated and
@@ -717,6 +717,14 @@ class MCPServerApp:
                 # ===== FALLBACK: Legacy 3-tier pipeline (requires API keys) =====
                 # Retained for backward compatibility.  New integrations should use
                 # agent-delegated mode above.
+                if detector is None:
+                    return {
+                        "ok": True,
+                        "captured": False,
+                        "reason": "No `extracted` JSON provided and legacy pipeline not available "
+                                  "(no API keys configured). Use agent-delegated mode by passing "
+                                  "the `extracted` parameter.",
+                    }
                 raw_event = RawEvent(
                     text=text,
                     user=user or "unknown",
@@ -1178,29 +1186,8 @@ class MCPServerApp:
                     return rune_config.scribe.tier2_model
                 return llm_cfg.anthropic_model
 
-            # Scribe pipeline
-            pattern_cache = PatternCache(embedding_svc)
-            patterns = load_all_language_patterns()
-            loaded = pattern_cache.load_patterns(patterns)
-            logger.info(f"Scribe Tier 1: loaded {loaded} patterns into cache")
-
-            detector = DecisionDetector(
-                pattern_cache,
-                threshold=rune_config.scribe.similarity_threshold,
-                high_confidence_threshold=rune_config.scribe.auto_capture_threshold,
-            )
-
+            # Phase 1: Core infrastructure (always needed)
             has_llm_key = bool(_provider_key(llm_provider))
-
-            tier2_filter = None
-            if rune_config.scribe.tier2_enabled and _provider_key(tier2_provider):
-                tier2_filter = Tier2Filter(
-                    llm_provider=tier2_provider,
-                    anthropic_api_key=anthropic_key,
-                    openai_api_key=openai_key,
-                    google_api_key=google_key,
-                    model=_provider_model(tier2_provider, "tier2"),
-                )
 
             llm_extractor = None
             if has_llm_key:
@@ -1213,12 +1200,37 @@ class MCPServerApp:
                 )
             record_builder = RecordBuilder(llm_extractor=llm_extractor)
 
+            # Phase 2: Legacy pipeline components (only if API keys present)
+            detector = None
+            tier2_filter = None
+            if has_llm_key:
+                pattern_cache = PatternCache(embedding_svc)
+                patterns = load_all_language_patterns()
+                loaded = pattern_cache.load_patterns(patterns)
+                logger.info(f"Scribe Tier 1: loaded {loaded} patterns into cache")
+
+                detector = DecisionDetector(
+                    pattern_cache,
+                    threshold=rune_config.scribe.similarity_threshold,
+                    high_confidence_threshold=rune_config.scribe.auto_capture_threshold,
+                )
+
+                if rune_config.scribe.tier2_enabled and _provider_key(tier2_provider):
+                    tier2_filter = Tier2Filter(
+                        llm_provider=tier2_provider,
+                        anthropic_api_key=anthropic_key,
+                        openai_api_key=openai_key,
+                        google_api_key=google_key,
+                        model=_provider_model(tier2_provider, "tier2"),
+                    )
+
             self._scribe = {
-                "detector": detector,
-                "tier2_filter": tier2_filter,
                 "record_builder": record_builder,
                 "envector_client": envector_client,
                 "embedding_service": embedding_svc,
+                # Legacy pipeline components (None if no API keys)
+                "detector": detector,
+                "tier2_filter": tier2_filter,
             }
             result["scribe"] = True
             if has_llm_key:
