@@ -44,23 +44,49 @@ unset VIRTUAL_ENV 2>/dev/null || true
 # Claude Code's plugin system may copy the repo directory (including .venv) into
 # its cache. A copied venv carries pip shebangs pointing at the *original* path,
 # so packages silently install into the wrong site-packages. Detect this by
-# checking whether pip's shebang references our VENV_DIR; if not, nuke and rebuild.
+# checking whether pip's shebang references our VENV_DIR
 NEED_VENV=0
 if [ ! -f "$VENV_DIR/bin/python3" ]; then
     NEED_VENV=1
 else
-    # Check pip or pip3 — some systems only create one of the two
-    _PIP_BIN=""
-    [ -f "$VENV_DIR/bin/pip" ]  && _PIP_BIN="$VENV_DIR/bin/pip"
-    [ -z "$_PIP_BIN" ] && [ -f "$VENV_DIR/bin/pip3" ] && _PIP_BIN="$VENV_DIR/bin/pip3"
-    if [ -n "$_PIP_BIN" ]; then
-        PIP_SHEBANG="$(head -1 "$_PIP_BIN")"
-        case "$PIP_SHEBANG" in
-            *"$VENV_DIR"*) ;;  # shebang points here — OK
-            *) echo "[rune] Contaminated venv detected ($_PIP_BIN shebang: $PIP_SHEBANG) — rebuilding..." >&2
-               rm -rf "$VENV_DIR"
-               NEED_VENV=1 ;;
-        esac
+    # Detect Python version mismatch between the venv interpreter and installed packages
+    _VENV_PYVER="$("$VENV_DIR/bin/python3" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)"
+    _SITE_PYVER=""
+    for dir in "$VENV_DIR"/lib/python*/site-packages; do
+        [ -d "$dir" ] || continue
+        # Get version which site-packages installed
+        if [ "$(ls -A "$dir" 2>/dev/null | head -1)" ]; then
+            _SITE_PYVER="$(basename "$(dirname "$dir")")"  # e.g. python3.10
+            _SITE_PYVER="${_SITE_PYVER#python}"            # e.g. 3.10
+            break
+        fi
+    done
+    if [ -n "$_VENV_PYVER" ] && [ -n "$_SITE_PYVER" ] && [ "$_VENV_PYVER" != "$_SITE_PYVER" ]; then
+        echo "[rune] Python version mismatch (venv runs $_VENV_PYVER, packages built for $_SITE_PYVER) - rebuilding..." >&2
+        rm -rf "$VENV_DIR"
+        NEED_VENV=1
+    else
+        # Check pip shebangs for path consistency (same Python version, different path)
+        _PIP_BIN=""
+        [ -f "$VENV_DIR/bin/pip" ]  && _PIP_BIN="$VENV_DIR/bin/pip"
+        [ -z "$_PIP_BIN" ] && [ -f "$VENV_DIR/bin/pip3" ] && _PIP_BIN="$VENV_DIR/bin/pip3"
+        if [ -n "$_PIP_BIN" ]; then
+            PIP_SHEBANG="$(head -1 "$_PIP_BIN")"
+            case "$PIP_SHEBANG" in
+                *"$VENV_DIR"*) ;;  # shebang points
+                *) echo "[rune] Contaminated venv detected ($_PIP_BIN shebang: $PIP_SHEBANG) - rewriting shebangs..." >&2
+                   _VENV_PYTHON="$VENV_DIR/bin/python3"
+                   for _script in "$VENV_DIR/bin/"*; do
+                       [ -f "$_script" ] || continue
+                       file -b --mime "$_script" 2>/dev/null | grep -q "^text/" || continue
+                       _first="$(head -1 "$_script")"
+                       case "$_first" in
+                           \#\!*python*) sed -i "1s|^#\!.*|#\!$_VENV_PYTHON|" "$_script" ;;
+                       esac
+                   done
+                   echo "[rune] Shebangs fixed." >&2 ;;
+            esac
+        fi
     fi
 fi
 if [ "$NEED_VENV" -eq 1 ]; then
