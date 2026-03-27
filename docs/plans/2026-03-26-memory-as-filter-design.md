@@ -805,6 +805,167 @@ Records with version "2.0" fall back to `payload.text`.
 
 ---
 
+## Part 10: Landscape Analysis — Where Rune Stands
+
+A comprehensive survey of existing agent memory systems, academic papers, and major-lab approaches (as of March 2026) reveals that Rune's Memory-as-Filter + Reusable Insight combination occupies an uncharted position in the design space.
+
+### The Existing Landscape
+
+#### A. Systems That Extract Before Storing (Not Raw Logs)
+
+**Mem0** (mem0.ai) — The closest competitor on novelty checking.
+- Extracts short factual statements from conversations ("user prefers PostgreSQL")
+- Before storing, retrieves top-10 similar existing memories → LLM decides ADD / UPDATE / DELETE / NOOP
+- Difference from Rune: Uses an LLM call as the gate (cost + latency per write). Stores extracted facts, not insight paragraphs.
+- Source: arXiv 2504.19413
+
+**PlugMem** (Microsoft Research, March 2026) — Closest on "raw → reusable knowledge."
+- Explicitly transforms raw interactions into propositional knowledge (facts) and prescriptive knowledge (reusable skills)
+- Retrieved knowledge further "distilled into concise, task-ready guidance"
+- Difference from Rune: Graph-based structured storage, not natural-language gist paragraphs. No novelty filter.
+- Source: microsoft.com/research/blog/from-raw-interaction-to-reusable-knowledge
+
+**SimpleMem** (January 2026) — Closest on compression.
+- "Semantic Structured Compression" achieves 11x compression, 26.4% F1 improvement
+- "Online Semantic Synthesis" consolidates related fragments during writing
+- Difference from Rune: Multi-index approach (semantic + lexical + symbolic). Consolidation is structural, not gist-based.
+- Source: arXiv 2601.02553
+
+**Amazon Bedrock AgentCore** (2025) — Closest on combined insight + dedup.
+- Extracts "insights" from conversations (semantic strategy)
+- Retrieves similar existing memories → LLM consolidation prompt merges or skips
+- Difference from Rune: LLM consolidation step (not pure similarity threshold). No team-level sharing. No FHE.
+- Source: AWS AgentCore docs
+
+**ReMe — Remember Me, Refine Me** (December 2025)
+- "Multi-faceted distillation" including success pattern recognition and comparative insight generation
+- Utility-based refinement prunes outdated memories autonomously
+- Difference from Rune: Individual agent focus, not team memory. No novelty gate at write time.
+- Source: arXiv 2512.10696
+
+#### B. The "Gist as Embedding Target" Question
+
+The central question: does any system embed a dense natural-language insight paragraph as its primary search target?
+
+**Structured Distillation for Personalized Agent Memory** (March 2026)
+- Compresses each exchange to a 38-token `exchange_core` — a "commit message" of what was accomplished
+- **Key validation: achieves 96% of verbatim MRR** with the distilled summary as search index
+- This paper empirically validates Rune's core hypothesis that a distilled gist can replace verbose text as the embedding target without meaningful retrieval quality loss.
+- Source: arXiv 2603.13017
+
+**HEMA — Hippocampus-Inspired Extended Memory Architecture** (2025)
+- Maintains a continuously-updated one-sentence "Compact Memory" alongside episodic vector memory
+- Explicitly models hippocampal dual-memory (gist vs. verbatim)
+- Closest to `reusable_insight` in neuroscience motivation, but designed for conversational continuity, not organizational knowledge preservation.
+- Source: arXiv 2504.16754
+
+#### C. Neuroscience-Inspired Approaches
+
+**HippoRAG** (NeurIPS 2024)
+- Directly inspired by hippocampal indexing theory
+- LLM as neocortex (encoding), KG as hippocampus (indexing), PageRank simulates pattern completion
+- A retrieval framework, not a memory management system. No write-time filtering.
+- Source: arXiv 2405.14831
+
+**"AI Meets Brain" Survey** (December 2025)
+- Discusses gist memory mechanisms: "paginates text and generates compressed gists as a global index"
+- Notes that long-term memory provides "priors and learned representational structures that shape how new information is encoded" — an indirect acknowledgment of the memory-as-filter principle
+- Source: arXiv 2512.23343
+
+**Stanford Generative Agents** (2023)
+- Periodic "reflections" synthesize memories into higher-level conclusions — an early form of gist extraction
+- No novelty filtering. Reflection triggered by importance score accumulation.
+- Source: ACM 3586183.3606763
+
+#### D. Major Lab Approaches
+
+**Anthropic (Claude Code Memory / Auto-Dream)**
+- Claude writes natural-language notes to MEMORY.md files
+- "Auto-Dream" (testing, early 2026) periodically reviews and rewrites memory — explicit sleep consolidation analogy
+- Local-only, single-developer, no team sharing, no vector search
+
+**OpenAI (ChatGPT Memory)**
+- Extracts short factual statements. ~1,200-1,400 words capacity
+- Consumer-focused, not agent-focused. No team sharing. No insight distillation.
+
+**Google (Always-On Memory Agent, 2025-2026)**
+- ConsolidateAgent generates insights from patterns, compresses related information
+- Explicitly ditches vector databases for LLM-driven memory management
+- Source: GoogleCloudPlatform/generative-ai (GitHub)
+
+### Comparative Matrix
+
+```
+                    Gist as    Novelty    LLM-free   Self-       Team      FHE
+                    embed      check      gate       improving   sharing   encrypted
+                    target     before     (no LLM    selectivity
+                               store      per write)
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Rune (proposed)   YES        YES        YES        YES         YES       YES
+  Mem0              -          YES        -          -           -         -
+  AgentCore         ~          YES        -          -           -         -
+  HEMA              ~          -          -          -           -         -
+  PlugMem           -          -          -          -           -         -
+  Structured Dist.  ~          -          -          -           -         -
+  SimpleMem         -          ~          -          -           -         -
+  ReMe              -          ~          -          -           -         -
+  Letta             -          -          -          -           -         -
+  Zep/Graphiti      -          -          -          -           -         -
+  Cognee            -          ~          -          -           -         -
+```
+
+### What's Genuinely Novel
+
+Three elements are individually precedented. Their combination is not.
+
+**1. Gist-as-embedding-target**
+
+Multiple systems extract and compress (Mem0 extracts facts, PlugMem extracts knowledge units, SimpleMem compresses). But no system treats a dense natural-language insight paragraph — optimized for both semantic recall and novelty comparison — as the primary embedded entity. The Structured Distillation paper (2026) empirically validates this approach achieves 96% of verbatim MRR.
+
+**2. Memory-as-Filter with pure similarity gate**
+
+Mem0 and AgentCore both search existing memory before storing. But both use an LLM call as the decision mechanism — expensive, non-deterministic, and opaque. Rune's pure similarity threshold is:
+- Deterministic (reproducible behavior)
+- Zero marginal cost per write (no LLM call)
+- Quantitatively tunable (threshold is a number, not a prompt)
+- Self-documenting (novelty_score explains every accept/reject)
+
+**3. Self-improving selectivity (emergent property)**
+
+No existing system explicitly articulates this: as the memory store grows, the novelty filter becomes more selective — because a richer memory means more entries to match against, meaning fewer new items exceed the novelty threshold. This mirrors hippocampal pattern separation, where the hippocampus becomes more discriminating as cortical representations mature.
+
+```
+  The emergent property, visualized:
+
+  Memories:  10          100         1,000       10,000
+             │           │           │           │
+  Filter:    Wide open   Narrowing   Selective   Highly selective
+             │           │           │           │
+  Analogy:   Infant      Child       Adult       Expert
+             (absorbs    (learning   (filters    (only genuinely
+              everything) rapidly)    noise)      new insights)
+```
+
+This is not a parameter that's tuned. It's a mathematical consequence of the architecture: more stored vectors → higher probability of any new vector having a close neighbor → higher rejection rate for redundant content. The memory *grows into* selectivity.
+
+### Academic Validation Points
+
+For a potential publication, the following existing work provides foundation:
+
+| Claim | Supporting Reference |
+|---|---|
+| Distilled summary can replace verbose text for retrieval | Structured Distillation (arXiv 2603.13017): 96% of verbatim MRR |
+| Gist vs verbatim is a real cognitive distinction | "AI Meets Brain" survey (arXiv 2512.23343) |
+| Hippocampal novelty detection is a valid computational model | HippoRAG (NeurIPS 2024, arXiv 2405.14831) |
+| Pre-storage similarity check improves memory quality | Mem0 (arXiv 2504.19413), AgentCore (AWS docs) |
+| Memory consolidation is a recognized agent memory operation | "Memory in the Age of AI Agents" survey (arXiv 2512.13564) |
+| Multi-agent shared memory with access control is an open problem | Collaborative Memory (ICML 2025, arXiv 2505.18279) |
+| FHE enables computation on encrypted data | enVector / CryptoLab's core research domain |
+
+The unique contribution would be: **demonstrating that a similarity-based novelty gate on gist embeddings, without LLM inference at write time, achieves comparable or superior memory quality to LLM-gated approaches — while adding the emergent self-improving selectivity property and FHE privacy guarantees.**
+
+---
+
 ## Summary
 
 ```
