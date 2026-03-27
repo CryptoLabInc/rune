@@ -10,7 +10,10 @@ description: Continuously monitors team communications and artifacts to identify
 
 Before doing anything, verify Rune is active:
 1. Check `~/.rune/config.json` exists and `"state": "active"`
-2. If not active, reply "Rune is not active. Use /rune:configure to set up." and stop.
+2. If not active:
+   - Check if `dormant_reason` field exists in config - if so, include it: "Rune is dormant: <reason>. Run `/rune:activate` to retry or `/rune:status` for details"
+   - If no `dormant_reason`: "Rune is not active. Use `/rune:configure` to set up"
+   - Stop.
 
 ## Your Job
 
