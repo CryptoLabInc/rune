@@ -140,11 +140,13 @@ def render_payload_text(record: "DecisionRecord") -> str:
     Render a DecisionRecord to payload.text (Markdown).
 
     This text is used for:
-    1. Embedding generation (for enVector search)
-    2. Memory reproduction (human-readable context)
+    1. Memory reproduction (human-readable full context)
+    2. Display in recall results
 
-    The text should be self-contained - reading just this text
-    should give full understanding of the decision.
+    NOTE (schema 2.1+): Embedding generation now uses
+    record.reusable_insight instead of this text.
+    For schema 2.0 records without reusable_insight,
+    this text is still used as embedding fallback.
     """
     # Extract values with safe defaults
     domain = record.domain.value if hasattr(record.domain, 'value') else str(record.domain)
