@@ -97,6 +97,16 @@ def _embedding_text_for_record(record) -> str:
     return embedding_text_for_record(record)
 
 
+def _classify_novelty(
+    max_similarity: float,
+    threshold_novel: float = 0.3,
+    threshold_redundant: float = 0.7,
+) -> dict:
+    """Classify capture novelty based on similarity to existing memory."""
+    from agents.common.schemas.embedding import classify_novelty
+    return classify_novelty(max_similarity, threshold_novel, threshold_redundant)
+
+
 # ---------- Capture Log ---------- #
 CAPTURE_LOG_PATH = os.path.join(os.path.expanduser("~"), ".rune", "capture_log.jsonl")
 
