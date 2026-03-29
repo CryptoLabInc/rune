@@ -169,7 +169,7 @@ class DecisionRecord(BaseModel):
 
     Core principle: payload.text must be able to fully reproduce the memory.
     """
-    schema_version: str = Field(default="2.0")
+    schema_version: str = Field(default="2.1")
     id: str = Field(..., description="Unique ID: dec_YYYY-MM-DD_domain_slug")
     type: Literal["decision_record"] = "decision_record"
 
@@ -197,6 +197,16 @@ class DecisionRecord(BaseModel):
     # Content preservation
     original_text: Optional[str] = Field(default=None, description="Original conversation text before extraction")
     group_summary: Optional[str] = Field(default=None, description="1-line topic summary shared across all phases for semantic anchoring")
+
+    # PRIMARY embedding target (schema 2.1+)
+    reusable_insight: str = Field(
+        default="",
+        description=(
+            "Dense natural-language paragraph capturing the core knowledge. "
+            "PRIMARY text embedded in enVector for semantic search. "
+            "128-512 tokens, no markdown, self-contained, causality-preserving."
+        ),
+    )
 
     quality: Quality = Field(default_factory=Quality)
     payload: Payload = Field(default_factory=Payload)
