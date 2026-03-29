@@ -457,3 +457,33 @@ class TestExtractedJSONParsing:
         assert not result.is_multi_phase
         assert result.single is not None
         assert result.single.title == "Only Phase"
+
+
+def test_reusable_insight_used_for_embedding_text():
+    """When reusable_insight is set, it should be the embedding target."""
+    from agents.common.schemas import DecisionRecord, DecisionDetail, Payload
+    from agents.common.schemas.embedding import embedding_text_for_record
+
+    record = DecisionRecord(
+        id="dec_test",
+        title="Test",
+        decision=DecisionDetail(what="Test"),
+        reusable_insight="Dense gist paragraph for embedding.",
+        payload=Payload(text="# Full markdown\n## Decision\nVerbose content"),
+    )
+    assert embedding_text_for_record(record) == "Dense gist paragraph for embedding."
+
+
+def test_embedding_text_fallback_to_payload():
+    """When reusable_insight is empty, fall back to payload.text."""
+    from agents.common.schemas import DecisionRecord, DecisionDetail, Payload
+    from agents.common.schemas.embedding import embedding_text_for_record
+
+    record = DecisionRecord(
+        id="dec_test",
+        title="Test",
+        decision=DecisionDetail(what="Test"),
+        reusable_insight="",
+        payload=Payload(text="Fallback payload text"),
+    )
+    assert embedding_text_for_record(record) == "Fallback payload text"

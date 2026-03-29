@@ -87,6 +87,16 @@ def _detection_from_agent_data(
     )
 
 
+def _embedding_text_for_record(record) -> str:
+    """Select the text to embed in enVector.
+
+    Schema 2.1+: use reusable_insight (dense NL gist).
+    Schema 2.0 fallback: use payload.text (verbose markdown).
+    """
+    from agents.common.schemas.embedding import embedding_text_for_record
+    return embedding_text_for_record(record)
+
+
 # ---------- Capture Log ---------- #
 CAPTURE_LOG_PATH = os.path.join(os.path.expanduser("~"), ".rune", "capture_log.jsonl")
 
@@ -684,8 +694,8 @@ class MCPServerApp:
                     )
                     records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
 
-                    # Store in enVector with FHE encryption
-                    texts = [r.payload.text for r in records]
+                    # Embed reusable_insight (schema 2.1) or payload.text (fallback)
+                    texts = [_embedding_text_for_record(r) for r in records]
                     metadata = [r.model_dump(mode="json") for r in records]
                     insert_result = envector_client.insert_with_text(
                         index_name=self._vault_index_name,
