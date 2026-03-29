@@ -966,6 +966,54 @@ The unique contribution would be: **demonstrating that a similarity-based novelt
 
 ---
 
+## Part 11: Embedding Space Experiment — What Vectors Can and Cannot Do
+
+An empirical test using `BAAI/bge-small-en-v1.5` (the same model Rune uses) to measure whether embedding vectors can distinguish structural properties of text (opinion vs decision) or only topical similarity.
+
+### Setup
+
+- **Anti-patterns** (noise): "We should probably look into this", "Let's discuss in the next meeting", etc.
+- **Good captures** (decisions): "We chose PostgreSQL over MongoDB because ACID...", "Auth middleware rewritten due to legal compliance...", etc.
+- **Edge cases** (opinions that look like decisions): "I really think we should use PostgreSQL", "MongoDB seems like overkill"
+
+### Results
+
+```
+  SUMMARY STATISTICS
+  ──────────────────────────────────────────────────
+  Anti vs Good:  mean=0.505  min=0.437  max=0.593
+  Anti vs Anti:  mean=0.660  min=0.552  max=0.845
+  Good vs Good:  mean=0.584  min=0.504  max=0.689
+
+  EDGE CASES
+  ──────────────────────────────────────────────────
+  "I think we should use PostgreSQL"
+    vs anti-patterns:  max=0.609
+    vs good captures:  max=0.811  ← topic dominates!
+```
+
+### Key Finding
+
+**Embedding models encode TOPIC, not STRUCTURE.** "I think we should use PostgreSQL" (opinion) and "We decided to adopt PostgreSQL because ACID" (decision) have 0.811 similarity — nearly identical in embedding space. The model sees "PostgreSQL" in both, not the difference between hedging and committing.
+
+### Implications for Architecture
+
+1. **Anti-pattern seeding won't work**: Noise and signal don't separate cleanly enough in embedding space (only 0.15 mean gap) to create a reliable threshold-based filter.
+2. **Novelty/dedup works well**: Same-topic decisions cluster tightly (0.8+), so the Memory-as-Filter approach is effective for detecting when a similar insight already exists.
+3. **Quality judgment must stay with the agent**: Only the agent (with full conversation context) can distinguish opinions from decisions. This is not a limitation — it mirrors the brain, where the hippocampus detects topic familiarity and the prefrontal cortex judges significance.
+4. **No Vault-side firmware needed**: The "innate logic" lives at the prompt level (SKILL.md / scribe.md), not as pre-seeded vectors. This simplifies the architecture — Vault requires no changes.
+
+### Final Role Assignment
+
+```
+  SKILL.md (innate logic)   — What is worth remembering? (a priori rules)
+  Agent (prefrontal cortex) — Is this a decision? Generate gist. (judgment)
+  enVector (hippocampus)    — Already know this? (novelty/dedup + recall)
+  Vault                     — No changes needed.
+```
+
+---
+
 ## Summary
 
 ```
