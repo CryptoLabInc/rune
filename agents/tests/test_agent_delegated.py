@@ -487,3 +487,30 @@ def test_embedding_text_fallback_to_payload():
         payload=Payload(text="Fallback payload text"),
     )
     assert embedding_text_for_record(record) == "Fallback payload text"
+
+
+def test_reusable_insight_flows_to_record():
+    """reusable_insight from agent JSON should appear on the built record."""
+    from agents.scribe.detector import DetectionResult
+    from agents.scribe.record_builder import RecordBuilder, RawEvent
+    from agents.scribe.llm_extractor import ExtractionResult, ExtractedFields
+
+    insight = "We chose PostgreSQL over MongoDB for ACID compliance in financial data."
+    builder = RecordBuilder()
+    raw = RawEvent(text="...", user="dev", channel="eng", timestamp="1711000000", source="claude_agent")
+    detection = DetectionResult(is_significant=True, confidence=0.85, domain="architecture")
+    pre_extraction = ExtractionResult(
+        group_title="PostgreSQL selection",
+        status_hint="accepted",
+        tags=["database"],
+        confidence=0.85,
+        group_summary=insight,
+        single=ExtractedFields(
+            title="PostgreSQL selection",
+            rationale="ACID compliance",
+            status_hint="accepted",
+            tags=["database"],
+        ),
+    )
+    records = builder.build_phases(raw, detection, pre_extraction=pre_extraction)
+    assert records[0].reusable_insight == insight

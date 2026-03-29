@@ -281,6 +281,11 @@ class RecordBuilder:
             )
             record.ensure_evidence_certainty_consistency()
             record.payload.text = render_payload_text(record)
+
+            # Populate reusable_insight from pre_extraction group_summary
+            if pre_extraction and getattr(pre_extraction, 'group_summary', None):
+                record.reusable_insight = pre_extraction.group_summary
+
             return [record]
 
         # ===== Multi-record: phase_chain or bundle =====
@@ -354,6 +359,11 @@ class RecordBuilder:
             )
             record.ensure_evidence_certainty_consistency()
             record.payload.text = render_payload_text(record)
+
+            # Populate reusable_insight from pre_extraction group_summary
+            if getattr(extraction, 'group_summary', None):
+                record.reusable_insight = extraction.group_summary
+
             records.append(record)
 
         return records
