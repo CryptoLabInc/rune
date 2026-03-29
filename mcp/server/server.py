@@ -704,6 +704,43 @@ class MCPServerApp:
                     )
                     records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
 
+                    # ===== Novelty check (Memory-as-Filter) =====
+                    # Compare reusable_insight against existing memory
+                    embedding_text = _embedding_text_for_record(records[0])
+                    novelty_info = {"score": 1.0, "class": "novel", "related": []}
+
+                    try:
+                        search_result = envector_client.search_with_text(
+                            index_name=self._vault_index_name,
+                            query_text=embedding_text,
+                            embedding_service=embedding_service,
+                            topk=3,
+                        )
+                        parsed = envector_client.parse_search_results(search_result)
+                        if parsed:
+                            max_sim = max(r.get("score", 0.0) for r in parsed)
+                            novelty_info = _classify_novelty(max_sim)
+                            novelty_info["related"] = [
+                                {
+                                    "id": r.get("metadata", {}).get("id", ""),
+                                    "title": r.get("metadata", {}).get("title", ""),
+                                    "similarity": round(r.get("score", 0.0), 3),
+                                }
+                                for r in parsed[:3]
+                            ]
+
+                            # REDUNDANT -> skip capture
+                            if novelty_info["class"] == "redundant":
+                                return {
+                                    "ok": True,
+                                    "captured": False,
+                                    "reason": "Redundant — similar insight already stored",
+                                    "novelty": novelty_info,
+                                }
+                    except Exception as e:
+                        # Novelty check failure is non-fatal — proceed with capture
+                        logger.warning("Novelty check failed: %s", e)
+
                     # Embed reusable_insight (schema 2.1) or payload.text (fallback)
                     texts = [_embedding_text_for_record(r) for r in records]
                     metadata = [r.model_dump(mode="json") for r in records]
@@ -726,6 +763,7 @@ class MCPServerApp:
                         "domain": first.domain.value,
                         "certainty": first.why.certainty.value,
                         "mode": "agent-delegated",
+                        "novelty": novelty_info,
                     }
                     if len(records) > 1:
                         result["record_count"] = len(records)
