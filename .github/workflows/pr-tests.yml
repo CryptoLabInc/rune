@@ -10,34 +10,28 @@ permissions:
 
 jobs:
   detect-changed-tests:
-    name: Detect changed test files
+    name: Detect changed test functions
     runs-on: ubuntu-latest
     outputs:
-      test_files: ${{ steps.detect.outputs.test_files }}
+      test_ids: ${{ steps.detect.outputs.test_ids }}
       has_tests: ${{ steps.detect.outputs.has_tests }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect changed test files
+      - name: Detect changed test node IDs
         id: detect
         run: |
           BASE=${{ github.event.pull_request.base.sha }}
           HEAD=${{ github.event.pull_request.head.sha }}
-
           CHANGED=$(git diff --name-only "$BASE" "$HEAD" | grep -E '(^|/)tests/test_[^/]+\.py$' || true)
-
-          echo "Changed test files:"
-          echo "$CHANGED"
 
           if [ -z "$CHANGED" ]; then
             echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "test_files=" >> "$GITHUB_OUTPUT"
+            echo "test_ids=" >> "$GITHUB_OUTPUT"
           else
-            FILES=$(echo "$CHANGED" | tr '\n' ' ' | sed 's/ $//')
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-            echo "test_files=$FILES" >> "$GITHUB_OUTPUT"
+            python scripts/ci_changed_tests.py "$BASE" "$HEAD" $CHANGED
           fi
 
   run-tests:
@@ -66,7 +60,7 @@ jobs:
       - name: Run changed tests
         id: pytest
         run: |
-          python -m pytest ${{ needs.detect-changed-tests.outputs.test_files }} \
+          python -m pytest ${{ needs.detect-changed-tests.outputs.test_ids }} \
             -v --tb=long \
             2>&1 | tee pytest_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
@@ -87,11 +81,10 @@ jobs:
             const passed = exitCode === '0';
             const status = passed ? '✅ All tests passed' : '❌ Some tests failed';
 
-            const testFiles = `${{ needs.detect-changed-tests.outputs.test_files }}`
+            const testIds = `${{ needs.detect-changed-tests.outputs.test_ids }}`
               .trim().split(' ').filter(Boolean)
-              .map(f => `- \`${f}\``).join('\n');
+              .map(id => '- `' + id + '`').join('\n');
 
-            // Trim output to avoid hitting comment size limits
             const MAX = 10000;
             const output = rawOutput.length > MAX
               ? '...(truncated)\n' + rawOutput.slice(-MAX)
@@ -102,8 +95,8 @@ jobs:
               marker,
               '## ' + status,
               '',
-              '**Test files run:**',
-              testFiles,
+              '**Tests run:**',
+              testIds,
               '',
               '<details>',
               '<summary>Full test output</summary>',
@@ -149,4 +142,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Skip notice
-        run: echo "No test files were added or modified in this PR — skipping test run."
+        run: echo "No test functions were added or modified in this PR — skipping test run."
