@@ -33,10 +33,20 @@ fi
 print_check "Configuration file found"
 
 # Extract Vault URL from config (basic check, assumes JSON is valid)
-RUNEVAULT_ENDPOINT=$(grep -o '"endpoint"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.rune/config.json" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+# Check 'vault.endpoint', not 'envector.endpoint'
+RUNEVAULT_ENDPOINT=$(python3 -c "
+import json, sys
+try:
+    with open('$HOME/.rune/config.json') as f:
+        c = json.load(f)
+    print(c.get('vault', {}).get('endpoint', ''))
+except Exception:
+    sys.exit(1)
+" 2>/dev/null)
 
 if [ -z "$RUNEVAULT_ENDPOINT" ]; then
-    print_fail "Vault URL not found in configuration"
+    print_fail "Vault endpoint not found in configuration (vault.endpoint is empty or missing)"
+    echo "  Run: /rune:configure"
     exit 1
 fi
 
@@ -45,10 +55,10 @@ print_check "Vault URL: $RUNEVAULT_ENDPOINT"
 # Check if Vault is accessible
 echo "Checking Vault connectivity..."
 if [[ "$RUNEVAULT_ENDPOINT" =~ ^tcp:// ]]; then
-    # TCP endpoint — extract host and port, use /dev/tcp
+    # TCP endpoint — extract host and port, use python3
     VAULT_HOST=$(echo "$RUNEVAULT_ENDPOINT" | sed 's|tcp://||' | cut -d: -f1)
     VAULT_PORT=$(echo "$RUNEVAULT_ENDPOINT" | sed 's|tcp://||' | cut -d: -f2)
-    if timeout 5 bash -c "echo > /dev/tcp/$VAULT_HOST/$VAULT_PORT" 2>/dev/null; then
+    if python3 -c "import socket,sys; s=socket.socket(); s.settimeout(5); s.connect(('$VAULT_HOST', int('$VAULT_PORT'))); s.close()" 2>/dev/null; then
         print_check "Vault is accessible (TCP $VAULT_HOST:$VAULT_PORT)"
     else
         print_fail "Vault is not accessible (TCP $VAULT_HOST:$VAULT_PORT)"
