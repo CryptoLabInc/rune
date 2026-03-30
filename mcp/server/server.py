@@ -461,8 +461,8 @@ class MCPServerApp:
         @self.mcp.tool(
             name="diagnostics",
             description=(
-                "System health check tool for the Rune."
-                "Reporst status of Vault connection, encryption keys, "
+                "System health check tool for the Rune. "
+                "Reports status of Vault connection, encryption keys, "
                 "pipeline initialization, and enVector cloud reachability."
             ),
             annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
