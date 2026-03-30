@@ -6,6 +6,66 @@ import pytest
 from unittest.mock import patch
 
 
+class TestCredentialEnvVarOverrideRemoved:
+    """Regression tests for the reconfigure-then-reload_pipelines bug.
+
+    Previously, env vars (RUNEVAULT_TOKEN, ENVECTOR_API_KEY, etc.) silently
+    overrode config.json values on every load_config() call. This meant that
+    after /rune:configure wrote a new token to disk, reload_pipelines still
+    used the old token from the process environment — producing a misleading
+    "Vault key fetch failed" error instead of picking up the new credential.
+    """
+
+    @pytest.mark.parametrize("env_var,field_path,env_val,config_val", [
+        ("RUNEVAULT_TOKEN",   ("vault", "token"),             "old-token",    "new-token"),
+        ("RUNEVAULT_ENDPOINT",("vault", "endpoint"),          "tcp://old:50051", "tcp://new:50051"),
+        ("VAULT_CA_CERT",     ("vault", "ca_cert"),           "/old/ca.pem",  "/new/ca.pem"),
+        ("VAULT_TLS_DISABLE", ("vault", "tls_disable"),       "true",         False),
+        ("ENVECTOR_API_KEY",  ("envector", "api_key"),        "old-key",      "new-key"),
+        ("ENVECTOR_ENDPOINT", ("envector", "endpoint"),       "old.envector.io", "new.envector.io"),
+    ])
+    def test_credential_not_overridden_by_env(self, tmp_path, env_var, field_path, env_val, config_val):
+        """configure-managed credentials must come from config.json, not env vars."""
+        from agents.common.config import load_config
+
+        section, field = field_path
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({section: {field: config_val}}))
+
+        with patch("agents.common.config.CONFIG_PATH", config_file), \
+             patch.dict(os.environ, {env_var: env_val}, clear=False):
+            cfg = load_config()
+
+        actual = getattr(getattr(cfg, section), field)
+        assert actual == config_val
+
+    @pytest.mark.parametrize("section,field,old_val,new_val", [
+        ("vault",    "token",    "old-token",       "new-token"),
+        ("vault",    "endpoint", "tcp://old:50051", "tcp://new:50051"),
+        ("vault",    "ca_cert",  "/old/ca.pem",     "/new/ca.pem"),
+        ("vault",    "tls_disable", False,           True),
+        ("envector", "api_key",  "old-key",         "new-key"),
+        ("envector", "endpoint", "old.envector.io", "new.envector.io"),
+    ])
+    def test_reload_picks_up_reconfigured_credential(self, tmp_path, section, field, old_val, new_val):
+        """Simulates reload_pipelines after reconfigure: second load_config() must reflect updated credential."""
+        from agents.common.config import load_config
+
+        config_file = tmp_path / "config.json"
+
+        config_file.write_text(json.dumps({section: {field: old_val}, "state": "active"}))
+        with patch("agents.common.config.CONFIG_PATH", config_file):
+            cfg1 = load_config()
+            assert getattr(getattr(cfg1, section), field) == old_val
+
+            # Simulate /rune:configure writing new credential
+            config_file.write_text(json.dumps({section: {field: new_val}, "state": "active"}))
+
+            # reload_pipelines calls load_config() again
+            cfg2 = load_config()
+            assert getattr(getattr(cfg2, section), field) == new_val
+
+
 class TestLLMConfig:
     def test_llm_config_defaults(self):
         from agents.common.config import LLMConfig
