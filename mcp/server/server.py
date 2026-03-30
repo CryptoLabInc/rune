@@ -658,7 +658,7 @@ class MCPServerApp:
                         pre_extraction = ExtractionResult(
                             group_title=str(data.get("group_title", ""))[:60],
                             group_type=str(data.get("group_type", "phase_chain")),
-                            group_summary=str(data.get("reusable_insight", "") or data.get("group_title", ""))[:200],
+                            group_summary=str(data.get("reusable_insight", "") or data.get("group_title", "")),
                             status_hint=str(data.get("status_hint", "")).lower(),
                             tags=[str(t).lower() for t in data.get("tags", []) if t],
                             confidence=agent_confidence,
@@ -689,6 +689,7 @@ class MCPServerApp:
                             )
                         pre_extraction = ExtractionResult(
                             group_title=single.title,
+                            group_summary=str(data.get("reusable_insight", "")) or "",
                             status_hint=single.status_hint,
                             tags=single.tags,
                             confidence=agent_confidence,

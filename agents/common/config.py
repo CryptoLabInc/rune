@@ -43,7 +43,7 @@ class EnVectorConfig:
 class EmbeddingConfig:
     """Embedding model configuration"""
     mode: str = "femb"  # fastembed (on-device)
-    model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    model: str = "BAAI/bge-base-en-v1.5"
 
 
 @dataclass
@@ -119,7 +119,7 @@ def _parse_embedding_config(data: dict) -> EmbeddingConfig:
     embedding_data = data.get("embedding", {})
     return EmbeddingConfig(
         mode=embedding_data.get("mode", "femb"),
-        model=embedding_data.get("model", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
+        model=embedding_data.get("model", "BAAI/bge-base-en-v1.5"),
     )
 
 

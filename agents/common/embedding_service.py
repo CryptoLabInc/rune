@@ -30,9 +30,11 @@ class EmbeddingService:
     _instance: Optional["EmbeddingService"] = None
     _adapter = None
 
-    def __new__(cls, mode: str = "femb", model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"):
+    def __new__(cls, mode: str = "femb", model: str = "BAAI/bge-base-en-v1.5"):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._init_adapter(mode, model)
+        elif cls._instance._model != model or cls._instance._mode != mode:
             cls._instance._init_adapter(mode, model)
         return cls._instance
 
@@ -156,7 +158,7 @@ _service_instance: Optional[EmbeddingService] = None
 
 def get_embedding_service(
     mode: str = "femb",
-    model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    model: str = "BAAI/bge-base-en-v1.5"
 ) -> EmbeddingService:
     """
     Get the singleton EmbeddingService instance.

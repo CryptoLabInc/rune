@@ -165,9 +165,10 @@ class Payload(BaseModel):
 
 class DecisionRecord(BaseModel):
     """
-    Decision Record Schema v2
+    Decision Record Schema v2.1
 
     Core principle: payload.text must be able to fully reproduce the memory.
+    Embedding target: reusable_insight (schema 2.1+), payload.text (fallback).
     """
     schema_version: str = Field(default="2.1")
     id: str = Field(..., description="Unique ID: dec_YYYY-MM-DD_domain_slug")

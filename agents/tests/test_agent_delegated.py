@@ -514,3 +514,57 @@ def test_reusable_insight_flows_to_record():
     )
     records = builder.build_phases(raw, detection, pre_extraction=pre_extraction)
     assert records[0].reusable_insight == insight
+
+
+def test_single_record_json_reusable_insight_wiring():
+    """reusable_insight from agent JSON must reach DecisionRecord in single-record path.
+
+    Regression test: the server.py single-record path was missing group_summary,
+    so reusable_insight was always empty for Format A captures.
+    """
+    import json
+    from agents.common.llm_utils import parse_llm_json
+    from agents.scribe.detector import DetectionResult
+    from agents.scribe.record_builder import RecordBuilder, RawEvent
+    from agents.scribe.llm_extractor import ExtractionResult, ExtractedFields
+
+    # Simulate agent JSON (Format A — single decision, no phases)
+    agent_json = {
+        "tier2": {"capture": True, "reason": "Architecture decision", "domain": "architecture"},
+        "title": "Adopt PostgreSQL",
+        "reusable_insight": "We chose PostgreSQL over MongoDB because ACID compliance is critical for financial transaction data. MongoDB was rejected due to eventual consistency risks.",
+        "rationale": "ACID compliance",
+        "problem": "Need reliable database",
+        "alternatives": ["MongoDB"],
+        "trade_offs": ["Less flexible schema"],
+        "status_hint": "accepted",
+        "tags": ["database"],
+        "confidence": 0.9,
+    }
+    data = agent_json
+
+    # Reproduce server.py single-record path (no phases or 0 phases)
+    single = ExtractedFields(
+        title=str(data.get("title", ""))[:60],
+        rationale=str(data.get("rationale", "")),
+        problem=str(data.get("problem", "")),
+        alternatives=[str(a) for a in data.get("alternatives", []) if a],
+        trade_offs=[str(t) for t in data.get("trade_offs", []) if t],
+        status_hint=str(data.get("status_hint", "")).lower(),
+        tags=[str(t).lower() for t in data.get("tags", []) if t],
+    )
+    pre_extraction = ExtractionResult(
+        group_title=single.title,
+        group_summary=str(data.get("reusable_insight", "")) or "",
+        status_hint=single.status_hint,
+        tags=single.tags,
+        confidence=0.9,
+        single=single,
+    )
+
+    builder = RecordBuilder()
+    raw = RawEvent(text="...", user="dev", channel="eng", timestamp="1711000000", source="claude_agent")
+    detection = DetectionResult(is_significant=True, confidence=0.9, domain="architecture")
+
+    records = builder.build_phases(raw, detection, pre_extraction=pre_extraction)
+    assert records[0].reusable_insight == agent_json["reusable_insight"]
