@@ -194,6 +194,10 @@ def load_config() -> RuneConfig:
     """
     Load configuration from file and environment variables.
 
+    Credentials managed by /rune:configure (vault, envector) are loaded
+    exclusively from ~/.rune/config.json. Other settings (embedding, scribe,
+    LLM keys) can be overridden via environment variables.
+
     Priority (highest to lowest):
     1. Environment variables
     2. Config file (~/.rune/config.json)
