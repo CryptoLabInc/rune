@@ -128,8 +128,8 @@ def _set_dormant_with_reason(reason: str):
             return
         with open(config_path) as f:
             data = json.load(f)
-        if data.get("state") == "dormant" and data.get("dormant_reason"):
-            return  # no overwrites
+        if data.get("state") == "dormant" and data.get("dormant_reason") == reason:
+            return  # already set to this reason — no change needed
         data["state"] = "dormant"
         data["dormant_reason"] = reason
         data["dormant_since"] = datetime.now(timezone.utc).isoformat()
@@ -1017,7 +1017,10 @@ class MCPServerApp:
             record_id: Annotated[str, Field(description="The record ID to soft-delete (e.g. dec_20260316_arch_abc)")],
         ) -> Dict[str, Any]:
             if self._retriever is None or self._scribe is None:
-                return {"ok": False, "error": "Pipelines not initialized. Is Rune active?"}
+                return make_error(PipelineNotReadyError(
+                    "Pipelines not initialized.",
+                    recovery_hint="Run /rune:activate to reinitialize pipelines, or restart Claude Code if the problem persists.",
+                ))
 
             try:
                 searcher = self._retriever["searcher"]
@@ -1026,7 +1029,10 @@ class MCPServerApp:
                 from agents.retriever.query_processor import ParsedQuery, TimeScope
                 target = await searcher.search_by_id(record_id)
                 if not target:
-                    return {"ok": False, "error": f"Record '{record_id}' not found in search results."}
+                    return make_error(InvalidInputError(
+                        f"Record '{record_id}' not found in search results. "
+                        "Use capture_history to find valid record IDs."
+                    ))
 
                 # Update status to reverted in metadata
                 metadata = target.metadata
@@ -1044,7 +1050,9 @@ class MCPServerApp:
                 )
 
                 if not insert_result.get("ok"):
-                    return {"ok": False, "error": f"Re-insert failed: {insert_result.get('error')}"}
+                    return make_error(EnvectorInsertError(
+                        f"Re-insert failed: {insert_result.get('error')}"
+                    ))
 
                 _append_capture_log(record_id, target.title, target.domain, "soft-delete", action="deleted")
                 return {
@@ -1055,9 +1063,33 @@ class MCPServerApp:
                     "method": "soft-delete (status=reverted)",
                 }
 
+            except VaultError as e:
+                logger.error(f"Delete failed (Vault): {e}", exc_info=True)
+                _set_dormant_with_reason("vault_unreachable")
+                return make_error(VaultConnectionError(
+                    str(e),
+                    recovery_hint=(
+                        "Vault error during delete. Check: "
+                        "(1) Is the Vault server running? "
+                        "(2) Is your token valid? "
+                        "Run /rune:status for diagnostics."
+                    ),
+                ))
+            except (ConnectionError, OSError) as e:
+                logger.error(f"Delete failed (network): {e}", exc_info=True)
+                _set_dormant_with_reason("envector_unreachable")
+                return make_error(EnvectorConnectionError(
+                    str(e),
+                    recovery_hint=(
+                        "Network error during delete. Check: "
+                        "(1) Is the enVector endpoint reachable? "
+                        "(2) Is your API key valid? "
+                        "Run /rune:status for diagnostics."
+                    ),
+                ))
             except Exception as e:
                 logger.error(f"Delete failed: {e}", exc_info=True)
-                return {"ok": False, "error": str(e)}
+                return make_error(e)
 
     def _init_pipelines(self) -> Dict[str, Any]:
         """
