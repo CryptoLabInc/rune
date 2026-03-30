@@ -218,19 +218,6 @@ def load_config() -> RuneConfig:
             print(f"[Config] Warning: Failed to load config file: {e}")
 
     # Environment variable overrides
-    if os.getenv("RUNEVAULT_ENDPOINT"):
-        config.vault.endpoint = os.getenv("RUNEVAULT_ENDPOINT")
-    if os.getenv("RUNEVAULT_TOKEN"):
-        config.vault.token = os.getenv("RUNEVAULT_TOKEN")
-    if os.getenv("VAULT_CA_CERT"):
-        config.vault.ca_cert = os.getenv("VAULT_CA_CERT")
-    if os.getenv("VAULT_TLS_DISABLE", "").lower() == "true":
-        config.vault.tls_disable = True
-
-    if os.getenv("ENVECTOR_ENDPOINT"):
-        config.envector.endpoint = os.getenv("ENVECTOR_ENDPOINT")
-    if os.getenv("ENVECTOR_API_KEY"):
-        config.envector.api_key = os.getenv("ENVECTOR_API_KEY")
     if os.getenv("EMBEDDING_MODE"):
         config.embedding.mode = os.getenv("EMBEDDING_MODE")
     if os.getenv("EMBEDDING_MODEL"):
