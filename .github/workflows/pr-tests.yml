@@ -70,15 +70,6 @@ jobs:
           ENVECTOR_API_KEY: ${{ secrets.ENVECTOR_API_KEY }}
         continue-on-error: true
 
-      - name: Detect collection-skipped tests
-        if: always()
-        run: |
-          python -m pytest agents/tests/ mcp/tests/ \
-            --collect-only -v --no-header \
-            2>&1 | grep -i "skip" | tee pytest_collect_skips.txt || true
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-
       - name: Post PR comment
         if: always()
         uses: actions/github-script@v7
@@ -86,9 +77,6 @@ jobs:
           script: |
             const fs = require('fs');
             const rawOutput = fs.readFileSync('pytest_output.txt', 'utf8');
-            const collectSkipsOutput = fs.existsSync('pytest_collect_skips.txt')
-              ? fs.readFileSync('pytest_collect_skips.txt', 'utf8')
-              : '';
             const exitCode = '${{ steps.pytest.outputs.exit_code }}';
             const passed = exitCode === '0';
             const status = passed ? '✅ All tests passed' : '❌ Some tests failed';
@@ -111,16 +99,22 @@ jobs:
               return null;
             }
 
-            // Parse collection-skipped test IDs from --collect-only -v output
-            // Looks for lines like: "SKIP [1] agents/tests/test_foo.py:5: reason"
-            // or "<SkippedItem 'test_name'>" patterns
-            function parseCollectionSkipNames(collectOutput) {
-              const skipped = [];
-              for (const line of collectOutput.split('\n')) {
-                const m = line.match(/^SKIP\s+\[\d+\]\s+(\S+):(\d+)(?::\s+(.*))?/);
-                if (m) skipped.push({ id: `${m[1]}:${m[2]}`, reason: m[3] || '(no reason given)' });
+            // Parse SKIPPED entries from pytest's "short test summary info" section
+            // Lines like: "SKIPPED [1] agents/tests/test_foo.py:175: reason text"
+            // This section exists in the main pytest run output and covers both
+            // runtime skips (with reason) and collection-level skips.
+            function parseShortSummarySkips(output) {
+              const entries = [];
+              let inSummary = false;
+              for (const line of output.split('\n')) {
+                if (/=+\s+short test summary info\s+=+/.test(line)) { inSummary = true; continue; }
+                if (inSummary) {
+                  if (/^={3,}/.test(line)) break;
+                  const m = line.match(/^SKIPPED\s+\[\d+\]\s+(.+?):(\d+):\s+(.+)/);
+                  if (m) entries.push({ file: m[1], line: parseInt(m[2]), reason: m[3].trim() });
+                }
               }
-              return skipped;
+              return entries;
             }
 
             // Parse individual test results from verbose pytest output
@@ -165,9 +159,28 @@ jobs:
             if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
 
             const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️' };
+
+            // Parse skip reasons from the short test summary section of the main output
+            const shortSummarySkips = parseShortSummarySkips(rawOutput);
+
+            // Build file → [reasons] for matching skipped test IDs to their reasons
+            const fileSkipReasons = {};
+            for (const s of shortSummarySkips) {
+              if (!fileSkipReasons[s.file]) fileSkipReasons[s.file] = [];
+              fileSkipReasons[s.file].push(s.reason);
+            }
+
+            // reasonById: first from inline verbose output (reason in parens), then short summary
             const reasonById = {};
             for (const t of testResults) {
               if (t.reason) reasonById[t.id] = t.reason;
+            }
+            for (const t of testResults) {
+              if ((t.result === 'SKIPPED' || t.result === 'XFAIL') && !reasonById[t.id]) {
+                const file = t.id.split('::')[0];
+                const reasons = fileSkipReasons[file];
+                if (reasons && reasons.length > 0) reasonById[t.id] = reasons[0];
+              }
             }
 
             // Full Test Results: summary counts + failed + skipped tests
@@ -177,8 +190,9 @@ jobs:
             const totalFail = failedTests.length;
             const totalSkip = skippedTests.length;
 
-            // Detect collection-skipped tests by comparing bot counts vs pytest summary
-            const collectionSkipNames = parseCollectionSkipNames(collectSkipsOutput);
+            // Detect collection-skipped: short summary entries whose file has no collected tests
+            const collectedFiles = new Set(testResults.map(t => t.id.split('::')[0]));
+            const collectionSkips = shortSummarySkips.filter(s => !collectedFiles.has(s.file));
             const summarySkipped = pytestSummary ? pytestSummary.skipped : 0;
             const collectionSkipCount = Math.max(0, summarySkipped - totalSkip);
 
@@ -198,8 +212,8 @@ jobs:
                 ...failedTests.map(t => `| ${resultIcon[t.result]} ${t.result} | \`${t.id}\` |`),
                 ...skippedTests.map(t => `| ${resultIcon[t.result]} ${t.result} | \`${t.id}\` |`),
                 ...(collectionSkipCount > 0
-                  ? (collectionSkipNames.length > 0
-                      ? collectionSkipNames.map(s => `| ⏭️ SKIPPED (collection) | \`${s.id}\` |`)
+                  ? (collectionSkips.length > 0
+                      ? collectionSkips.map(s => `| ⏭️ SKIPPED (collection) | \`${s.file}:${s.line}\` |`)
                       : [`| ⏭️ SKIPPED (collection) | ${collectionSkipCount} test(s) skipped during collection — names unavailable |`])
                   : []),
               ];
@@ -244,15 +258,15 @@ jobs:
                     '',
                   ]),
                   ...(collectionSkipCount > 0
-                    ? (collectionSkipNames.length > 0
-                        ? collectionSkipNames.flatMap(s => [
-                            `#### \`${s.id}\` _(collection-skipped)_`,
+                    ? (collectionSkips.length > 0
+                        ? collectionSkips.flatMap(s => [
+                            `#### \`${s.file}:${s.line}\` _(collection-skipped)_`,
                             s.reason,
                             '',
                           ])
                         : [
                             `#### _(${collectionSkipCount} collection-skipped test(s))_`,
-                            'These tests were skipped during pytest collection. Re-run with `--collect-only -v` to inspect.',
+                            'These tests were skipped during pytest collection. Check the short test summary in the CI logs for details.',
                             '',
                           ])
                     : []),
