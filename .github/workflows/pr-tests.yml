@@ -81,6 +81,81 @@ jobs:
             const passed = exitCode === '0';
             const status = passed ? '✅ All tests passed' : '❌ Some tests failed';
 
+            // Parse individual test results from verbose pytest output
+            // e.g. "tests/foo.py::TestClass::test_bar PASSED     [ 50%]"
+            const testResults = [];
+            for (const line of rawOutput.split('\n')) {
+              const m = line.match(/^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)/);
+              if (m) testResults.push({ id: m[1], result: m[2] });
+            }
+
+            // Parse failure detail blocks from the FAILURES section
+            const failures = {};
+            const lines = rawOutput.split('\n');
+            let inFailures = false;
+            let currentKey = null;
+            let currentLines = [];
+            for (const line of lines) {
+              if (/^={3,}\s+FAILURES\s+={3,}/.test(line)) {
+                inFailures = true;
+                continue;
+              }
+              if (inFailures) {
+                const header = line.match(/^_{3,}\s+(.+?)\s+_{3,}$/);
+                if (header) {
+                  if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
+                  currentKey = header[1];
+                  currentLines = [];
+                  continue;
+                }
+                if (/^={3,}/.test(line)) {
+                  if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
+                  inFailures = false; currentKey = null; currentLines = [];
+                  continue;
+                }
+                if (currentKey) currentLines.push(line);
+              }
+            }
+            if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
+
+            // Build results table
+            const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️' };
+            const tableRows = testResults.map(t =>
+              `| \`${t.id}\` | ${resultIcon[t.result] || ''} ${t.result} |`
+            );
+            const tableSection = testResults.length > 0
+              ? [
+                  '### Test Results',
+                  '',
+                  '| Test | Result |',
+                  '|------|--------|',
+                  ...tableRows,
+                  '',
+                ].join('\n')
+              : '';
+
+            // Build failure details section
+            const failedTests = testResults.filter(t => t.result === 'FAILED' || t.result === 'ERROR');
+            const failureSection = failedTests.length > 0
+              ? [
+                  '---',
+                  '### ❌ Failure Details',
+                  '',
+                  ...failedTests.flatMap(t => {
+                    // failure key is everything after the file path (e.g. "TestClass::test_bar")
+                    const key = t.id.split('::').slice(1).join('::');
+                    const detail = failures[key] || failures[t.id] || '(no detail found)';
+                    return [
+                      `#### \`${t.id}\``,
+                      '```',
+                      detail,
+                      '```',
+                      '',
+                    ];
+                  }),
+                ].join('\n')
+              : '';
+
             const hasChanged = '${{ needs.detect-changed-tests.outputs.has_changed }}' === 'true';
             const changedIds = '${{ needs.detect-changed-tests.outputs.test_ids }}'
               .trim().split(' ').filter(Boolean);
@@ -88,7 +163,7 @@ jobs:
             const changedSection = hasChanged
               ? [
                   '---',
-                  '### 🆕 Changed / New Tests in This PR',
+                  '### Changed / New Tests in This PR',
                   '',
                   changedIds.map(id => '- `' + id + '`').join('\n'),
                   '',
@@ -108,6 +183,8 @@ jobs:
             ];
 
             if (changedSection) parts.push(changedSection);
+            if (tableSection) parts.push(tableSection);
+            if (failureSection) parts.push(failureSection);
 
             parts.push(
               '---',
