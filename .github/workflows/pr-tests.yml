@@ -70,6 +70,15 @@ jobs:
           ENVECTOR_API_KEY: ${{ secrets.ENVECTOR_API_KEY }}
         continue-on-error: true
 
+      - name: Detect collection-skipped tests
+        if: always()
+        run: |
+          python -m pytest agents/tests/ mcp/tests/ \
+            --collect-only -v --no-header \
+            2>&1 | grep -i "skip" | tee pytest_collect_skips.txt || true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
       - name: Post PR comment
         if: always()
         uses: actions/github-script@v7
@@ -77,9 +86,42 @@ jobs:
           script: |
             const fs = require('fs');
             const rawOutput = fs.readFileSync('pytest_output.txt', 'utf8');
+            const collectSkipsOutput = fs.existsSync('pytest_collect_skips.txt')
+              ? fs.readFileSync('pytest_collect_skips.txt', 'utf8')
+              : '';
             const exitCode = '${{ steps.pytest.outputs.exit_code }}';
             const passed = exitCode === '0';
             const status = passed ? '✅ All tests passed' : '❌ Some tests failed';
+
+            // Parse pytest final summary line for authoritative counts
+            // e.g. "4 failed, 261 passed, 2 skipped in 4.06s"
+            function parsePytestSummary(output) {
+              const lines = output.split('\n');
+              for (let i = lines.length - 1; i >= 0; i--) {
+                const line = lines[i];
+                if (/^=+\s+/.test(line) && /\d+\s+(passed|failed)/.test(line)) {
+                  const counts = { passed: 0, failed: 0, error: 0, skipped: 0, xfailed: 0, xpassed: 0 };
+                  for (const [, n, k] of line.matchAll(/(\d+)\s+(passed|failed|error|skipped|xfailed|xpassed)/g)) {
+                    counts[k] = parseInt(n);
+                  }
+                  counts.total = Object.values(counts).reduce((a, b) => a + b, 0);
+                  return counts;
+                }
+              }
+              return null;
+            }
+
+            // Parse collection-skipped test IDs from --collect-only -v output
+            // Looks for lines like: "SKIP [1] agents/tests/test_foo.py:5: reason"
+            // or "<SkippedItem 'test_name'>" patterns
+            function parseCollectionSkipNames(collectOutput) {
+              const skipped = [];
+              for (const line of collectOutput.split('\n')) {
+                const m = line.match(/^SKIP\s+\[\d+\]\s+(\S+):(\d+)(?::\s+(.*))?/);
+                if (m) skipped.push({ id: `${m[1]}:${m[2]}`, reason: m[3] || '(no reason given)' });
+              }
+              return skipped;
+            }
 
             // Parse individual test results from verbose pytest output
             // e.g. "tests/foo.py::TestClass::test_bar PASSED     [ 50%]"
@@ -89,6 +131,8 @@ jobs:
               const m = line.match(/^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)(?:\s+\(([^)]*)\))?/);
               if (m) testResults.push({ id: m[1], result: m[2], reason: m[3] || null });
             }
+
+            const pytestSummary = parsePytestSummary(rawOutput);
 
             // Parse failure detail blocks from the FAILURES section
             // pytest headers use "ClassName.test_method" (dot) not "::"
@@ -133,13 +177,31 @@ jobs:
             const totalFail = failedTests.length;
             const totalSkip = skippedTests.length;
 
+            // Detect collection-skipped tests by comparing bot counts vs pytest summary
+            const collectionSkipNames = parseCollectionSkipNames(collectSkipsOutput);
+            const summarySkipped = pytestSummary ? pytestSummary.skipped : 0;
+            const collectionSkipCount = Math.max(0, summarySkipped - totalSkip);
+
+            // Build corrected totals using pytest summary as authoritative source
+            const authoritativeTotal = pytestSummary ? pytestSummary.total : testResults.length;
+            const correctedTotal = testResults.length + collectionSkipCount;
+
+            // Warn if corrected total still doesn't match summary after reconciliation
+            const stillMismatched = pytestSummary && correctedTotal !== authoritativeTotal;
+
             let tableSection = '';
             if (testResults.length > 0) {
-              const skipPart = totalSkip > 0 ? `, ${totalSkip} skipped` : '';
-              const summary = `**${totalPass} passed, ${totalFail} failed${skipPart}** (${testResults.length} total)`;
+              const correctedSkip = totalSkip + collectionSkipCount;
+              const skipPart = correctedSkip > 0 ? `, ${correctedSkip} skipped` : '';
+              const summary = `**${totalPass} passed, ${totalFail} failed${skipPart}** (${authoritativeTotal} total)`;
               const notableRows = [
                 ...failedTests.map(t => `| ${resultIcon[t.result]} ${t.result} | \`${t.id}\` |`),
                 ...skippedTests.map(t => `| ${resultIcon[t.result]} ${t.result} | \`${t.id}\` |`),
+                ...(collectionSkipCount > 0
+                  ? (collectionSkipNames.length > 0
+                      ? collectionSkipNames.map(s => `| ⏭️ SKIPPED (collection) | \`${s.id}\` |`)
+                      : [`| ⏭️ SKIPPED (collection) | ${collectionSkipCount} test(s) skipped during collection — names unavailable |`])
+                  : []),
               ];
               const notableTable = notableRows.length > 0
                 ? ['', '| Result | Test |', '|--------|------|', ...notableRows, ''].join('\n')
@@ -169,8 +231,9 @@ jobs:
                 ].join('\n')
               : '';
 
-            // Skipped details
-            const skippedSection = skippedTests.length > 0
+            // Skipped details (execution-time + collection-time)
+            const hasAnySkipped = skippedTests.length > 0 || collectionSkipCount > 0;
+            const skippedSection = hasAnySkipped
               ? [
                   '---',
                   '### ⏭️ Skipped Details',
@@ -180,6 +243,31 @@ jobs:
                     reasonById[t.id] || '(no reason given)',
                     '',
                   ]),
+                  ...(collectionSkipCount > 0
+                    ? (collectionSkipNames.length > 0
+                        ? collectionSkipNames.flatMap(s => [
+                            `#### \`${s.id}\` _(collection-skipped)_`,
+                            s.reason,
+                            '',
+                          ])
+                        : [
+                            `#### _(${collectionSkipCount} collection-skipped test(s))_`,
+                            'These tests were skipped during pytest collection. Re-run with `--collect-only -v` to inspect.',
+                            '',
+                          ])
+                    : []),
+                ].join('\n')
+              : '';
+
+            // Warning if test counts still don't reconcile after correction
+            const warningSection = stillMismatched
+              ? [
+                  '---',
+                  '### ⚠️ Count Mismatch Warning',
+                  '',
+                  `pytest reported **${authoritativeTotal} total** tests in its summary, but the reconciled count is **${correctedTotal}**.`,
+                  'This may indicate XFAIL/XPASS results or other collection anomalies not reflected above.',
+                  '',
                 ].join('\n')
               : '';
 
@@ -193,6 +281,7 @@ jobs:
             if (tableSection) bodyParts.push(tableSection);
             if (failureSection) bodyParts.push(failureSection);
             if (skippedSection) bodyParts.push(skippedSection);
+            if (warningSection) bodyParts.push(warningSection);
 
             const body = bodyParts.join('\n');
 
