@@ -278,10 +278,10 @@ jobs:
               '',
             ];
 
+            if (warningSection) bodyParts.push(warningSection);
             if (tableSection) bodyParts.push(tableSection);
             if (failureSection) bodyParts.push(failureSection);
             if (skippedSection) bodyParts.push(skippedSection);
-            if (warningSection) bodyParts.push(warningSection);
 
             const body = bodyParts.join('\n');
 
