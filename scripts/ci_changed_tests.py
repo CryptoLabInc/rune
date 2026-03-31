@@ -3,7 +3,7 @@
 Find pytest node IDs for test functions/classes added or modified between two commits.
 
 Usage: python ci_changed_tests.py <base_sha> <head_sha> <test_file1> [...]
-Writes 'has_tests' and 'test_ids' to $GITHUB_OUTPUT.
+Writes 'has_changed' and 'test_ids' to $GITHUB_OUTPUT.
 """
 
 import ast
@@ -87,7 +87,7 @@ def main() -> None:
         print("No changed tests found.")
         if github_output:
             with open(github_output, "a") as f:
-                f.write("has_tests=false\ntest_ids=\n")
+                f.write("has_changed=false\ntest_ids=\n")
         return
 
     print("Changed test node IDs:")
@@ -96,7 +96,7 @@ def main() -> None:
 
     if github_output:
         with open(github_output, "a") as f:
-            f.write("has_tests=true\n")
+            f.write("has_changed=true\n")
             f.write(f"test_ids={' '.join(all_ids)}\n")
 
 

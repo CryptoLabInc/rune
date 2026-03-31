@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_ids: ${{ steps.detect.outputs.test_ids }}
-      has_tests: ${{ steps.detect.outputs.has_tests }}
+      has_changed: ${{ steps.detect.outputs.has_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,16 +28,15 @@ jobs:
           CHANGED=$(git diff --name-only "$BASE" "$HEAD" | grep -E '(^|/)tests/test_[^/]+\.py$' || true)
 
           if [ -z "$CHANGED" ]; then
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "has_changed=false" >> "$GITHUB_OUTPUT"
             echo "test_ids=" >> "$GITHUB_OUTPUT"
           else
             python scripts/ci_changed_tests.py "$BASE" "$HEAD" $CHANGED
           fi
 
   run-tests:
-    name: Run changed tests
+    name: Run all tests
     needs: detect-changed-tests
-    if: needs.detect-changed-tests.outputs.has_tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,10 +56,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run changed tests
+      - name: Run all tests
         id: pytest
         run: |
-          python -m pytest ${{ needs.detect-changed-tests.outputs.test_ids }} \
+          python -m pytest agents/tests/ mcp/tests/ \
             -v --tb=long \
             2>&1 | tee pytest_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
@@ -81,9 +80,19 @@ jobs:
             const passed = exitCode === '0';
             const status = passed ? '✅ All tests passed' : '❌ Some tests failed';
 
-            const testIds = `${{ needs.detect-changed-tests.outputs.test_ids }}`
-              .trim().split(' ').filter(Boolean)
-              .map(id => '- `' + id + '`').join('\n');
+            const hasChanged = '${{ needs.detect-changed-tests.outputs.has_changed }}' === 'true';
+            const changedIds = '${{ needs.detect-changed-tests.outputs.test_ids }}'
+              .trim().split(' ').filter(Boolean);
+
+            const changedSection = hasChanged
+              ? [
+                  '---',
+                  '### 🆕 Changed / New Tests in This PR',
+                  '',
+                  changedIds.map(id => '- `' + id + '`').join('\n'),
+                  '',
+                ].join('\n')
+              : '';
 
             const MAX = 10000;
             const output = rawOutput.length > MAX
@@ -91,13 +100,16 @@ jobs:
               : rawOutput;
 
             const marker = '<!-- pr-tests-bot -->';
-            const body = [
+            const parts = [
               marker,
               '## ' + status,
               '',
-              '**Tests run:**',
-              testIds,
-              '',
+            ];
+
+            if (changedSection) parts.push(changedSection);
+
+            parts.push(
+              '---',
               '<details>',
               '<summary>Full test output</summary>',
               '',
@@ -105,7 +117,9 @@ jobs:
               output,
               '```',
               '</details>',
-            ].join('\n');
+            );
+
+            const body = parts.join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -134,12 +148,3 @@ jobs:
       - name: Fail if tests failed
         if: steps.pytest.outputs.exit_code != '0'
         run: exit 1
-
-  no-tests-changed:
-    name: No test files changed
-    needs: detect-changed-tests
-    if: needs.detect-changed-tests.outputs.has_tests == 'false'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Skip notice
-        run: echo "No test functions were added or modified in this PR — skipping test run."
