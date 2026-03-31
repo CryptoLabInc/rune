@@ -202,22 +202,32 @@ Even if the cloud is compromised, your organizational knowledge remains mathemat
 
 ### Install
 
+#### Claude Code in terminal
 ```bash
-# Claude Code
-claude plugin marketplace add https://github.com/CryptoLabInc/rune.git
-claude plugin install rune
+$ claude plugin marketplace add https://github.com/CryptoLabInc/rune.git
+$ claude plugin install rune
+```
 
-# Codex CLI
-$skill-installer install https://github.com/CryptoLabInc/rune.git
+#### In a Claude Code session
+```
+> /plugin marketplace add https://github.com/CryptoLabInc/rune.git
+> /plugin install rune
+```
 
-# Gemini CLI
-gemini extensions install https://github.com/CryptoLabInc/rune
+#### In a Codex CLI session
+```
+> $skill-installer install https://github.com/CryptoLabInc/rune.git
+```
+
+#### Gemini CLI in terminal
+```bash
+$ gemini extensions install https://github.com/CryptoLabInc/rune
 ```
 
 ### Configure
 
 ```
-/rune:configure
+> /rune:configure
 ```
 
 You'll need credentials from your team admin:
