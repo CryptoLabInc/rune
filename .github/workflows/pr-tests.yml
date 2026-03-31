@@ -71,6 +71,7 @@ jobs:
         continue-on-error: true
 
       - name: Post PR comment
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
@@ -146,5 +147,5 @@ jobs:
             }
 
       - name: Fail if tests failed
-        if: steps.pytest.outputs.exit_code != '0'
+        if: always() && steps.pytest.outputs.exit_code != '0'
         run: exit 1
