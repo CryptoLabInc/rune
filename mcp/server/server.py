@@ -1081,7 +1081,7 @@ class MCPServerApp:
         records = record_builder.build_phases(raw_event, detection)
 
         # Store in enVector with FHE encryption
-        texts = [r.payload.text for r in records]
+        texts = [_embedding_text_for_record(r) for r in records]
         metadata = [r.model_dump(mode="json") for r in records]
         insert_result = envector_client.insert_with_text(
             index_name=self._vault_index_name,
