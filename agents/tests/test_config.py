@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import patch
 
 
-class TestCredentialEnvVarOverrideRemoved:
+class TestCredentialOverrideConfig:
     """Regression tests for the reconfigure-then-reload_pipelines bug.
 
     Previously, env vars (RUNEVAULT_TOKEN, ENVECTOR_API_KEY, etc.) silently
