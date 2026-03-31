@@ -535,6 +535,17 @@ class MCPServerApp:
             }
             report["pipelines"] = pipelines_info
 
+            # Embedding model
+            embedding_info: Dict[str, Any] = {
+                "model": None,
+                "mode": None,
+            }
+            if self._scribe and self._scribe.get("embedding_service"):
+                svc = self._scribe["embedding_service"]
+                embedding_info["model"] = getattr(svc, "_model", "unknown")
+                embedding_info["mode"] = getattr(svc, "_mode", "unknown")
+            report["embedding"] = embedding_info
+
             # enVector Cloud
             envector_info: Dict[str, Any] = {
                 "reachable": False,
