@@ -111,17 +111,24 @@ def _classify_novelty(
 CAPTURE_LOG_PATH = os.path.join(os.path.expanduser("~"), ".rune", "capture_log.jsonl")
 
 
-def _append_capture_log(record_id: str, title: str, domain: str, mode: str, action: str = "captured"):
+def _append_capture_log(
+    record_id: str, title: str, domain: str, mode: str,
+    action: str = "captured", novelty_class: str = "", novelty_score: float = 0.0,
+):
     """Append a capture event to the local JSONL log (atomic, secure permissions)."""
     try:
-        entry = json.dumps({
+        entry_dict = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "action": action,
             "id": record_id,
             "title": title,
             "domain": domain,
             "mode": mode,
-        }, ensure_ascii=False)
+        }
+        if novelty_class:
+            entry_dict["novelty_class"] = novelty_class
+            entry_dict["novelty_score"] = novelty_score
+        entry = json.dumps(entry_dict, ensure_ascii=False)
         fd = os.open(CAPTURE_LOG_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a") as f:
             f.write(entry + "\n")
@@ -781,7 +788,11 @@ class MCPServerApp:
                         result["record_count"] = len(records)
                         result["group_id"] = first.group_id
                         result["group_type"] = first.group_type or "phase_chain"
-                    _append_capture_log(first.id, first.title, first.domain.value, "agent-delegated")
+                    _append_capture_log(
+                        first.id, first.title, first.domain.value, "agent-delegated",
+                        novelty_class=novelty_info.get("class", ""),
+                        novelty_score=novelty_info.get("score", 0.0),
+                    )
                     return result
 
                 # ===== FALLBACK: Legacy 3-tier pipeline (requires API keys) =====
