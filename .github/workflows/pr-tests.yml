@@ -235,10 +235,14 @@ jobs:
                     const keyColon = parts.join('::');
                     const detail = failures[keyDot] || failures[keyColon] || failures[t.id] || '(no detail found)';
                     return [
-                      `#### \`${t.id}\``,
+                      `<details>`,
+                      `<summary><code>${t.id}</code></summary>`,
+                      '',
                       '```',
                       detail,
                       '```',
+                      '',
+                      '</details>',
                       '',
                     ];
                   }),
