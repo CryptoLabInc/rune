@@ -90,6 +90,7 @@ jobs:
             }
 
             // Parse failure detail blocks from the FAILURES section
+            // pytest headers use "ClassName.test_method" (dot) not "::"
             const failures = {};
             const lines = rawOutput.split('\n');
             let inFailures = false;
@@ -118,33 +119,65 @@ jobs:
             }
             if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
 
-            // Build results table
             const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️' };
-            const tableRows = testResults.map(t =>
-              `| \`${t.id}\` | ${resultIcon[t.result] || ''} ${t.result} |`
-            );
-            const tableSection = testResults.length > 0
-              ? [
-                  '### Test Results',
-                  '',
-                  '| Test | Result |',
-                  '|------|--------|',
-                  ...tableRows,
-                  '',
-                ].join('\n')
-              : '';
+            const resultById = {};
+            for (const t of testResults) resultById[t.id] = t.result;
 
-            // Build failure details section
+            // Changed / New Tests section with per-test PASS/FAIL and summary
+            const hasChanged = '${{ needs.detect-changed-tests.outputs.has_changed }}' === 'true';
+            const changedIds = '${{ needs.detect-changed-tests.outputs.test_ids }}'
+              .trim().split(' ').filter(Boolean);
+
+            let changedSection = '';
+            if (hasChanged && changedIds.length > 0) {
+              const changedPass = changedIds.filter(id => resultById[id] === 'PASSED').length;
+              const changedRows = changedIds.map(id => {
+                const res = resultById[id] || 'UNKNOWN';
+                return `| ${resultIcon[res] || ''} ${res} | \`${id}\` |`;
+              });
+              changedSection = [
+                '---',
+                '### Changed / New Tests in This PR',
+                '',
+                `**${changedPass} / ${changedIds.length} passed**`,
+                '',
+                '| Result | Test |',
+                '|--------|------|',
+                ...changedRows,
+                '',
+              ].join('\n');
+            }
+
+            // Full test results: summary counts + failed tests only
             const failedTests = testResults.filter(t => t.result === 'FAILED' || t.result === 'ERROR');
+            const totalPass = testResults.filter(t => t.result === 'PASSED').length;
+            const totalFail = failedTests.length;
+            const totalSkip = testResults.filter(t => t.result === 'SKIPPED' || t.result === 'XFAIL').length;
+
+            let tableSection = '';
+            if (testResults.length > 0) {
+              const skipPart = totalSkip > 0 ? `, ${totalSkip} skipped` : '';
+              const summary = `**${totalPass} passed, ${totalFail} failed${skipPart}** (${testResults.length} total)`;
+              const failRows = failedTests.map(t =>
+                `| ${resultIcon[t.result] || ''} ${t.result} | \`${t.id}\` |`
+              );
+              const failTable = failedTests.length > 0
+                ? ['', '| Result | Test |', '|--------|------|', ...failRows, ''].join('\n')
+                : '';
+              tableSection = ['### Test Results', '', summary, failTable].join('\n');
+            }
+
+            // Failure details — pytest FAILURES headers use dot notation: "TestClass.test_method"
             const failureSection = failedTests.length > 0
               ? [
                   '---',
                   '### ❌ Failure Details',
                   '',
                   ...failedTests.flatMap(t => {
-                    // failure key is everything after the file path (e.g. "TestClass::test_bar")
-                    const key = t.id.split('::').slice(1).join('::');
-                    const detail = failures[key] || failures[t.id] || '(no detail found)';
+                    const parts = t.id.split('::').slice(1);
+                    const keyDot = parts.join('.');
+                    const keyColon = parts.join('::');
+                    const detail = failures[keyDot] || failures[keyColon] || failures[t.id] || '(no detail found)';
                     return [
                       `#### \`${t.id}\``,
                       '```',
@@ -156,48 +189,40 @@ jobs:
                 ].join('\n')
               : '';
 
-            const hasChanged = '${{ needs.detect-changed-tests.outputs.has_changed }}' === 'true';
-            const changedIds = '${{ needs.detect-changed-tests.outputs.test_ids }}'
-              .trim().split(' ').filter(Boolean);
-
-            const changedSection = hasChanged
-              ? [
-                  '---',
-                  '### Changed / New Tests in This PR',
-                  '',
-                  changedIds.map(id => '- `' + id + '`').join('\n'),
-                  '',
-                ].join('\n')
-              : '';
+            // Full output: only the failures + summary section (skip passing test lines)
+            const failureBlockMatch = rawOutput.match(/(={3,} FAILURES ={3,}[\s\S]*)/);
+            const failureOnlyOutput = failureBlockMatch ? failureBlockMatch[1].trim() : '';
 
             const MAX = 10000;
-            const output = rawOutput.length > MAX
-              ? '...(truncated)\n' + rawOutput.slice(-MAX)
-              : rawOutput;
+            const output = failureOnlyOutput.length > MAX
+              ? '...(truncated)\n' + failureOnlyOutput.slice(-MAX)
+              : failureOnlyOutput;
 
             const marker = '<!-- pr-tests-bot -->';
-            const parts = [
+            const bodyParts = [
               marker,
               '## ' + status,
               '',
             ];
 
-            if (changedSection) parts.push(changedSection);
-            if (tableSection) parts.push(tableSection);
-            if (failureSection) parts.push(failureSection);
+            if (changedSection) bodyParts.push(changedSection);
+            if (tableSection) bodyParts.push(tableSection);
+            if (failureSection) bodyParts.push(failureSection);
 
-            parts.push(
-              '---',
-              '<details>',
-              '<summary>Full test output</summary>',
-              '',
-              '```',
-              output,
-              '```',
-              '</details>',
-            );
+            if (output) {
+              bodyParts.push(
+                '---',
+                '<details>',
+                '<summary>Failure output</summary>',
+                '',
+                '```',
+                output,
+                '```',
+                '</details>',
+              );
+            }
 
-            const body = parts.join('\n');
+            const body = bodyParts.join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
