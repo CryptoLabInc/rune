@@ -258,19 +258,19 @@ jobs:
                   '',
                   ...skippedTests.flatMap(t => [
                     `#### \`${t.id}\``,
-                    reasonById[t.id] || '(no reason given)',
+                    `> ${reasonById[t.id] || '(no reason given)'}`,
                     '',
                   ]),
                   ...(collectionSkipCount > 0
                     ? (collectionSkips.length > 0
                         ? collectionSkips.flatMap(s => [
                             `#### \`${s.file}:${s.line}\` _(collection-skipped)_`,
-                            s.reason,
+                            `> ${s.reason}`,
                             '',
                           ])
                         : [
                             `#### _(${collectionSkipCount} collection-skipped test(s))_`,
-                            'These tests were skipped during pytest collection. Check the short test summary in the CI logs for details.',
+                            '> These tests were skipped during pytest collection. Check the short test summary in the CI logs for details.',
                             '',
                           ])
                     : []),
