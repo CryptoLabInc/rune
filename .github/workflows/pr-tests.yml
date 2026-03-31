@@ -166,7 +166,7 @@ jobs:
               ].join('\n');
             }
 
-            // Full suite results: summary counts + failed + skipped tests
+            // Full Test Results: summary counts + failed + skipped tests
             const failedTests = testResults.filter(t => t.result === 'FAILED' || t.result === 'ERROR');
             const skippedTests = testResults.filter(t => t.result === 'SKIPPED' || t.result === 'XFAIL');
             const totalPass = testResults.filter(t => t.result === 'PASSED').length;
@@ -184,7 +184,7 @@ jobs:
               const notableTable = notableRows.length > 0
                 ? ['', '| Result | Test |', '|--------|------|', ...notableRows, ''].join('\n')
                 : '';
-              tableSection = ['### Full Suite Results', '', summary, notableTable].join('\n');
+              tableSection = ['### Full Test Results', '', summary, notableTable].join('\n');
             }
 
             // Failure details — pytest FAILURES headers use dot notation: "TestClass.test_method"
