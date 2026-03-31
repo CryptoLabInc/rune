@@ -221,7 +221,7 @@ $ claude plugin install rune
 
 #### Gemini CLI in terminal
 ```bash
-$ gemini extensions install https://github.com/CryptoLabInc/rune
+$ gemini extensions install https://github.com/CryptoLabInc/rune.git
 ```
 
 ### Configure
