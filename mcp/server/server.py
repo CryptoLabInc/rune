@@ -1004,9 +1004,12 @@ class MCPServerApp:
                 envector_client = self._scribe["envector_client"]
                 embedding_service = self._scribe["embedding_service"]
 
+                # Use reusable_insight for embedding if available (schema 2.1+)
+                ri = metadata.get("reusable_insight", "")
+                embedding_text = ri.strip() if ri and ri.strip() else target.payload_text
                 insert_result = envector_client.insert_with_text(
                     index_name=self._vault_index_name,
-                    texts=[target.payload_text],
+                    texts=[embedding_text],
                     embedding_service=embedding_service,
                     metadata=[metadata],
                 )

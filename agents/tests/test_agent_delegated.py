@@ -568,3 +568,38 @@ def test_single_record_json_reusable_insight_wiring():
 
     records = builder.build_phases(raw, detection, pre_extraction=pre_extraction)
     assert records[0].reusable_insight == agent_json["reusable_insight"]
+
+
+def test_embedding_text_for_metadata_dict():
+    """_embedding_text_for_record should work with metadata dicts (delete_capture path)."""
+    from agents.common.schemas.embedding import embedding_text_for_record as _embedding_text_for_record
+
+    class FakeRecord:
+        reusable_insight = "Dense gist about PostgreSQL choice."
+        class payload:
+            text = "# Full verbose markdown\n## Decision\nLong content..."
+
+    assert _embedding_text_for_record(FakeRecord()) == "Dense gist about PostgreSQL choice."
+
+    class FakeRecordLegacy:
+        reusable_insight = ""
+        class payload:
+            text = "Fallback payload text"
+
+    assert _embedding_text_for_record(FakeRecordLegacy()) == "Fallback payload text"
+
+
+def test_delete_embedding_text_selection():
+    """delete_capture should use reusable_insight from metadata for embedding."""
+    def select_delete_embedding_text(metadata, fallback_payload_text):
+        ri = metadata.get("reusable_insight", "")
+        return ri.strip() if ri and ri.strip() else fallback_payload_text
+
+    metadata_21 = {"reusable_insight": "Dense gist.", "payload": {"text": "Verbose."}}
+    assert select_delete_embedding_text(metadata_21, "Verbose.") == "Dense gist."
+
+    metadata_20 = {"payload": {"text": "Verbose."}}
+    assert select_delete_embedding_text(metadata_20, "Verbose.") == "Verbose."
+
+    metadata_empty = {"reusable_insight": "", "payload": {"text": "Verbose."}}
+    assert select_delete_embedding_text(metadata_empty, "Verbose.") == "Verbose."
