@@ -120,50 +120,10 @@ jobs:
             }
             if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
 
-            const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️', 'NOT RUN': '⚪' };
-            const resultById = {};
+            const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️' };
             const reasonById = {};
             for (const t of testResults) {
-              resultById[t.id] = t.result;
               if (t.reason) reasonById[t.id] = t.reason;
-            }
-
-            // Updated Tests in this PR — per-test PASS/FAIL and summary
-            const hasChanged = '${{ needs.detect-changed-tests.outputs.has_changed }}' === 'true';
-            const changedIds = '${{ needs.detect-changed-tests.outputs.test_ids }}'
-              .trim().split(' ').filter(Boolean);
-
-            // For parameterized tests, ci_changed_tests.py outputs the base function name
-            // (e.g. "test_foo") but pytest IDs include params (e.g. "test_foo[param1-param2]").
-            // Resolve a changed ID to its aggregate result across all matching param variants.
-            const resolveResult = (id) => {
-              if (resultById[id]) return resultById[id];
-              const prefix = id + '[';
-              const variants = testResults.filter(t => t.id.startsWith(prefix));
-              if (variants.length === 0) return 'NOT RUN';
-              if (variants.some(t => t.result === 'FAILED' || t.result === 'ERROR')) return 'FAILED';
-              if (variants.every(t => t.result === 'PASSED')) return 'PASSED';
-              if (variants.every(t => t.result === 'SKIPPED' || t.result === 'XFAIL')) return 'SKIPPED';
-              return variants[0].result;
-            };
-
-            let changedSection = '';
-            if (hasChanged && changedIds.length > 0) {
-              const changedPass = changedIds.filter(id => resolveResult(id) === 'PASSED').length;
-              const changedRows = changedIds.map(id => {
-                const res = resolveResult(id);
-                return `| ${resultIcon[res]} ${res} | \`${id}\` |`;
-              });
-              changedSection = [
-                '### Updated Tests in this PR',
-                '',
-                `**${changedPass} / ${changedIds.length} passed**`,
-                '',
-                '| Result | Test |',
-                '|--------|------|',
-                ...changedRows,
-                '',
-              ].join('\n');
             }
 
             // Full Test Results: summary counts + failed + skipped tests
@@ -230,7 +190,6 @@ jobs:
               '',
             ];
 
-            if (changedSection) bodyParts.push(changedSection);
             if (tableSection) bodyParts.push(tableSection);
             if (failureSection) bodyParts.push(failureSection);
             if (skippedSection) bodyParts.push(skippedSection);
