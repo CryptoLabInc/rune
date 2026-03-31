@@ -60,7 +60,7 @@ jobs:
         id: pytest
         run: |
           python -m pytest agents/tests/ mcp/tests/ \
-            -v --tb=long \
+            -v --tb=long -rs \
             2>&1 | tee pytest_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
         env:
