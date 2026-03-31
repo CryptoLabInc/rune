@@ -818,3 +818,33 @@ class TestFormatAnswerForDisplay:
         assert "85%" in formatted
         assert "dec_1" in formatted
         assert "alternatives" in formatted.lower()
+
+
+def test_search_result_has_reusable_insight():
+    """SearchResult should carry reusable_insight from metadata."""
+    from agents.retriever.searcher import SearchResult
+
+    # Schema 2.1
+    r = SearchResult(
+        record_id="dec_test",
+        title="Test",
+        payload_text="Verbose markdown",
+        reusable_insight="Dense gist",
+        domain="architecture",
+        certainty="supported",
+        status="accepted",
+        score=0.8,
+    )
+    assert r.reusable_insight == "Dense gist"
+
+    # Schema 2.0 default
+    r2 = SearchResult(
+        record_id="dec_test2",
+        title="Test2",
+        payload_text="Verbose",
+        domain="architecture",
+        certainty="supported",
+        status="accepted",
+        score=0.8,
+    )
+    assert r2.reusable_insight == ""

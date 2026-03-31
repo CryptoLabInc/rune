@@ -50,6 +50,7 @@ class SearchResult:
     certainty: str
     status: str
     score: float
+    reusable_insight: str = ""  # Schema 2.1+: dense NL gist (primary embedding text)
     adjusted_score: float = 0.0  # After recency weighting + status penalty
     metadata: Dict[str, Any] = field(default_factory=dict)
     # Group fields (phase_chain or bundle)
@@ -517,6 +518,8 @@ class Searcher:
             if isinstance(decision, dict):
                 payload_text = decision.get("what", "")
 
+        reusable_insight = metadata.get("reusable_insight", "")
+
         group_id = metadata.get("group_id")
         group_type = metadata.get("group_type")
         phase_seq = metadata.get("phase_seq")
@@ -531,6 +534,7 @@ class Searcher:
             certainty=certainty,
             status=status,
             score=score,
+            reusable_insight=reusable_insight,
             adjusted_score=score,
             metadata=metadata,
             group_id=group_id,
@@ -590,5 +594,6 @@ class Searcher:
         record = await self.search_by_id(record_id)
         if not record:
             return []
-        results = await self._search_single(record.payload_text[:500], topk + 1)
+        search_text = record.reusable_insight.strip() or record.payload_text[:500]
+        results = await self._search_single(search_text, topk + 1)
         return [r for r in results if r.record_id != record_id][:topk]
