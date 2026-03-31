@@ -83,10 +83,11 @@ jobs:
 
             // Parse individual test results from verbose pytest output
             // e.g. "tests/foo.py::TestClass::test_bar PASSED     [ 50%]"
+            // e.g. "tests/foo.py::TestClass::test_bar SKIPPED (reason)  [ 50%]"
             const testResults = [];
             for (const line of rawOutput.split('\n')) {
-              const m = line.match(/^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)/);
-              if (m) testResults.push({ id: m[1], result: m[2] });
+              const m = line.match(/^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)(?:\s+\(([^)]*)\))?/);
+              if (m) testResults.push({ id: m[1], result: m[2], reason: m[3] || null });
             }
 
             // Parse failure detail blocks from the FAILURES section
@@ -119,25 +120,42 @@ jobs:
             }
             if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
 
-            const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️' };
+            const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️', 'NOT RUN': '⚪' };
             const resultById = {};
-            for (const t of testResults) resultById[t.id] = t.result;
+            const reasonById = {};
+            for (const t of testResults) {
+              resultById[t.id] = t.result;
+              if (t.reason) reasonById[t.id] = t.reason;
+            }
 
-            // Changed / New Tests section with per-test PASS/FAIL and summary
+            // Updated Tests in this PR — per-test PASS/FAIL and summary
             const hasChanged = '${{ needs.detect-changed-tests.outputs.has_changed }}' === 'true';
             const changedIds = '${{ needs.detect-changed-tests.outputs.test_ids }}'
               .trim().split(' ').filter(Boolean);
 
+            // For parameterized tests, ci_changed_tests.py outputs the base function name
+            // (e.g. "test_foo") but pytest IDs include params (e.g. "test_foo[param1-param2]").
+            // Resolve a changed ID to its aggregate result across all matching param variants.
+            const resolveResult = (id) => {
+              if (resultById[id]) return resultById[id];
+              const prefix = id + '[';
+              const variants = testResults.filter(t => t.id.startsWith(prefix));
+              if (variants.length === 0) return 'NOT RUN';
+              if (variants.some(t => t.result === 'FAILED' || t.result === 'ERROR')) return 'FAILED';
+              if (variants.every(t => t.result === 'PASSED')) return 'PASSED';
+              if (variants.every(t => t.result === 'SKIPPED' || t.result === 'XFAIL')) return 'SKIPPED';
+              return variants[0].result;
+            };
+
             let changedSection = '';
             if (hasChanged && changedIds.length > 0) {
-              const changedPass = changedIds.filter(id => resultById[id] === 'PASSED').length;
+              const changedPass = changedIds.filter(id => resolveResult(id) === 'PASSED').length;
               const changedRows = changedIds.map(id => {
-                const res = resultById[id] || 'UNKNOWN';
-                return `| ${resultIcon[res] || ''} ${res} | \`${id}\` |`;
+                const res = resolveResult(id);
+                return `| ${resultIcon[res]} ${res} | \`${id}\` |`;
               });
               changedSection = [
-                '---',
-                '### Changed / New Tests in This PR',
+                '### Updated Tests in this PR',
                 '',
                 `**${changedPass} / ${changedIds.length} passed**`,
                 '',
@@ -148,23 +166,25 @@ jobs:
               ].join('\n');
             }
 
-            // Full test results: summary counts + failed tests only
+            // Full suite results: summary counts + failed + skipped tests
             const failedTests = testResults.filter(t => t.result === 'FAILED' || t.result === 'ERROR');
+            const skippedTests = testResults.filter(t => t.result === 'SKIPPED' || t.result === 'XFAIL');
             const totalPass = testResults.filter(t => t.result === 'PASSED').length;
             const totalFail = failedTests.length;
-            const totalSkip = testResults.filter(t => t.result === 'SKIPPED' || t.result === 'XFAIL').length;
+            const totalSkip = skippedTests.length;
 
             let tableSection = '';
             if (testResults.length > 0) {
               const skipPart = totalSkip > 0 ? `, ${totalSkip} skipped` : '';
               const summary = `**${totalPass} passed, ${totalFail} failed${skipPart}** (${testResults.length} total)`;
-              const failRows = failedTests.map(t =>
-                `| ${resultIcon[t.result] || ''} ${t.result} | \`${t.id}\` |`
-              );
-              const failTable = failedTests.length > 0
-                ? ['', '| Result | Test |', '|--------|------|', ...failRows, ''].join('\n')
+              const notableRows = [
+                ...failedTests.map(t => `| ${resultIcon[t.result]} ${t.result} | \`${t.id}\` |`),
+                ...skippedTests.map(t => `| ${resultIcon[t.result]} ${t.result} | \`${t.id}\` |`),
+              ];
+              const notableTable = notableRows.length > 0
+                ? ['', '| Result | Test |', '|--------|------|', ...notableRows, ''].join('\n')
                 : '';
-              tableSection = ['### Test Results', '', summary, failTable].join('\n');
+              tableSection = ['### Full Suite Results', '', summary, notableTable].join('\n');
             }
 
             // Failure details — pytest FAILURES headers use dot notation: "TestClass.test_method"
@@ -189,14 +209,19 @@ jobs:
                 ].join('\n')
               : '';
 
-            // Full output: only the failures + summary section (skip passing test lines)
-            const failureBlockMatch = rawOutput.match(/(={3,} FAILURES ={3,}[\s\S]*)/);
-            const failureOnlyOutput = failureBlockMatch ? failureBlockMatch[1].trim() : '';
-
-            const MAX = 10000;
-            const output = failureOnlyOutput.length > MAX
-              ? '...(truncated)\n' + failureOnlyOutput.slice(-MAX)
-              : failureOnlyOutput;
+            // Skipped details
+            const skippedSection = skippedTests.length > 0
+              ? [
+                  '---',
+                  '### ⏭️ Skipped Details',
+                  '',
+                  ...skippedTests.flatMap(t => [
+                    `#### \`${t.id}\``,
+                    reasonById[t.id] || '(no reason given)',
+                    '',
+                  ]),
+                ].join('\n')
+              : '';
 
             const marker = '<!-- pr-tests-bot -->';
             const bodyParts = [
@@ -208,19 +233,7 @@ jobs:
             if (changedSection) bodyParts.push(changedSection);
             if (tableSection) bodyParts.push(tableSection);
             if (failureSection) bodyParts.push(failureSection);
-
-            if (output) {
-              bodyParts.push(
-                '---',
-                '<details>',
-                '<summary>Failure output</summary>',
-                '',
-                '```',
-                output,
-                '```',
-                '</details>',
-              );
-            }
+            if (skippedSection) bodyParts.push(skippedSection);
 
             const body = bodyParts.join('\n');
 
