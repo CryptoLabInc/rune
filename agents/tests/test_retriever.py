@@ -246,10 +246,11 @@ class TestExpandPhaseChains:
 
         # Should have fetched siblings
         searcher._search_single.assert_called_once()
-        # Should contain siblings ordered by phase_seq
-        assert len(expanded) == 2  # Only siblings (originals filtered by existing_ids)
-        assert expanded[0].phase_seq == 1
-        assert expanded[1].phase_seq == 2
+        # Should contain original + siblings ordered by phase_seq
+        assert len(expanded) == 3  # Original (dec_p0) + 2 fetched siblings
+        assert expanded[0].phase_seq == 0
+        assert expanded[1].phase_seq == 1
+        assert expanded[2].phase_seq == 2
 
     @pytest.mark.asyncio
     async def test_expand_orders_by_phase_seq(self, searcher):

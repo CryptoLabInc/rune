@@ -151,8 +151,8 @@ class TestTier2Filter:
         assert f.is_available is False
 
         result = f.evaluate("Some text")
-        # Should pass through (default to capture)
-        assert result.should_capture is True
+        # Fail-closed: reject on unavailable to avoid noise
+        assert result.should_capture is False
         assert "unavailable" in result.reason.lower()
 
     def test_evaluate_fallback_on_error(self, filter_with_mock):
@@ -160,8 +160,8 @@ class TestTier2Filter:
         filter_with_mock._llm.generate.side_effect = Exception("API error")
 
         result = filter_with_mock.evaluate("Some text")
-        # Should pass through on error
-        assert result.should_capture is True
+        # Fail-closed: reject on error to avoid noise
+        assert result.should_capture is False
         assert "error" in result.reason.lower()
 
     def test_parse_response_valid_json(self):
@@ -205,8 +205,8 @@ class TestTier2Filter:
         f._llm = mock_llm
 
         result = f._parse_response("This is not JSON at all")
-        # Should default to capture
-        assert result.should_capture is True
+        # Fail-closed: reject on parse failure to avoid noise
+        assert result.should_capture is False
 
     def test_system_prompt_content(self):
         """Test that the policy prompt covers key concepts"""
