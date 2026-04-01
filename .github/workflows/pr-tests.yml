@@ -158,7 +158,7 @@ jobs:
             }
             if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
 
-            const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️' };
+            const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️', 'NOT RUN': '⚪' };
 
             // Parse skip reasons from the short test summary section of the main output
             const shortSummarySkips = parseShortSummarySkips(rawOutput);
@@ -171,8 +171,10 @@ jobs:
             }
 
             // reasonById: first from inline verbose output (reason in parens), then short summary
+            const resultById = {};
             const reasonById = {};
             for (const t of testResults) {
+              resultById[t.id] = t.result;
               if (t.reason) reasonById[t.id] = t.reason;
             }
             for (const t of testResults) {
@@ -181,6 +183,44 @@ jobs:
                 const reasons = fileSkipReasons[file];
                 if (reasons && reasons.length > 0) reasonById[t.id] = reasons[0];
               }
+            }
+
+            // Tests Added/Modified in This PR — per-test PASS/FAIL and summary
+            const hasChanged = '${{ needs.detect-changed-tests.outputs.has_changed }}' === 'true';
+            const changedIds = '${{ needs.detect-changed-tests.outputs.test_ids }}'
+              .trim().split(' ').filter(Boolean);
+
+            // For parameterized tests, ci_changed_tests.py outputs the base function name
+            // (e.g. "test_foo") but pytest IDs include params (e.g. "test_foo[param1-param2]").
+            // Resolve a changed ID to its aggregate result across all matching param variants.
+            const resolveResult = (id) => {
+              if (resultById[id]) return resultById[id];
+              const prefix = id + '[';
+              const variants = testResults.filter(t => t.id.startsWith(prefix));
+              if (variants.length === 0) return 'NOT RUN';
+              if (variants.some(t => t.result === 'FAILED' || t.result === 'ERROR')) return 'FAILED';
+              if (variants.every(t => t.result === 'PASSED')) return 'PASSED';
+              if (variants.every(t => t.result === 'SKIPPED' || t.result === 'XFAIL')) return 'SKIPPED';
+              return variants[0].result;
+            };
+
+            let changedSection = '';
+            if (hasChanged && changedIds.length > 0) {
+              const changedPass = changedIds.filter(id => resolveResult(id) === 'PASSED').length;
+              const changedRows = changedIds.map(id => {
+                const res = resolveResult(id);
+                return `| ${resultIcon[res]} ${res} | \`${id}\` |`;
+              });
+              changedSection = [
+                '### Tests Added/Modified in This PR',
+                '',
+                `**${changedPass} / ${changedIds.length} passed**`,
+                '',
+                '| Result | Test |',
+                '|--------|------|',
+                ...changedRows,
+                '',
+              ].join('\n');
             }
 
             // Full Test Results: summary counts + failed + skipped tests
@@ -297,6 +337,7 @@ jobs:
             ];
 
             if (warningSection) bodyParts.push(warningSection);
+            if (changedSection) bodyParts.push(changedSection);
             if (tableSection) bodyParts.push(tableSection);
             if (failureSection) bodyParts.push(failureSection);
             if (skippedSection) bodyParts.push(skippedSection);
