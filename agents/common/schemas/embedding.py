@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 
 # Novelty thresholds (Memory-as-Filter)
 NOVELTY_THRESHOLD_NOVEL = 0.3
-NOVELTY_THRESHOLD_REDUNDANT = 0.7
+NOVELTY_THRESHOLD_RELATED = 0.7
+NOVELTY_THRESHOLD_NEAR_DUPLICATE = 0.95
 
 
 def embedding_text_for_record(record: "DecisionRecord") -> str:
@@ -31,16 +32,24 @@ def embedding_text_for_record(record: "DecisionRecord") -> str:
 def classify_novelty(
     max_similarity: float,
     threshold_novel: float = NOVELTY_THRESHOLD_NOVEL,
-    threshold_redundant: float = NOVELTY_THRESHOLD_REDUNDANT,
+    threshold_related: float = NOVELTY_THRESHOLD_RELATED,
+    threshold_near_duplicate: float = NOVELTY_THRESHOLD_NEAR_DUPLICATE,
 ) -> dict:
     """Classify capture novelty based on similarity to existing memory.
 
     Returns dict with 'score' (0-1, higher=more novel) and 'class'.
+    Classes (annotation-only except near_duplicate):
+      - near_duplicate (>= 0.95): blocks capture
+      - related (>= 0.7): annotation only
+      - evolution (>= 0.3): annotation only
+      - novel (< 0.3): annotation only
     """
     novelty_score = 1.0 - max_similarity
-    if max_similarity < threshold_novel:
-        return {"class": "novel", "score": round(novelty_score, 4)}
-    elif max_similarity >= threshold_redundant:
-        return {"class": "redundant", "score": round(novelty_score, 4)}
-    else:
+    if max_similarity >= threshold_near_duplicate:
+        return {"class": "near_duplicate", "score": round(novelty_score, 4)}
+    elif max_similarity >= threshold_related:
+        return {"class": "related", "score": round(novelty_score, 4)}
+    elif max_similarity >= threshold_novel:
         return {"class": "evolution", "score": round(novelty_score, 4)}
+    else:
+        return {"class": "novel", "score": round(novelty_score, 4)}

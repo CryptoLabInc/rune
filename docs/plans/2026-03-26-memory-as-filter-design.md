@@ -225,45 +225,67 @@ You don't "query" your long-term memory. You're in a conversation, and relevant 
                                     Compare against ALL
   Generates reusable_insight:       existing memories
   "PostgreSQL chosen over
-   MongoDB for financial            ┌────────────────────┐
-   data. ACID compliance            │ max_similarity:     │
-   non-negotiable."                 │                     │
-                                    │ < 0.3  → NOVEL     │
-                             ◄────  │ 0.3-0.7 → EVOLVE  │
-                                    │ > 0.7  → REDUNDANT │
-  Result:                           └────────────────────┘
-  ┌──────────────────────┐
-  │ NOVEL → Store it     │     No patterns.
-  │ EVOLVE → Store+Link  │     No maintenance.
-  │ REDUNDANT → Skip     │     Self-improving.
+   MongoDB for financial            ┌──────────────────────────────┐
+   data. ACID compliance            │ max_similarity:              │
+   non-negotiable."                 │                              │
+                                    │ >= 0.95  → NEAR-DUPLICATE   │
+                             ◄────  │            (block — accidental│
+                                    │            double-send)      │
+  Result:                           │                              │
+  ┌──────────────────────┐          │ < 0.95   → CAPTURE          │
+  │ NEAR-DUP → Block     │         │            + annotate with:  │
+  │ (accidental resend)   │         │            novelty class +   │
+  │                       │         │            related records   │
+  │ ALL ELSE → Capture    │         └──────────────────────────────┘
+  │ + novelty annotation: │
+  │   NOVEL (< 0.3)       │    No patterns.
+  │   EVOLUTION (0.3-0.7) │    No maintenance.
+  │   FAMILIAR (> 0.7)    │    Self-improving.
+  │                       │
+  │ Annotation is METADATA │    Agent's judgment (SKILL.md)
+  │ returned to agent,     │    is the primary filter for
+  │ NOT a gate.            │    "should I capture this?"
   └──────────────────────┘
 ```
 
 ### Why This Works
 
+**Key insight: Embedding models respond to TOPIC, not INTENT.** A decision reversal
+about the same technology will have high similarity (~0.85) with the original decision.
+If similarity were a gate, the most important captures would be blocked — decision
+reversals, escalations, scope changes, exceptions to rules, lessons from failures on
+known systems. These are exactly the knowledge that teams need most.
+
+The solution: **novelty score is an annotation, not a gate.** The agent (via SKILL.md
+policy) decides what is worth capturing. The similarity check catches only accidental
+near-duplicates (>= 0.95) — same text sent twice in a session. Everything else is
+captured with a novelty annotation that provides context.
+
 ```
   EMPTY MEMORY (Day 1)            RICH MEMORY (Month 6)
   ━━━━━━━━━━━━━━━━━━━            ━━━━━━━━━━━━━━━━━━━━━
 
-  Everything is novel.            Most things are redundant.
-  Captures aggressively.          Captures selectively.
+  Everything is novel.            Rich annotations available.
+  Captures aggressively.          Agent captures selectively
+                                  (via SKILL.md judgment).
 
   ┌─────────┐                     ┌─────────┐
   │ ○       │  "PostgreSQL        │ ○○○○○○  │  "PostgreSQL
-  │         │   for ACID"         │ ○○○○○○  │   for ACID"
-  │         │  → NOVEL (capture)  │ ○○○○○○  │  → REDUNDANT (skip)
-  │         │                     │ ○○○○○○  │
-  │         │  "Auth middleware   │ ○○○○○○  │  "Read replica
-  │         │   rewrite"         │ ○○○○○○  │   for PostgreSQL"
-  │         │  → NOVEL (capture)  │ ○○○○○○  │  → EVOLUTION (capture)
-  └─────────┘                     └─────────┘
-
-  Like a new employee:            Like a veteran:
-  Everything is worth             Only genuinely new
-  remembering.                    insights get stored.
+  │         │   for ACID"         │ ○○○○○○  │   REVERSED — now
+  │         │  → NOVEL (capture)  │ ○○○○○○  │   using MongoDB"
+  │         │                     │ ○○○○○○  │  → FAMILIAR annotation
+  │         │  "Auth middleware   │ ○○○○○○  │    but CAPTURED (this
+  │         │   rewrite"         │ ○○○○○○  │    is a reversal!)
+  │         │  → NOVEL (capture)  │ ○○○○○○  │
+  └─────────┘                     │ ○○○○○○  │  "Read replica
+                                  │ ○○○○○○  │   for PostgreSQL"
+  Like a new employee:            └─────────┘  → EVOLUTION annotation
+  Everything is worth
+  remembering.                    The agent decides significance.
+                                  Novelty is context, not control.
 ```
 
-### Novelty Score: The Quantitative Quality Metric
+### Novelty Score: Annotation, Not Gate
 
 ```
   novelty_score = 1 - max_similarity_to_existing
@@ -271,19 +293,29 @@ You don't "query" your long-term memory. You're in a conversation, and relevant 
   ┌──────────────────────────────────────────────────┐
   │                                                    │
   │  1.0 ┤ ████ Completely new domain/topic           │
-  │      │                                             │
+  │      │       class: NOVEL                          │
   │  0.8 ┤ ███ New decision in familiar domain         │
   │      │                                             │
+  │  0.7 ┤ ── ── ── ── ── ── ── ── ── ── ── ── ──    │
+  │      │       class: EVOLUTION                      │
   │  0.6 ┤ ██ Evolution of existing decision           │
   │      │                                             │
   │  0.4 ┤ █ Update to recent decision                 │
-  │      │        ─ ─ ─ CAPTURE THRESHOLD ─ ─ ─        │
-  │  0.2 ┤ Minor variation of stored knowledge         │
   │      │                                             │
+  │  0.3 ┤ ── ── ── ── ── ── ── ── ── ── ── ── ──    │
+  │      │       class: FAMILIAR                       │
+  │  0.2 ┤ Variation of stored knowledge               │
+  │      │                                             │
+  │  0.05┤ ═══ NEAR-DUPLICATE BLOCK (>= 0.95) ═══    │
   │  0.0 ┤ Exact duplicate                             │
   │      └─────────────────────────────────────────    │
   │                                                    │
-  │  This number is trackable, graphable, tunable.    │
+  │  ALL classes above 0.05 are CAPTURED with the     │
+  │  novelty class as annotation metadata.             │
+  │  Only near-duplicates (>= 0.95 similarity) are    │
+  │  automatically blocked.                            │
+  │                                                    │
+  │  This number is trackable, graphable, informative. │
   │  Pattern matching gave us nothing like this.       │
   └──────────────────────────────────────────────────┘
 ```
@@ -546,21 +578,21 @@ The agent generates `reusable_insight` following these principles:
   │  Step 1: Parse extracted JSON                            │
   │          Extract reusable_insight                         │
   │                                                          │
-  │  Step 2: NOVELTY CHECK (new!)                            │
+  │  Step 2: NOVELTY CHECK (annotation, not gate)             │
   │  ┌────────────────────────────────────────────────────┐  │
   │  │                                                    │  │
   │  │  recall(reusable_insight, top_k=3)                 │  │
   │  │         │                                          │  │
   │  │         ▼                                          │  │
-  │  │  ┌─ similarity < 0.3 ─► NOVEL                     │  │
-  │  │  │                       Store new record          │  │
+  │  │  ┌─ similarity >= 0.95 ► NEAR-DUPLICATE            │  │
+  │  │  │                       Block (accidental resend) │  │
+  │  │  │                       Return existing record    │  │
   │  │  │                                                 │  │
-  │  │  ├─ similarity 0.3-0.7 ► EVOLUTION                 │  │
-  │  │  │                       Store + link to related   │  │
-  │  │  │                                                 │  │
-  │  │  └─ similarity > 0.7 ─► REDUNDANT                  │  │
-  │  │                          Return existing record    │  │
-  │  │                          Agent can show it         │  │
+  │  │  └─ similarity < 0.95 ─► CAPTURE with annotation:  │  │
+  │  │                          < 0.3  → class: NOVEL     │  │
+  │  │                          0.3-0.7 → class: EVOLUTION│  │
+  │  │                          > 0.7  → class: FAMILIAR  │  │
+  │  │                          + link to related records  │  │
   │  └────────────────────────────────────────────────────┘  │
   │                                                          │
   │  Step 3: Build DecisionRecord                            │
@@ -666,18 +698,46 @@ class DecisionRecord(BaseModel):
 }
 ```
 
+High-similarity but NOT a near-duplicate — captured with "familiar" annotation.
+This is the critical case: a decision reversal about the same technology scores
+~0.85 similarity but carries the most important new information.
+
+```json
+{
+  "ok": true,
+  "captured": true,
+  "record_id": "dec_2026-03-28_architecture_postgresql_reversal",
+  "summary": "PostgreSQL decision reversed — switching to MongoDB",
+  "domain": "architecture",
+  "mode": "agent-delegated",
+  "novelty": {
+    "score": 0.12,
+    "class": "familiar",
+    "related": [
+      {
+        "id": "dec_2026-03-26_architecture_postgresql_selection",
+        "title": "PostgreSQL selection for financial data",
+        "similarity": 0.88
+      }
+    ]
+  }
+}
+```
+
+Near-duplicate blocked — same insight sent twice in a session (accidental double-send).
+
 ```json
 {
   "ok": true,
   "captured": false,
-  "reason": "Redundant — similar insight already stored",
+  "reason": "Near-duplicate — virtually identical insight already stored (similarity >= 0.95)",
   "novelty": {
-    "score": 0.12,
-    "class": "redundant",
+    "score": 0.02,
+    "class": "near_duplicate",
     "existing": {
-      "id": "dec_2026-03-20_architecture_postgresql_selection",
+      "id": "dec_2026-03-26_architecture_postgresql_selection",
       "title": "PostgreSQL selection for financial data",
-      "similarity": 0.88
+      "similarity": 0.98
     }
   }
 }
@@ -740,13 +800,20 @@ A: The novelty filter prevents duplicates and low-value captures. And because Ru
 |---|---|---|
 | `NOVEL_THRESHOLD` | 0.3 | Below this similarity = completely new knowledge |
 | `EVOLUTION_THRESHOLD` | 0.7 | Above NOVEL, below this = update to existing knowledge |
-| `REDUNDANT_THRESHOLD` | 0.7 | Above this = already stored, skip |
+| `NEAR_DUPLICATE_THRESHOLD` | 0.95 | Above this = accidental double-send, block |
 
-These are tunable per deployment. The novelty score provides a quantitative metric for tuning:
+**Important:** Only `NEAR_DUPLICATE_THRESHOLD` acts as a gate. The other thresholds
+are classification boundaries for the novelty annotation returned to the agent.
+Captures with similarity 0.7-0.94 are classified as "familiar" but still stored —
+because embedding models respond to TOPIC, not INTENT. A decision reversal about
+the same technology will score ~0.85 similarity with the original decision, and
+blocking it would lose the most valuable type of organizational knowledge.
+
+These are tunable per deployment. The novelty score provides a quantitative metric for understanding memory growth:
 - Track `novelty_score` distribution over time
-- If too many captures are REDUNDANT → lower threshold
-- If too few captures → raise threshold
-- Correlate with recall frequency for quality validation
+- Monitor the ratio of NOVEL / EVOLUTION / FAMILIAR captures
+- If near-duplicate blocks are too aggressive → raise `NEAR_DUPLICATE_THRESHOLD`
+- Correlate novelty class with recall frequency for quality validation
 
 ### Cold Start Behavior
 
@@ -754,7 +821,7 @@ These are tunable per deployment. The novelty score provides a quantitative metr
   Day 1 (0 memories):
   ┌───────────────────────────────────────────┐
   │ Every insight has novelty_score = 1.0     │
-  │ Everything gets captured.                  │
+  │ Everything gets captured as NOVEL.         │
   │ This is correct — an empty brain           │
   │ captures aggressively.                     │
   └───────────────────────────────────────────┘
@@ -762,15 +829,17 @@ These are tunable per deployment. The novelty score provides a quantitative metr
   Week 1 (~50 memories):
   ┌───────────────────────────────────────────┐
   │ Common topics start showing similarity.    │
-  │ Second "we use PostgreSQL" gets filtered.  │
-  │ Novel topics still captured freely.        │
+  │ Captures get FAMILIAR annotations.         │
+  │ Exact re-sends blocked as near-duplicates. │
+  │ Agent uses annotations to refine judgment. │
   └───────────────────────────────────────────┘
 
   Month 3 (~500 memories):
   ┌───────────────────────────────────────────┐
-  │ Memory is selective.                       │
-  │ Only genuinely new insights pass.          │
-  │ Evolution captures track how decisions     │
+  │ Rich annotation data available.            │
+  │ Agent (via SKILL.md) has learned which     │
+  │ topics already have deep coverage.         │
+  │ EVOLUTION annotations track how decisions  │
   │ change over time.                          │
   └───────────────────────────────────────────┘
 ```

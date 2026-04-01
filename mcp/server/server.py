@@ -100,11 +100,12 @@ def _embedding_text_for_record(record) -> str:
 def _classify_novelty(
     max_similarity: float,
     threshold_novel: float = 0.3,
-    threshold_redundant: float = 0.7,
+    threshold_related: float = 0.7,
+    threshold_near_duplicate: float = 0.95,
 ) -> dict:
     """Classify capture novelty based on similarity to existing memory."""
     from agents.common.schemas.embedding import classify_novelty
-    return classify_novelty(max_similarity, threshold_novel, threshold_redundant)
+    return classify_novelty(max_similarity, threshold_novel, threshold_related, threshold_near_duplicate)
 
 
 # ---------- Capture Log ---------- #
@@ -748,12 +749,12 @@ class MCPServerApp:
                                 for r in parsed[:3]
                             ]
 
-                            # REDUNDANT -> skip capture
-                            if novelty_info["class"] == "redundant":
+                            # NEAR-DUPLICATE -> skip capture (only blocking case)
+                            if novelty_info["class"] == "near_duplicate":
                                 return {
                                     "ok": True,
                                     "captured": False,
-                                    "reason": "Redundant — similar insight already stored",
+                                    "reason": "Near-duplicate — virtually identical insight already stored",
                                     "novelty": novelty_info,
                                 }
                     except Exception as e:
