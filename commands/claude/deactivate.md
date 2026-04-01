@@ -15,7 +15,10 @@ Switch from active to dormant state. Configuration is preserved — use `/rune:a
 2. Check current `state`:
    - Already `"dormant"`: Respond "Rune is already dormant." and stop.
 
-3. Update `state` to `"dormant"` in `~/.rune/config.json`.
+3. Update `~/.rune/config.json`:
+   - Set `state` to `"dormant"`
+   - Set `dormant_reason` to `"user_deactivated"`
+   - Set `dormant_since` to current timestamp (e.g., `"2026-03-26T10:00:00Z"`)
 
 4. Call `reload_pipelines` as a **native MCP tool** (`mcp__envector__reload_pipelines`) — invoke it directly like any other tool, do NOT use `claude mcp call` via Bash (that subcommand doesn't exist).
    - This ensures MCP tools (`capture`/`recall`) immediately return errors instead of processing.
