@@ -61,7 +61,7 @@ jobs:
         run: |
           TEST_DIRS=$(find . -type d -name "tests" | grep -v __pycache__ | grep -v "/.git/" | tr '\n' ' ') \
           && python -m pytest $TEST_DIRS \
-            -v --tb=long -rs \
+            -v --tb=long -rs --import-mode=importlib \
             2>&1 | tee pytest_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
         env:
