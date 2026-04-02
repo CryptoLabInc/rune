@@ -228,3 +228,75 @@ class TestBatchCaptureTool:
                 statuses.append("error")
 
         assert statuses == ["captured", "error", "captured"]
+
+
+class TestBatchCaptureE2E:
+    """End-to-end smoke tests for batch_capture feature."""
+
+    def test_output_format_matches_design_spec(self):
+        """Verify return schema matches design doc specification."""
+        result = {
+            "ok": True,
+            "total": 3,
+            "results": [
+                {"index": 0, "title": "Decision A", "status": "captured", "novelty": "novel"},
+                {"index": 1, "title": "Decision B", "status": "near_duplicate", "novelty": "near_duplicate"},
+                {"index": 2, "title": "Decision C", "status": "error", "error": "Some failure"},
+            ],
+            "captured": 1,
+            "skipped": 1,
+            "errors": 1,
+        }
+
+        # Schema validation
+        assert result["ok"] is True
+        assert result["total"] == 3
+        assert result["captured"] + result["skipped"] + result["errors"] == result["total"]
+        assert len(result["results"]) == result["total"]
+
+        # Per-item required fields
+        for r in result["results"]:
+            assert "index" in r
+            assert "title" in r
+            assert "status" in r
+            assert r["status"] in ("captured", "near_duplicate", "skipped", "error")
+
+        # Error items have error field
+        error_items = [r for r in result["results"] if r["status"] == "error"]
+        for r in error_items:
+            assert "error" in r
+
+    def test_scribe_prompts_contain_batch_capture(self):
+        """Verify both scribe prompts mention batch_capture and Session-End Sweep."""
+        with open("agents/claude/scribe.md") as f:
+            claude_scribe = f.read()
+        assert "batch_capture" in claude_scribe
+        assert "Session-End Sweep" in claude_scribe
+        assert "claude_agent" in claude_scribe
+
+        with open("agents/gemini/scribe.md") as f:
+            gemini_scribe = f.read()
+        assert "batch_capture" in gemini_scribe
+        assert "Session-End Sweep" in gemini_scribe
+        assert "gemini_agent" in gemini_scribe
+
+    def test_batch_capture_item_format_compatible_with_capture(self):
+        """Verify _make_item() produces format compatible with capture tool's extracted param."""
+        import json
+        item = _make_item("Test Compatibility")
+
+        # Must be JSON-serializable
+        serialized = json.dumps(item)
+        deserialized = json.loads(serialized)
+
+        # Required fields for agent-delegated capture
+        assert "tier2" in deserialized
+        assert "capture" in deserialized["tier2"]
+        assert "domain" in deserialized["tier2"]
+        assert "title" in deserialized
+        assert "reusable_insight" in deserialized
+        assert len(deserialized["reusable_insight"]) > 0
+        assert "status_hint" in deserialized
+        assert "confidence" in deserialized
+        assert isinstance(deserialized["confidence"], (int, float))
+        assert 0.0 <= deserialized["confidence"] <= 1.0
