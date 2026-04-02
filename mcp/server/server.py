@@ -678,6 +678,91 @@ class MCPServerApp:
                 logger.error(f"Capture failed: {e}", exc_info=True)
                 return make_error(e)
 
+        # ---------- MCP Tools: Batch Capture (Session-End Sweep) ---------- #
+        @self.mcp.tool(
+            name="batch_capture",
+            description=(
+                "Batch-capture multiple decisions at once (session-end sweep). "
+                "Each item uses the same format as the `capture` tool's `extracted` parameter. "
+                "Items are processed independently — one failure does not abort others. "
+                "Novelty check runs per item; near-duplicates are skipped."
+            ),
+            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
+        )
+        async def tool_batch_capture(
+            items: Annotated[str, Field(description="JSON array of extracted decision objects (same format as capture's extracted parameter)")],
+            source: Annotated[str, Field(description="Source (e.g., 'claude_agent')")] = "claude_agent",
+            user: Annotated[Optional[str], Field(description="User who authored the decisions")] = None,
+            channel: Annotated[Optional[str], Field(description="Channel or context")] = None,
+            ctx: Optional[Context] = None,
+        ) -> Dict[str, Any]:
+            _maybe_reload_for_auto_provider(ctx)
+
+            if self._scribe is None:
+                return make_error(PipelineNotReadyError("Scribe pipeline not initialized."))
+            if not self._vault_index_name:
+                return make_error(PipelineNotReadyError("No index name available."))
+
+            try:
+                items_list = json.loads(items)
+            except json.JSONDecodeError as e:
+                return {"ok": False, "error": f"Invalid JSON: {e}"}
+
+            if not isinstance(items_list, list):
+                return {"ok": False, "error": "items must be a JSON array"}
+
+            if len(items_list) == 0:
+                return {"ok": True, "total": 0, "results": [], "captured": 0, "skipped": 0, "errors": 0}
+
+            results = []
+            for i, item in enumerate(items_list):
+                title = ""
+                try:
+                    title = item.get("title", "") if isinstance(item, dict) else ""
+                    result = await self._capture_single(
+                        text="[batch_capture]",
+                        source=source,
+                        user=user,
+                        channel=channel,
+                        extracted=json.dumps(item),
+                    )
+                    if result.get("captured"):
+                        status = "captured"
+                        novelty_class = result.get("novelty", {}).get("class", "novel")
+                    elif result.get("novelty", {}).get("class") == "near_duplicate":
+                        status = "near_duplicate"
+                        novelty_class = "near_duplicate"
+                    else:
+                        status = "skipped"
+                        novelty_class = result.get("novelty", {}).get("class", "")
+                    results.append({
+                        "index": i,
+                        "title": title,
+                        "status": status,
+                        "novelty": novelty_class,
+                    })
+                except Exception as e:
+                    logger.warning("batch_capture item %d failed: %s", i, e)
+                    results.append({
+                        "index": i,
+                        "title": title,
+                        "status": "error",
+                        "error": str(e),
+                    })
+
+            captured = sum(1 for r in results if r["status"] == "captured")
+            skipped = sum(1 for r in results if r["status"] in ("skipped", "near_duplicate"))
+            errors = sum(1 for r in results if r["status"] == "error")
+
+            return {
+                "ok": True,
+                "total": len(results),
+                "results": results,
+                "captured": captured,
+                "skipped": skipped,
+                "errors": errors,
+            }
+
         # ---------- MCP Tools: Recall (Retriever Pipeline) ---------- #
         @self.mcp.tool(
             name="recall",
