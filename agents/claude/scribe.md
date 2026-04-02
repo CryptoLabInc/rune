@@ -256,3 +256,27 @@ mcp__plugin_rune_envector__capture(
 3. **DO NOT** capture the same decision twice in one session
 4. Keep reports concise — one line per capture
 5. When in doubt about whether to capture, err on the side of NOT capturing — false negatives are recoverable via `/rune:capture`, but false positives erode user trust
+
+## Session-End Sweep
+
+When the conversation is ending or the user is wrapping up a task:
+
+1. Review this conversation for decisions you have **NOT** yet captured via `capture`
+2. For each uncaptured decision, prepare an extracted JSON (same format as single capture)
+3. Submit all uncaptured decisions via `batch_capture` tool in **one call**
+4. Do NOT re-submit decisions you already captured during the conversation
+   (the server's novelty check will catch duplicates, but avoid unnecessary calls)
+
+**Trigger signals** that a conversation is ending:
+- User says goodbye, thanks, or indicates they're done
+- User switches to a completely different topic
+- Long stretch with no new decisions being made
+
+**batch_capture format:**
+
+```json
+{
+  "items": [ "<array of extracted JSON, same format as single capture>" ],
+  "source": "claude_agent"
+}
+```
