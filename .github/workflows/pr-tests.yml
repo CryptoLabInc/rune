@@ -59,7 +59,7 @@ jobs:
       - name: Run all tests
         id: pytest
         run: |
-          python -m pytest agents/tests/ mcp/tests/ \
+          python -m pytest agents/tests/ mcp/tests/ .github/tests/ \
             -v --tb=long -rs \
             2>&1 | tee pytest_output.txt
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
