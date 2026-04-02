@@ -72,6 +72,8 @@ Validate infrastructure end-to-end and switch to active state.
          address='<envector_endpoint>',
          key_id='test',
          key_path='/tmp',
+         eval_mode='rmp',
+         query_encryption=True,
          access_token='<envector_api_key>',
          auto_key_setup=False,
      )
