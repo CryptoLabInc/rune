@@ -31,7 +31,7 @@ jobs:
             echo "has_changed=false" >> "$GITHUB_OUTPUT"
             echo "test_ids=" >> "$GITHUB_OUTPUT"
           else
-            python scripts/ci_changed_tests.py "$BASE" "$HEAD" $CHANGED
+            python .github/scripts/ci_changed_tests.py "$BASE" "$HEAD" $CHANGED
           fi
 
   run-tests:
