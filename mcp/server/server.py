@@ -629,172 +629,13 @@ class MCPServerApp:
                 # The calling agent (Claude/Gemini/Codex) has already evaluated and
                 # extracted the decision.  We just validate, build records, and store.
                 if extracted is not None:
-                    data = parse_llm_json(extracted)
-                    if not data:
-                        return {"ok": False, "error": "Invalid extracted JSON — could not parse."}
-
-                    # Tier 2 check: agent already evaluated
-                    tier2 = data.get("tier2", {})
-                    if not tier2.get("capture", True):
-                        return {
-                            "ok": True,
-                            "captured": False,
-                            "reason": f"Agent rejected: {tier2.get('reason', 'no reason')}",
-                        }
-
-                    # Domain from agent's tier2 evaluation
-                    agent_domain = tier2.get("domain", "general")
-
-                    # Parse confidence from agent JSON
-                    agent_confidence = data.get("confidence")
-                    if isinstance(agent_confidence, (int, float)):
-                        agent_confidence = max(0.0, min(1.0, float(agent_confidence)))
-                    else:
-                        agent_confidence = None
-
-                    # Build detection from agent data — no detector needed
-                    detection = _detection_from_agent_data(
-                        domain=agent_domain,
-                        confidence=float(agent_confidence) if agent_confidence is not None else 0.0,
-                    )
-
-                    # Build ExtractionResult from agent JSON
-
-                    phases_data = data.get("phases")
-                    if phases_data and len(phases_data) > 1:
-                        # Multi-phase or bundle
-                        phases = []
-                        for p in phases_data[:7]:
-                            phases.append(PhaseExtractedFields(
-                                phase_title=str(p.get("phase_title", ""))[:60],
-                                phase_decision=str(p.get("phase_decision", "")),
-                                phase_rationale=str(p.get("phase_rationale", "")),
-                                phase_problem=str(p.get("phase_problem", "")),
-                                alternatives=[str(a) for a in p.get("alternatives", []) if a],
-                                trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
-                                tags=[str(t).lower() for t in p.get("tags", []) if t],
-                            ))
-                        pre_extraction = ExtractionResult(
-                            group_title=str(data.get("group_title", ""))[:60],
-                            group_type=str(data.get("group_type", "phase_chain")),
-                            group_summary=str(data.get("reusable_insight", "") or data.get("group_title", "")),
-                            status_hint=str(data.get("status_hint", "")).lower(),
-                            tags=[str(t).lower() for t in data.get("tags", []) if t],
-                            confidence=agent_confidence,
-                            phases=phases,
-                        )
-                    else:
-                        # Single record (may have phases with 0-1 entries, or flat fields)
-                        if phases_data and len(phases_data) == 1:
-                            p = phases_data[0]
-                            single = ExtractedFields(
-                                title=str(p.get("phase_title", data.get("title", "")))[:60],
-                                rationale=str(p.get("phase_rationale", data.get("rationale", ""))),
-                                problem=str(p.get("phase_problem", data.get("problem", ""))),
-                                alternatives=[str(a) for a in p.get("alternatives", []) if a],
-                                trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
-                                status_hint=str(data.get("status_hint", "")).lower(),
-                                tags=[str(t).lower() for t in p.get("tags", data.get("tags", [])) if t],
-                            )
-                        else:
-                            single = ExtractedFields(
-                                title=str(data.get("title", ""))[:60],
-                                rationale=str(data.get("rationale", "")),
-                                problem=str(data.get("problem", "")),
-                                alternatives=[str(a) for a in data.get("alternatives", []) if a],
-                                trade_offs=[str(t) for t in data.get("trade_offs", []) if t],
-                                status_hint=str(data.get("status_hint", "")).lower(),
-                                tags=[str(t).lower() for t in data.get("tags", []) if t],
-                            )
-                        pre_extraction = ExtractionResult(
-                            group_title=single.title,
-                            group_summary=str(data.get("reusable_insight", "")) or "",
-                            status_hint=single.status_hint,
-                            tags=single.tags,
-                            confidence=agent_confidence,
-                            single=single,
-                        )
-
-                    raw_event = RawEvent(
+                    return await self._capture_single(
                         text=text,
-                        user=user or "unknown",
-                        channel=channel or "claude_session",
-                        timestamp=str(datetime.now(timezone.utc).timestamp()),
                         source=source,
+                        user=user,
+                        channel=channel,
+                        extracted=extracted,
                     )
-                    records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
-
-                    # ===== Novelty check (Memory-as-Filter) =====
-                    # Compare reusable_insight against existing memory
-                    embedding_text = _embedding_text_for_record(records[0])
-                    novelty_info = {"score": 1.0, "class": "novel", "related": []}
-
-                    try:
-                        search_result = envector_client.search_with_text(
-                            index_name=self._vault_index_name,
-                            query_text=embedding_text,
-                            embedding_service=embedding_service,
-                            topk=3,
-                        )
-                        parsed = envector_client.parse_search_results(search_result)
-                        if parsed:
-                            max_sim = max(r.get("score", 0.0) for r in parsed)
-                            novelty_info = _classify_novelty(max_sim)
-                            novelty_info["related"] = [
-                                {
-                                    "id": r.get("metadata", {}).get("id", ""),
-                                    "title": r.get("metadata", {}).get("title", ""),
-                                    "similarity": round(r.get("score", 0.0), 3),
-                                }
-                                for r in parsed[:3]
-                            ]
-
-                            # NEAR-DUPLICATE -> skip capture (only blocking case)
-                            if novelty_info["class"] == "near_duplicate":
-                                return {
-                                    "ok": True,
-                                    "captured": False,
-                                    "reason": "Near-duplicate — virtually identical insight already stored",
-                                    "novelty": novelty_info,
-                                }
-                    except Exception as e:
-                        # Novelty check failure is non-fatal — proceed with capture
-                        logger.warning("Novelty check failed: %s", e)
-
-                    # Embed reusable_insight (schema 2.1) or payload.text (fallback)
-                    texts = [_embedding_text_for_record(r) for r in records]
-                    metadata = [r.model_dump(mode="json") for r in records]
-                    insert_result = envector_client.insert_with_text(
-                        index_name=self._vault_index_name,
-                        texts=texts,
-                        embedding_service=embedding_service,
-                        metadata=metadata,
-                    )
-
-                    if not insert_result.get("ok"):
-                        return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
-
-                    first = records[0]
-                    result = {
-                        "ok": True,
-                        "captured": True,
-                        "record_id": first.id,
-                        "summary": first.title,
-                        "domain": first.domain.value,
-                        "certainty": first.why.certainty.value,
-                        "mode": "agent-delegated",
-                        "novelty": novelty_info,
-                    }
-                    if len(records) > 1:
-                        result["record_count"] = len(records)
-                        result["group_id"] = first.group_id
-                        result["group_type"] = first.group_type or "phase_chain"
-                    _append_capture_log(
-                        first.id, first.title, first.domain.value, "agent-delegated",
-                        novelty_class=novelty_info.get("class", ""),
-                        novelty_score=novelty_info.get("score", 0.0),
-                    )
-                    return result
 
                 # ===== FALLBACK: Legacy 3-tier pipeline (requires API keys) =====
                 # Retained for backward compatibility.  New integrations should use
@@ -1052,6 +893,205 @@ class MCPServerApp:
             except Exception as e:
                 logger.error(f"Delete failed: {e}", exc_info=True)
                 return {"ok": False, "error": str(e)}
+
+    async def _capture_single(
+        self,
+        text: str,
+        source: str,
+        user: Optional[str],
+        channel: Optional[str],
+        extracted: str,
+    ) -> Dict[str, Any]:
+        """Execute a single agent-delegated capture.
+
+        Extracted from tool_capture() so it can be reused by batch_capture
+        and session-end sweep without duplicating logic.
+
+        The caller is responsible for error handling (try/except); this
+        method raises on failure rather than returning error dicts.
+        """
+        from datetime import datetime, timezone
+        from agents.scribe.record_builder import RawEvent
+        from agents.scribe.llm_extractor import (
+            ExtractionResult, ExtractedFields, PhaseExtractedFields,
+        )
+        from agents.common.llm_utils import parse_llm_json
+
+        if self._scribe is None:
+            return {"ok": False, "error": "Scribe pipeline not initialized."}
+        if not self._vault_index_name:
+            return {"ok": False, "error": "No index name available."}
+
+        record_builder = self._scribe["record_builder"]
+        envector_client = self._scribe["envector_client"]
+        embedding_service = self._scribe["embedding_service"]
+
+        data = parse_llm_json(extracted)
+        if not data:
+            return {"ok": False, "error": "Invalid extracted JSON — could not parse."}
+
+        # Tier 2 check: agent already evaluated
+        tier2 = data.get("tier2", {})
+        if not tier2.get("capture", True):
+            return {
+                "ok": True,
+                "captured": False,
+                "reason": f"Agent rejected: {tier2.get('reason', 'no reason')}",
+            }
+
+        # Domain from agent's tier2 evaluation
+        agent_domain = tier2.get("domain", "general")
+
+        # Parse confidence from agent JSON
+        agent_confidence = data.get("confidence")
+        if isinstance(agent_confidence, (int, float)):
+            agent_confidence = max(0.0, min(1.0, float(agent_confidence)))
+        else:
+            agent_confidence = None
+
+        # Build detection from agent data — no detector needed
+        detection = _detection_from_agent_data(
+            domain=agent_domain,
+            confidence=float(agent_confidence) if agent_confidence is not None else 0.0,
+        )
+
+        # Build ExtractionResult from agent JSON
+
+        phases_data = data.get("phases")
+        if phases_data and len(phases_data) > 1:
+            # Multi-phase or bundle
+            phases = []
+            for p in phases_data[:7]:
+                phases.append(PhaseExtractedFields(
+                    phase_title=str(p.get("phase_title", ""))[:60],
+                    phase_decision=str(p.get("phase_decision", "")),
+                    phase_rationale=str(p.get("phase_rationale", "")),
+                    phase_problem=str(p.get("phase_problem", "")),
+                    alternatives=[str(a) for a in p.get("alternatives", []) if a],
+                    trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
+                    tags=[str(t).lower() for t in p.get("tags", []) if t],
+                ))
+            pre_extraction = ExtractionResult(
+                group_title=str(data.get("group_title", ""))[:60],
+                group_type=str(data.get("group_type", "phase_chain")),
+                group_summary=str(data.get("reusable_insight", "") or data.get("group_title", "")),
+                status_hint=str(data.get("status_hint", "")).lower(),
+                tags=[str(t).lower() for t in data.get("tags", []) if t],
+                confidence=agent_confidence,
+                phases=phases,
+            )
+        else:
+            # Single record (may have phases with 0-1 entries, or flat fields)
+            if phases_data and len(phases_data) == 1:
+                p = phases_data[0]
+                single = ExtractedFields(
+                    title=str(p.get("phase_title", data.get("title", "")))[:60],
+                    rationale=str(p.get("phase_rationale", data.get("rationale", ""))),
+                    problem=str(p.get("phase_problem", data.get("problem", ""))),
+                    alternatives=[str(a) for a in p.get("alternatives", []) if a],
+                    trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
+                    status_hint=str(data.get("status_hint", "")).lower(),
+                    tags=[str(t).lower() for t in p.get("tags", data.get("tags", [])) if t],
+                )
+            else:
+                single = ExtractedFields(
+                    title=str(data.get("title", ""))[:60],
+                    rationale=str(data.get("rationale", "")),
+                    problem=str(data.get("problem", "")),
+                    alternatives=[str(a) for a in data.get("alternatives", []) if a],
+                    trade_offs=[str(t) for t in data.get("trade_offs", []) if t],
+                    status_hint=str(data.get("status_hint", "")).lower(),
+                    tags=[str(t).lower() for t in data.get("tags", []) if t],
+                )
+            pre_extraction = ExtractionResult(
+                group_title=single.title,
+                group_summary=str(data.get("reusable_insight", "")) or "",
+                status_hint=single.status_hint,
+                tags=single.tags,
+                confidence=agent_confidence,
+                single=single,
+            )
+
+        raw_event = RawEvent(
+            text=text,
+            user=user or "unknown",
+            channel=channel or "claude_session",
+            timestamp=str(datetime.now(timezone.utc).timestamp()),
+            source=source,
+        )
+        records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
+
+        # ===== Novelty check (Memory-as-Filter) =====
+        # Compare reusable_insight against existing memory
+        embedding_text = _embedding_text_for_record(records[0])
+        novelty_info = {"score": 1.0, "class": "novel", "related": []}
+
+        try:
+            search_result = envector_client.search_with_text(
+                index_name=self._vault_index_name,
+                query_text=embedding_text,
+                embedding_service=embedding_service,
+                topk=3,
+            )
+            parsed = envector_client.parse_search_results(search_result)
+            if parsed:
+                max_sim = max(r.get("score", 0.0) for r in parsed)
+                novelty_info = _classify_novelty(max_sim)
+                novelty_info["related"] = [
+                    {
+                        "id": r.get("metadata", {}).get("id", ""),
+                        "title": r.get("metadata", {}).get("title", ""),
+                        "similarity": round(r.get("score", 0.0), 3),
+                    }
+                    for r in parsed[:3]
+                ]
+
+                # NEAR-DUPLICATE -> skip capture (only blocking case)
+                if novelty_info["class"] == "near_duplicate":
+                    return {
+                        "ok": True,
+                        "captured": False,
+                        "reason": "Near-duplicate — virtually identical insight already stored",
+                        "novelty": novelty_info,
+                    }
+        except Exception as e:
+            # Novelty check failure is non-fatal — proceed with capture
+            logger.warning("Novelty check failed: %s", e)
+
+        # Embed reusable_insight (schema 2.1) or payload.text (fallback)
+        texts = [_embedding_text_for_record(r) for r in records]
+        metadata = [r.model_dump(mode="json") for r in records]
+        insert_result = envector_client.insert_with_text(
+            index_name=self._vault_index_name,
+            texts=texts,
+            embedding_service=embedding_service,
+            metadata=metadata,
+        )
+
+        if not insert_result.get("ok"):
+            return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+
+        first = records[0]
+        result = {
+            "ok": True,
+            "captured": True,
+            "record_id": first.id,
+            "summary": first.title,
+            "domain": first.domain.value,
+            "certainty": first.why.certainty.value,
+            "mode": "agent-delegated",
+            "novelty": novelty_info,
+        }
+        if len(records) > 1:
+            result["record_count"] = len(records)
+            result["group_id"] = first.group_id
+            result["group_type"] = first.group_type or "phase_chain"
+        _append_capture_log(
+            first.id, first.title, first.domain.value, "agent-delegated",
+            novelty_class=novelty_info.get("class", ""),
+            novelty_score=novelty_info.get("score", 0.0),
+        )
+        return result
 
     async def _legacy_standard_capture(
         self,

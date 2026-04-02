@@ -118,3 +118,20 @@ class TestBatchCaptureIntegration:
         assert capturable[0]["title"] == "Approved Decision"
         assert len(skipped) == 1
         assert skipped[0]["title"] == "Casual Chat"
+
+
+class TestCaptureSingleRefactor:
+    """Verify _capture_single exists as a method on MCPServerApp."""
+
+    def test_capture_single_is_method(self):
+        """After refactor, MCPServerApp should have _capture_single."""
+        import os, sys, inspect
+        # mcp/server/ lives two levels up from agents/tests/
+        mcp_root = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, "mcp")
+        )
+        if mcp_root not in sys.path:
+            sys.path.insert(0, mcp_root)
+        from server.server import MCPServerApp
+        assert hasattr(MCPServerApp, '_capture_single')
+        assert inspect.iscoroutinefunction(MCPServerApp._capture_single)
