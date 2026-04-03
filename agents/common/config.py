@@ -232,11 +232,20 @@ def load_config() -> RuneConfig:
         config.embedding.model = os.getenv("EMBEDDING_MODEL")
 
     if os.getenv("SCRIBE_PORT"):
-        config.scribe.slack_webhook_port = int(os.getenv("SCRIBE_PORT"))
+        try:
+            config.scribe.slack_webhook_port = int(os.getenv("SCRIBE_PORT"))
+        except ValueError:
+            print(f"[Config] Warning: invalid SCRIBE_PORT value: {os.getenv('SCRIBE_PORT')}")
     if os.getenv("SCRIBE_THRESHOLD"):
-        config.scribe.similarity_threshold = float(os.getenv("SCRIBE_THRESHOLD"))
+        try:
+            config.scribe.similarity_threshold = float(os.getenv("SCRIBE_THRESHOLD"))
+        except ValueError:
+            print(f"[Config] Warning: invalid SCRIBE_THRESHOLD value: {os.getenv('SCRIBE_THRESHOLD')}")
     if os.getenv("SCRIBE_AUTO_THRESHOLD"):
-        config.scribe.auto_capture_threshold = float(os.getenv("SCRIBE_AUTO_THRESHOLD"))
+        try:
+            config.scribe.auto_capture_threshold = float(os.getenv("SCRIBE_AUTO_THRESHOLD"))
+        except ValueError:
+            print(f"[Config] Warning: invalid SCRIBE_AUTO_THRESHOLD value: {os.getenv('SCRIBE_AUTO_THRESHOLD')}")
     if os.getenv("SLACK_SIGNING_SECRET"):
         config.scribe.slack_signing_secret = os.getenv("SLACK_SIGNING_SECRET")
     if os.getenv("NOTION_SIGNING_SECRET"):
