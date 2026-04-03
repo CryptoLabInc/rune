@@ -475,8 +475,19 @@ class MCPServerApp:
                 Dict with subsystem health information
             """
             import time
+            import sys
 
             report: Dict[str, Any] = {"ok": True}
+
+            # Environment Info
+            try:
+                report["environment"] = {
+                    "os": sys.platform,
+                    "python_version": sys.version.split(" ")[0],
+                    "cwd": os.getcwd(),
+                }
+            except Exception as e:
+                report["environment"] = {"error": str(e)}
 
             # Dormant state info
             config_path = os.path.join(os.path.expanduser("~"), ".rune", "config.json")
@@ -608,7 +619,7 @@ class MCPServerApp:
                 if extracted is not None:
                     data = parse_llm_json(extracted)
                     if not data:
-                        return {"ok": False, "error": "Invalid extracted JSON — could not parse."}
+                        return make_error(InvalidInputError("Invalid extracted JSON — could not parse."))
 
                     # Tier 2 check: agent already evaluated
                     tier2 = data.get("tier2", {})
@@ -709,7 +720,7 @@ class MCPServerApp:
                     )
 
                     if not insert_result.get("ok"):
-                        return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+                        return make_error(EnvectorInsertError(f"Insert failed: {insert_result.get('error')}"))
 
                     first = records[0]
                     result = {
@@ -778,7 +789,7 @@ class MCPServerApp:
                 )
 
                 if not insert_result.get("ok"):
-                    return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+                    return make_error(EnvectorInsertError(f"Insert failed: {insert_result.get('error')}"))
 
                 first = records[0]
                 result = {
