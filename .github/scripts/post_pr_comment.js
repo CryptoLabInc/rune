@@ -86,19 +86,18 @@ module.exports = async ({ github, context }) => {
   let changedSection = '';
   if (hasChanged && changedIds.length > 0) {
     const changedPass = changedIds.filter(id => resolveResult(id) === 'PASSED').length;
-    const changedRows = changedIds.map(id => {
-      const res = resolveResult(id);
-      return `| ${resultIcon[res]} ${res} | \`${id}\` |`;
-    });
+    const notPassedRows = changedIds
+      .map(id => ({ id, res: resolveResult(id) }))
+      .filter(({ res }) => res !== 'PASSED')
+      .map(({ id, res }) => `| ${resultIcon[res]} ${res} | \`${id}\` |`);
+    const notableTable = notPassedRows.length > 0
+      ? ['', '| Result | Test |', '|--------|------|', ...notPassedRows, ''].join('\n')
+      : '';
     changedSection = [
       '### Tests Added/Modified in This PR',
       '',
       `**${changedPass} / ${changedIds.length} passed**`,
-      '',
-      '| Result | Test |',
-      '|--------|------|',
-      ...changedRows,
-      '',
+      notableTable,
     ].join('\n');
   }
 
