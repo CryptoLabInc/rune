@@ -54,61 +54,15 @@ module.exports = async ({ github, context }) => {
 
   const pytestSummary = parsePytestSummary(rawOutput);
 
-  // Parse failure detail blocks from the FAILURES section
-  // pytest headers use "ClassName.test_method" (dot) not "::"
-  const failures = {};
-  const lines = rawOutput.split('\n');
-  let inFailures = false;
-  let currentKey = null;
-  let currentLines = [];
-  for (const line of lines) {
-    if (/^={3,}\s+FAILURES\s+={3,}/.test(line)) {
-      inFailures = true;
-      continue;
-    }
-    if (inFailures) {
-      const header = line.match(/^_{3,}\s+(.+?)\s+_{3,}$/);
-      if (header) {
-        if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
-        currentKey = header[1];
-        currentLines = [];
-        continue;
-      }
-      if (/^={3,}/.test(line)) {
-        if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
-        inFailures = false; currentKey = null; currentLines = [];
-        continue;
-      }
-      if (currentKey) currentLines.push(line);
-    }
-  }
-  if (currentKey) failures[currentKey] = currentLines.join('\n').trim();
 
   const resultIcon = { PASSED: '✅', FAILED: '❌', ERROR: '💥', SKIPPED: '⏭️', XFAIL: '🔕', XPASS: '⚠️', 'NOT RUN': '⚪' };
 
   // Parse skip reasons from the short test summary section of the main output
   const shortSummarySkips = parseShortSummarySkips(rawOutput);
 
-  // Build file → [reasons] for matching skipped test IDs to their reasons
-  const fileSkipReasons = {};
-  for (const s of shortSummarySkips) {
-    if (!fileSkipReasons[s.file]) fileSkipReasons[s.file] = [];
-    fileSkipReasons[s.file].push(s.reason);
-  }
-
-  // reasonById: first from inline verbose output (reason in parens), then short summary
   const resultById = {};
-  const reasonById = {};
   for (const t of testResults) {
     resultById[t.id] = t.result;
-    if (t.reason) reasonById[t.id] = t.reason;
-  }
-  for (const t of testResults) {
-    if ((t.result === 'SKIPPED' || t.result === 'XFAIL') && !reasonById[t.id]) {
-      const file = t.id.split('::')[0];
-      const reasons = fileSkipReasons[file];
-      if (reasons && reasons.length > 0) reasonById[t.id] = reasons[0];
-    }
   }
 
   // Tests Added/Modified in This PR — per-test PASS/FAIL and summary
@@ -190,60 +144,6 @@ module.exports = async ({ github, context }) => {
     tableSection = ['### Full Test Results', '', summary, notableTable].join('\n');
   }
 
-  // Failure details — pytest FAILURES headers use dot notation: "TestClass.test_method"
-  const failureSection = failedTests.length > 0
-    ? [
-        '---',
-        '### ❌ Failure Details',
-        '',
-        ...failedTests.flatMap(t => {
-          const parts = t.id.split('::').slice(1);
-          const keyDot = parts.join('.');
-          const keyColon = parts.join('::');
-          const detail = failures[keyDot] || failures[keyColon] || failures[t.id] || '(no detail found)';
-          return [
-            '<details>',
-            `<summary><code>${t.id}</code></summary>`,
-            '',
-            '```',
-            detail,
-            '```',
-            '',
-            '</details>',
-            '',
-          ];
-        }),
-      ].join('\n')
-    : '';
-
-  // Skipped details (execution-time + collection-time)
-  const hasAnySkipped = skippedTests.length > 0 || collectionSkipCount > 0;
-  const skippedSection = hasAnySkipped
-    ? [
-        '---',
-        '### ⏭️ Skipped Details',
-        '',
-        ...skippedTests.flatMap(t => [
-          `#### \`${t.id}\``,
-          `> ${reasonById[t.id] || '(no reason given)'}`,
-          '',
-        ]),
-        ...(collectionSkipCount > 0
-          ? (collectionSkips.length > 0
-              ? collectionSkips.flatMap(s => [
-                  `#### \`${s.file}:${s.line}\` _(collection-skipped)_`,
-                  `> ${s.reason}`,
-                  '',
-                ])
-              : [
-                  `#### _(${collectionSkipCount} collection-skipped test(s))_`,
-                  '> These tests were skipped during pytest collection. Check the short test summary in the CI logs for details.',
-                  '',
-                ])
-          : []),
-      ].join('\n')
-    : '';
-
   // Warning if test counts still don't reconcile after correction
   const warningSection = stillMismatched
     ? [
@@ -272,8 +172,6 @@ module.exports = async ({ github, context }) => {
   if (warningSection) bodyParts.push(warningSection);
   if (changedSection) bodyParts.push(changedSection);
   if (tableSection) bodyParts.push(tableSection);
-  if (failureSection) bodyParts.push(failureSection);
-  if (skippedSection) bodyParts.push(skippedSection);
 
   const body = bodyParts.join('\n');
 
