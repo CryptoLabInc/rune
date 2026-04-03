@@ -173,7 +173,14 @@ module.exports = async ({ github, context }) => {
   if (changedSection) bodyParts.push(changedSection);
   if (tableSection) bodyParts.push(tableSection);
 
-  const body = bodyParts.join('\n');
+  const LIMIT = 60000;
+  const TRUNCATION = `\n\n> ⚠️ Comment truncated — [See CI logs](${runUrl}) for the full results.`;
+
+  let body = bodyParts.join('\n');
+  if (body.length > LIMIT) {
+    const cutAt = body.lastIndexOf('\n', LIMIT - TRUNCATION.length);
+    body = body.slice(0, cutAt > 0 ? cutAt : LIMIT - TRUNCATION.length) + TRUNCATION;
+  }
 
   const { data: comments } = await github.rest.issues.listComments({
     owner: context.repo.owner,
