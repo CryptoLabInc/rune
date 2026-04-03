@@ -13,12 +13,9 @@ permissions:
   pull-requests: write
 
 jobs:
-  detect-changed-tests:
-    name: Detect changed test functions
+  run-tests:
+    name: Run all tests
     runs-on: ubuntu-latest
-    outputs:
-      test_ids: ${{ steps.detect.outputs.test_ids }}
-      has_changed: ${{ steps.detect.outputs.has_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,13 +34,6 @@ jobs:
           else
             python .github/scripts/ci_changed_tests.py "$BASE" "$HEAD" $CHANGED
           fi
-
-  run-tests:
-    name: Run all tests
-    needs: detect-changed-tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -188,8 +178,8 @@ jobs:
             }
 
             // Tests Added/Modified in This PR — per-test PASS/FAIL and summary
-            const hasChanged = '${{ needs.detect-changed-tests.outputs.has_changed }}' === 'true';
-            const changedIds = '${{ needs.detect-changed-tests.outputs.test_ids }}'
+            const hasChanged = '${{ steps.detect.outputs.has_changed }}' === 'true';
+            const changedIds = '${{ steps.detect.outputs.test_ids }}'
               .trim().split(' ').filter(Boolean);
 
             // For parameterized tests, ci_changed_tests.py outputs the base function name
