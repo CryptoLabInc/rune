@@ -45,6 +45,10 @@ Feature requests should include:
    - Follow existing code style
    - Update documentation
    - Test your changes
+     - Files must live under a `tests/` subdirectory and be named `test_*.py`
+     - Test classes must start with `Test`
+     - Test functions/methods must start with `test_`
+
    - Pass cross-agent invariant checks (see checklist below)
 
 4. **Commit your changes**

@@ -1,5 +1,5 @@
 # Test detection rules (ci_changed_tests.py + grep pattern):
-#   - Files must live under a `tests/` directory and be named `test_*.py`
+#   - Files must live under a `tests/` subdirectory and be named `test_*.py`
 #   - Test classes must start with `Test`
 #   - Test functions/methods must start with `test_`
 name: PR Tests
