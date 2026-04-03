@@ -334,10 +334,16 @@ jobs:
                 ].join('\n')
               : '';
 
+            const headSha = '${{ github.event.pull_request.head.sha }}';
+            const shortSha = headSha.slice(0, 7);
+            const commitUrl = `https://github.com/${{ github.repository }}/commit/${headSha}`;
+
             const marker = '<!-- pr-tests-bot -->';
             const bodyParts = [
               marker,
               '## ' + status,
+              '',
+              `> Ran on commit [\`${shortSha}\`](${commitUrl})`,
               '',
             ];
 
