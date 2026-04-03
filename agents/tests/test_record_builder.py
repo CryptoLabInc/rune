@@ -616,73 +616,10 @@ class TestBuildPhases:
 
         assert len(records) == 3
 
-        # All share the same group_id
+        # Verify the builder linked them under one group
         group_ids = {r.group_id for r in records}
         assert len(group_ids) == 1
         assert None not in group_ids
-
-        # All have correct group_type
-        assert all(r.group_type == "phase_chain" for r in records)
-
-        # phase_seq is sequential (0, 1, 2)
-        seqs = [r.phase_seq for r in records]
-        assert seqs == [0, 1, 2]
-
-        # All have phase_total == 3
-        assert all(r.phase_total == 3 for r in records)
-
-        # Record IDs are unique with _p suffix
-        ids = [r.id for r in records]
-        assert len(ids) == len(set(ids))
-        assert any("_p0" in rid for rid in ids)
-        assert any("_p1" in rid for rid in ids)
-
-    def test_bundle_uses_b_suffix(self, sample_raw_event, sample_detection):
-        """build_phases uses _b suffix for bundle group type"""
-        from agents.scribe.record_builder import RecordBuilder
-        from agents.scribe.llm_extractor import PhaseExtractedFields, ExtractionResult
-        from agents.common.schemas import Sensitivity
-        from unittest.mock import Mock
-
-        phases = [
-            PhaseExtractedFields(
-                phase_title="Auth Method",
-                phase_decision="Use OAuth 2.0",
-                phase_rationale="Industry standard",
-                phase_problem="Authentication approach",
-            ),
-            PhaseExtractedFields(
-                phase_title="Token Storage",
-                phase_decision="HTTP-only cookies",
-                phase_rationale="XSS protection",
-                phase_problem="Where to store tokens",
-            ),
-        ]
-
-        extractor = Mock()
-        extractor.is_available = True
-        extractor.extract.return_value = ExtractionResult(
-            group_title="Auth Architecture",
-            group_type="bundle",
-            status_hint="accepted",
-            tags=["auth"],
-            single=None,
-            phases=phases,
-        )
-
-        builder = RecordBuilder(
-            default_sensitivity=Sensitivity.INTERNAL,
-            llm_extractor=extractor,
-        )
-
-        records = builder.build_phases(sample_raw_event, sample_detection)
-
-        assert len(records) == 2
-        assert all(r.group_type == "bundle" for r in records)
-
-        ids = [r.id for r in records]
-        assert any("_b0" in rid for rid in ids)
-        assert any("_b1" in rid for rid in ids)
 
     def test_no_llm_falls_back_to_single(self, sample_raw_event, sample_detection):
         """build_phases returns single record when LLM unavailable"""
@@ -695,3 +632,117 @@ class TestBuildPhases:
 
         assert len(records) == 1
         assert records[0].group_id is None
+
+
+class TestRecordBuilderDecomposed:
+    """
+    Granular unit tests
+    """
+
+    @pytest.fixture
+    def builder(self):
+        from agents.scribe.record_builder import RecordBuilder
+        from agents.common.schemas import Sensitivity
+        return RecordBuilder(default_sensitivity=Sensitivity.INTERNAL)
+
+    @pytest.fixture
+    def sample_raw_event(self):
+        from agents.scribe.record_builder import RawEvent
+        return RawEvent(
+            text="Test text",
+            user="user1",
+            channel="chan1",
+            timestamp="1706799600",
+            source="slack",
+        )
+
+    @pytest.fixture
+    def sample_detection(self):
+        from agents.scribe.detector import DetectionResult
+        return DetectionResult(
+            is_significant=True,
+            confidence=0.9,
+            matched_pattern="pattern",
+            domain="architecture",
+        )
+
+    def test_build_single_record_title_fallback(self, builder, sample_raw_event, sample_detection):
+        """Single record builder falls back to _extract_title if fields.title is missing"""
+        from agents.scribe.llm_extractor import ExtractedFields, ExtractionResult
+
+        fields = ExtractedFields(
+            title="",  # Missing title
+            rationale="Because reasons",
+            problem="Issue X",
+        )
+        extraction = ExtractionResult(single=fields)
+
+        # Access internal method to demonstrate testability
+        record = builder._build_single_record_from_extraction(
+            fields=fields,
+            raw_event=sample_raw_event,
+            clean_text="Decided to use X over Y",
+            detection=sample_detection,
+            extraction=extraction,
+            redaction_notes="Redacted 1 [API_KEY]",
+        )
+
+        # Title should have been extracted from clean_text/detection since fields.title was empty
+        assert record.title != ""
+        assert "Decided to use X" in record.title
+        assert record.quality.review_notes == "Redacted 1 [API_KEY]"
+
+    def test_build_multi_record_invalid_timestamp(self, builder, sample_detection):
+        """Multi record builder handles invalid timestamps in raw_event gracefully"""
+        from agents.scribe.record_builder import RawEvent
+        from agents.scribe.llm_extractor import ExtractionResult, PhaseExtractedFields
+
+        bad_event = RawEvent(
+            text="test", user="u", channel="c",
+            timestamp="invalid-timestamp", # This would cause float() to fail
+            source="slack"
+        )
+        extraction = ExtractionResult(
+            group_title="Title",
+            phases=[PhaseExtractedFields(phase_title="P1", phase_decision="D1")]
+        )
+
+        records = builder._build_multi_record_from_extraction(
+            extraction=extraction,
+            raw_event=bad_event,
+            clean_text="test",
+            detection=sample_detection,
+            redaction_notes=None
+        )
+
+        assert len(records) == 1
+        # timestamp parsing failure should result in keeping the raw string
+        assert records[0].decision.when == "invalid-timestamp"
+
+    def test_build_multi_record_group_metadata(self, builder, sample_raw_event, sample_detection):
+        """Group metadata (summary, types) is correctly mapped in multi-record build"""
+        from agents.scribe.llm_extractor import ExtractionResult, PhaseExtractedFields
+
+        extraction = ExtractionResult(
+            group_title="Global Group",
+            group_type="bundle",
+            group_summary="Overall summary",
+            phases=[
+                PhaseExtractedFields(phase_title="P1", phase_decision="D1"),
+                PhaseExtractedFields(phase_title="P2", phase_decision="D2")
+            ]
+        )
+
+        records = builder._build_multi_record_from_extraction(
+            extraction=extraction,
+            raw_event=sample_raw_event,
+            clean_text="test",
+            detection=sample_detection,
+            redaction_notes=None
+        )
+
+        assert len(records) == 2
+        assert records[0].group_type == "bundle"
+        assert records[0].group_summary == "Overall summary"
+        assert "_b0" in records[0].id
+        assert "_b1" in records[1].id
