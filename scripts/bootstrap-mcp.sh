@@ -81,7 +81,14 @@ else
                        file -b --mime "$_script" 2>/dev/null | grep -q "^text/" || continue
                        _first="$(head -1 "$_script")"
                        case "$_first" in
-                           \#\!*python*) sed -i "1s|^#\!.*|#\!$_VENV_PYTHON|" "$_script" ;;
+                           \#\!*python*)
+                                if sed --version >/dev/null 2>&1; then
+                                    # GNU sed (Linux)
+                                    sed -i "1s|^#\!.*|#\!$_VENV_PYTHON|" "$_script"
+                                else
+                                    # BSD sed (macOS)
+                                    sed -i '' "1s|^#\!.*|#\!$_VENV_PYTHON|" "$_script"
+                                fi ;;
                        esac
                    done
                    echo "[rune] Shebangs fixed." >&2 ;;
