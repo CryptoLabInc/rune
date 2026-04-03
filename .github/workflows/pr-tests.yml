@@ -70,9 +70,6 @@ jobs:
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
         env:
           PYTHONPATH: ${{ github.workspace }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ENVECTOR_API_KEY: ${{ secrets.ENVECTOR_API_KEY }}
         continue-on-error: true
 
       - name: Post PR comment
