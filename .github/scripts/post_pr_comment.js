@@ -168,11 +168,13 @@ module.exports = async ({ github, context }) => {
   // Warn if corrected total still doesn't match summary after reconciliation
   const stillMismatched = pytestSummary && correctedTotal !== authoritativeTotal;
 
+  const runUrl = `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+
   let tableSection = '';
   if (testResults.length > 0) {
     const correctedSkip = totalSkip + collectionSkipCount;
     const skipPart = correctedSkip > 0 ? `, ${correctedSkip} skipped` : '';
-    const summary = `**${totalPass} passed, ${totalFail} failed${skipPart}** (${authoritativeTotal} total)`;
+    const summary = `**${totalPass} passed, ${totalFail} failed${skipPart}** (${authoritativeTotal} total) — [See CI logs](${runUrl})`;
     const notableRows = [
       ...failedTests.map(t => `| ${resultIcon[t.result]} ${t.result} | \`${t.id}\` |`),
       ...skippedTests.map(t => `| ${resultIcon[t.result]} ${t.result} | \`${t.id}\` |`),
