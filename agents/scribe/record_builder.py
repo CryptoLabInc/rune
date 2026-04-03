@@ -242,48 +242,81 @@ class RecordBuilder:
             fields = extraction.single
             if fields is None:
                 return [self.build(raw_event, detection, language)]
-
-            title = fields.title or self._extract_title(clean_text, detection)
-            evidence = self._extract_evidence(raw_event, clean_text)
-            certainty, missing_info = self._determine_certainty(evidence, fields.rationale)
-            status = self._status_from_hint(fields.status_hint, evidence, clean_text)
-            domain = self._parse_domain(detection.domain)
-            timestamp = datetime.now(timezone.utc)
-            record_id = generate_record_id(timestamp, domain, title)
-
-            record = DecisionRecord(
-                id=record_id,
-                domain=domain,
-                sensitivity=self._default_sensitivity,
-                status=status,
-                timestamp=timestamp,
-                title=title,
-                decision=self._extract_decision_detail(raw_event, clean_text),
-                context=Context(
-                    problem=fields.problem,
-                    alternatives=fields.alternatives[:5],
-                    trade_offs=fields.trade_offs[:5],
-                ),
-                why=Why(
-                    rationale_summary=fields.rationale,
-                    certainty=certainty,
-                    missing_info=missing_info,
-                ),
-                evidence=evidence,
-                tags=fields.tags or self._extract_tags(clean_text, detection),
-                original_text=raw_event.text,
-                quality=Quality(
-                    scribe_confidence=extraction.confidence if extraction.confidence is not None else detection.confidence,
-                    review_state=ReviewState.UNREVIEWED,
-                    review_notes=redaction_notes if redaction_notes else None,
-                ),
-                payload=Payload(format="markdown", text=""),
-            )
-            record.ensure_evidence_certainty_consistency()
-            record.payload.text = render_payload_text(record)
-            return [record]
+            return [self._build_single_record_from_extraction(
+                fields=fields,
+                raw_event=raw_event,
+                clean_text=clean_text,
+                detection=detection,
+                extraction=extraction,
+                redaction_notes=redaction_notes,
+            )]
 
         # ===== Multi-record: phase_chain or bundle =====
+        return self._build_multi_record_from_extraction(
+            extraction=extraction,
+            raw_event=raw_event,
+            clean_text=clean_text,
+            detection=detection,
+            redaction_notes=redaction_notes,
+        )
+
+    def _build_single_record_from_extraction(
+        self,
+        fields: Any,
+        raw_event: RawEvent,
+        clean_text: str,
+        detection: DetectionResult,
+        extraction: ExtractionResult,
+        redaction_notes: Optional[str],
+    ) -> DecisionRecord:
+        title = fields.title or self._extract_title(clean_text, detection)
+        evidence = self._extract_evidence(raw_event, clean_text)
+        certainty, missing_info = self._determine_certainty(evidence, fields.rationale)
+        status = self._status_from_hint(fields.status_hint, evidence, clean_text)
+        domain = self._parse_domain(detection.domain)
+        timestamp = datetime.now(timezone.utc)
+        record_id = generate_record_id(timestamp, domain, title)
+
+        record = DecisionRecord(
+            id=record_id,
+            domain=domain,
+            sensitivity=self._default_sensitivity,
+            status=status,
+            timestamp=timestamp,
+            title=title,
+            decision=self._extract_decision_detail(raw_event, clean_text),
+            context=Context(
+                problem=fields.problem,
+                alternatives=fields.alternatives[:5],
+                trade_offs=fields.trade_offs[:5],
+            ),
+            why=Why(
+                rationale_summary=fields.rationale,
+                certainty=certainty,
+                missing_info=missing_info,
+            ),
+            evidence=evidence,
+            tags=fields.tags or self._extract_tags(clean_text, detection),
+            original_text=raw_event.text,
+            quality=Quality(
+                scribe_confidence=extraction.confidence if extraction.confidence is not None else detection.confidence,
+                review_state=ReviewState.UNREVIEWED,
+                review_notes=redaction_notes if redaction_notes else None,
+            ),
+            payload=Payload(format="markdown", text=""),
+        )
+        record.ensure_evidence_certainty_consistency()
+        record.payload.text = render_payload_text(record)
+        return record
+
+    def _build_multi_record_from_extraction(
+        self,
+        extraction: ExtractionResult,
+        raw_event: RawEvent,
+        clean_text: str,
+        detection: DetectionResult,
+        redaction_notes: Optional[str],
+    ) -> List[DecisionRecord]:
         phases = extraction.phases
         domain = self._parse_domain(detection.domain)
         timestamp = datetime.now(timezone.utc)
