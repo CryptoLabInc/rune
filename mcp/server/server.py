@@ -883,8 +883,8 @@ class MCPServerApp:
             name="reload_pipelines",
             description=(
                 "Re-read ~/.rune/config.json and reinitialize scribe/retriever pipelines. "
-                "Call this after /rune:activate changes state to 'active' to avoid "
-                "restarting Claude Code."
+                "Call this after the Rune activate command changes state to 'active' "
+                "to avoid restarting the current agent session."
             ),
             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
         )
@@ -1515,7 +1515,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--envector-key-id",
-        default=os.getenv("ENVECTOR_KEY_ID", "mcp_key"),
+        default=os.getenv("ENVECTOR_KEY_ID", "vault-key"),
         help="enVector key identifier.",
     )
     parser.add_argument(

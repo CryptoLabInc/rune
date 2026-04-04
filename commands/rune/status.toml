@@ -15,7 +15,7 @@ Follow these steps:
 Codex only:
 - If Codex MCP registration is missing for Rune, suggest running `<plugin_root>/scripts/install-codex.sh`.
 
-1. Check if `~/.rune/config.json` exists. If not, show "Not configured" and suggest `/rune:configure`.
+1. Check if `~/.rune/config.json` exists. If not, show "Not configured" and suggest `/rune:configure` (or `$rune configure` for Codex CLI).
 
 2. Read the config and display the basic configuration section.
 
@@ -51,8 +51,8 @@ MCP Tools:
 ```
 
 5. Add recommendations based on what is missing:
-   - Config missing: "Run `/rune:configure` to set up"
-   - State dormant: "Run `/rune:activate` to enable"
+   - Config missing: "Run `/rune:configure` (or `$rune configure` for Codex CLI) to set up"
+   - State dormant: "Run `/rune:activate` (or `$rune activate` for Codex CLI) to enable"
    - Keys not loaded: "Check Vault connection — keys are fetched from Vault at startup"
    - Pipelines not initialized: "Run `reload_pipelines` or restart the MCP server"
    - enVector unreachable: "Check network connectivity and enVector endpoint in config"
@@ -61,4 +61,3 @@ Use checkmarks for healthy items, X marks for issues.
 
 User input: {{input}}
 """
-

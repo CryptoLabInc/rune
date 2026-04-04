@@ -8,7 +8,7 @@ Follow these steps:
 
 2. If confirmed:
    - Delete `~/.rune/config.json`
-   - Respond: "Configuration cleared. Run `/rune:configure` to set up again."
+   - Respond: "Configuration cleared. Run `/rune:configure` (or `$rune configure` for Codex CLI) to set up again."
 
 3. If not confirmed:
    - Respond: "Reset cancelled."

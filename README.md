@@ -202,32 +202,37 @@ Even if the cloud is compromised, your organizational knowledge remains mathemat
 
 ### Install
 
-#### Claude Code in terminal
+Claude Code in terminal:
 ```bash
 $ claude plugin marketplace add https://github.com/CryptoLabInc/rune.git
 $ claude plugin install rune
 ```
 
-#### In a Claude Code session
+In a Claude Code session:
 ```
 > /plugin marketplace add https://github.com/CryptoLabInc/rune.git
 > /plugin install rune
 ```
 
-#### In a Codex CLI session
+In a Codex CLI session:
 ```
 > $skill-installer install https://github.com/CryptoLabInc/rune.git
 ```
 
-#### Gemini CLI in terminal
+Gemini CLI in terminal:
 ```bash
 $ gemini extensions install https://github.com/CryptoLabInc/rune.git
 ```
 
 ### Configure
 
+In slash-command agents:
 ```
 > /rune:configure
+```
+In Codex CLI:
+```
+> $rune configure
 ```
 
 You'll need credentials from your team admin:
@@ -336,7 +341,7 @@ Give each member:
 - Vault gRPC endpoint + authentication token
 - enVector cluster endpoint + API key
 
-They install the plugin, run `/rune:configure`, and they're connected to the team memory.
+They install the plugin, run the Rune configure command (`/rune:configure` in slash-command clients, `$rune configure` in Codex CLI), and they're connected to the team memory.
 
 ### Security Management
 

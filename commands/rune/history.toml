@@ -36,7 +36,7 @@ Timestamp            | Record ID                         | Title                
    - "No captures recorded yet. Rune captures decisions automatically during conversations."
 
 4. Show tip at the bottom:
-   - "Use `/rune:delete <record_id>` to remove a capture."
+   - "Use `/rune:delete <record_id>` (or `$rune delete <record_id>` for Codex CLI) to remove a capture."
 
 User input: {{input}}
 """

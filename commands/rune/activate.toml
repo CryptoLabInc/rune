@@ -19,7 +19,7 @@ Codex only:
    "Not configured. Run `/rune:configure` first." and stop.
 
 2. Verify required fields exist: `vault.endpoint`, `vault.token`, `envector.endpoint`, `envector.api_key`.
-   If any are missing or empty, show what is missing and suggest `/rune:configure`.
+   If any are missing or empty, show what is missing and suggest `/rune:configure` (or `$rune configure` for Codex CLI).
 
 3. Validate infrastructure connectivity:
    - For Vault endpoint, parse the scheme:
@@ -38,7 +38,7 @@ Codex only:
 5. If checks fail:
    - Keep `state` as `"dormant"`
    - Show a detailed error report for each failed check
-   - Suggest: `/rune:status` for more info
+   - Suggest: `/rune:status` (or `$rune status` for Codex CLI) for more info
 
 User input: {{input}}
 """

@@ -14,7 +14,7 @@ Codex only:
 - If MCP tool routing is unavailable in Codex, suggest `<plugin_root>/scripts/install-codex.sh`.
 
 First, read `~/.rune/config.json`. If it is missing or `state` is not `"active"`, respond:
-"Rune is dormant. Run `/rune:configure` and `/rune:activate` first."
+"Rune is dormant. Run `/rune:configure` (or `$rune configure` for Codex CLI) and `/rune:activate` (or `$rune activate` for Codex CLI) first."
 Do NOT attempt any search.
 
 When active:

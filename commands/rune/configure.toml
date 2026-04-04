@@ -69,7 +69,7 @@ Rune Configuration Complete
 ============================
   Config    : ~/.rune/config.json
   Vault TLS : <enabled (system CA) | enabled (custom CA) | disabled>
-  State     : dormant (run /rune:activate to enable)
+  State     : dormant (run /rune:activate or $rune activate to enable)
 ```
 
 If Vault was not configured, add: "Vault not configured — plugin will start in dormant state."
