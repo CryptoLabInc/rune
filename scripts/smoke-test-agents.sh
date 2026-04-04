@@ -41,7 +41,7 @@ check_path() {
 
 FAIL=0
 check_path "codex" "${RUNE_CODEX_ROOT:-$HOME/.codex/skills/rune}" || FAIL=1
-check_path "claude" "${RUNE_CLAUDE_ROOT:-$HOME/.claude/plugins/cache/cryptolab/rune/0.2.5}" || FAIL=1
+check_path "claude" "${RUNE_CLAUDE_ROOT:-$HOME/.claude/plugins/cache/cryptolab/rune/0.3.0}" || FAIL=1
 check_path "gemini" "${RUNE_GEMINI_ROOT:-$HOME/.gemini/extensions/rune}" || FAIL=1
 
 if [ "$FAIL" -eq 0 ]; then
