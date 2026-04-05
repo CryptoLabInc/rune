@@ -271,11 +271,7 @@ When the conversation is ending or the user is wrapping up a task:
 - User switches to a completely different topic
 - Long stretch with no new decisions being made
 
-**batch_capture format:**
+**batch_capture parameters** (each is a separate tool parameter, NOT a single JSON):
 
-```json
-{
-  "items": [ "<array of extracted JSON, same format as single capture>" ],
-  "source": "gemini_agent"
-}
-```
+- `items`: JSON array string of extracted decision objects (same format as single capture's `extracted` parameter)
+- `source`: `"gemini_agent"` (optional, defaults to `"claude_agent"`)

@@ -719,8 +719,9 @@ class MCPServerApp:
                 title = ""
                 try:
                     title = item.get("title", "") if isinstance(item, dict) else ""
+                    item_text = item.get("reusable_insight") or item.get("title") or "[batch_capture]" if isinstance(item, dict) else "[batch_capture]"
                     result = await self._capture_single(
-                        text="[batch_capture]",
+                        text=item_text,
                         source=source,
                         user=user,
                         channel=channel,
