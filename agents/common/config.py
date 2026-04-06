@@ -33,13 +33,6 @@ class VaultConfig:
 
 
 @dataclass
-class EnVectorConfig:
-    """enVector Cloud configuration"""
-    endpoint: str = "localhost:50050"
-    api_key: str = ""
-
-
-@dataclass
 class EmbeddingConfig:
     """Embedding model configuration"""
     mode: str = "femb"  # fastembed (on-device)
@@ -85,7 +78,6 @@ class RetrieverConfig:
 class RuneConfig:
     """Main Rune configuration"""
     vault: VaultConfig = field(default_factory=VaultConfig)
-    envector: EnVectorConfig = field(default_factory=EnVectorConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     scribe: ScribeConfig = field(default_factory=ScribeConfig)
@@ -104,15 +96,6 @@ def _parse_vault_config(data: dict) -> VaultConfig:
         token=vault_data.get("token", ""),
         ca_cert=vault_data.get("ca_cert", ""),
         tls_disable=vault_data.get("tls_disable", False),
-    )
-
-
-def _parse_envector_config(data: dict) -> EnVectorConfig:
-    """Parse envector section from config dict"""
-    envector_data = data.get("envector", {})
-    return EnVectorConfig(
-        endpoint=envector_data.get("endpoint", "localhost:50050"),
-        api_key=envector_data.get("api_key", ""),
     )
 
 
@@ -196,9 +179,10 @@ def load_config() -> RuneConfig:
     """
     Load configuration from file and environment variables.
 
-    Credentials managed by /rune:configure (vault, envector) are loaded
-    exclusively from ~/.rune/config.json. Other settings (embedding, scribe,
-    LLM keys) can be overridden via environment variables.
+    Vault credentials are loaded from ~/.rune/config.json.
+    enVector credentials are delivered via Vault bundle (not stored locally).
+    Other settings (embedding, scribe, LLM keys) can be overridden via
+    environment variables.
 
     Priority (highest to lowest):
     1. Environment variables
@@ -214,7 +198,6 @@ def load_config() -> RuneConfig:
                 data = json.load(f)
 
             config.vault = _parse_vault_config(data)
-            config.envector = _parse_envector_config(data)
             config.embedding = _parse_embedding_config(data)
             config.llm = _parse_llm_config(data)
             config.scribe = _parse_scribe_config(data)
@@ -312,10 +295,6 @@ def save_config(config: RuneConfig) -> None:
             "token": config.vault.token,
             "ca_cert": config.vault.ca_cert,
             "tls_disable": config.vault.tls_disable,
-        },
-        "envector": {
-            "endpoint": config.envector.endpoint,
-            "api_key": config.envector.api_key,
         },
         "embedding": {
             "mode": config.embedding.mode,
