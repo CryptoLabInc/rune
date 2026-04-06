@@ -5,7 +5,7 @@ allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(curl:*),
 
 # /rune:activate — Activate Plugin
 
-Validate infrastructure and switch to active state.
+Validate infrastructure end-to-end and switch to active state.
 
 ## Steps
 
@@ -25,7 +25,9 @@ Validate infrastructure and switch to active state.
    - If missing: auto-run `bash $PLUGIN_ROOT/scripts/install.sh` to set up.
    - If install fails: show error and stop.
 
-5. Run infrastructure validation:
+5. Run infrastructure validation - test **all subsystems**, not just connectivity:
+
+   **5a. Vault: connectivity + token validity**
    - Check Vault connectivity by parsing the scheme from `vault.endpoint`:
      - If `http://` or `https://`: `curl -sf <vault-endpoint>/health`
      - If `tcp://`: extract host and port, then test TCP connectivity using Python (portable across macOS/Linux, works in both bash and zsh):
@@ -34,18 +36,84 @@ Validate infrastructure and switch to active state.
       ```
       - Do NOT use `bash -c 'echo > /dev/tcp/...'` — macOS `/bin/bash` may not support `/dev/tcp`.
      - Do NOT blindly curl a `tcp://` endpoint — curl does not support the `tcp://` scheme.
+   - Validate Vault token:
+     ```bash
+     $PLUGIN_ROOT/.venv/bin/python3 -c "
+     import asyncio, sys, os
+     sys.path.insert(0, '$PLUGIN_ROOT/mcp')
+     from adapter.vault_client import VaultClient
+     async def check():
+         c = VaultClient(
+             vault_endpoint='<vault_endpoint>',
+             vault_token='<vault_token>',
+             ca_cert='<ca_cert_or_empty>' or None,
+             tls_disable=<tls_disable_bool>,
+         )
+         try:
+             bundle = await c.get_public_key()
+             key_id = bundle.get('key_id', '')
+             index = bundle.get('index_name', '')
+             print(f'OK key_id={key_id} index={index}')
+         finally:
+             await c.close()
+     asyncio.run(check())
+     "
+     ```
+   - If key fetch fails, report **specifically**: "Vault reachable but token rejected - check your token or run `/rune:configure`."
+
+   **5b. enVector: connectivity + API key validity**
+   - Test enVector by listing indexes:
+     ```bash
+     $PLUGIN_ROOT/.venv/bin/python3 -c "
+     import sys
+     sys.path.insert(0, '$PLUGIN_ROOT/mcp')
+     from adapter import EnVectorSDKAdapter
+     a = EnVectorSDKAdapter(
+         address='<envector_endpoint>',
+         key_id='test',
+         key_path='/tmp',
+         eval_mode='rmp',
+         query_encryption=False,
+         access_token='<envector_api_key>',
+         auto_key_setup=False,
+     )
+     result = a.invoke_get_index_list()
+     print('OK')
+     "
+     ```
+   - If fails, report **specifically**: "enVector unreachable or API key invalid - check endpoint and key in config."
+
+   **5c. Python environment**
    - Check MCP server can import: `$PLUGIN_ROOT/.venv/bin/python3 -c "import mcp"`
 
-6. If all checks pass:
+6. Display a per-subsystem validation report:
+   ```
+   Infrastructure Validation
+   =========================
+   - Vault reachable        (tcp://vault.example.com:50051)
+   - Vault token valid      (key_id: abc123)
+   - enVector reachable     (cluster-xxx.envector.io)
+   - enVector API key valid
+   - Python environment     (.venv OK)
+   ```
+   Use "x" mark for failures with the specific error message on the same line.
+
+7. If all checks pass:
    - Update `~/.rune/config.json` setting `state` to `"active"`
+   - **Clear dormant reason**: remove `dormant_reason` and `dormant_since` fields from config if present
    - Call `reload_pipelines` as a **native MCP tool** (`mcp__envector__reload_pipelines`) — invoke it directly like any other tool, do NOT use `claude mcp call` via Bash (that subcommand doesn't exist).
    - If `reload_pipelines` is not available as a tool (MCP server not running), note that a Claude Code restart is needed for changes to take effect.
    - If reload_pipelines returns errors, show them and suggest restarting Claude Code as fallback.
    - Respond: "Rune activated. Organizational memory is now online."
 
-7. If checks fail:
+8. If any check fails:
    - Keep `state` as `"dormant"`
-   - Show detailed error report for each failed check
-   - Suggest: `/rune:status` for more info
+   - Show the full validation report (passed and failed items)
+   - For each failure, include the specific recovery action:
+     - Vault unreachable: "Check if Vault server is running and endpoint is correct"
+     - Vault token invalid: "Token may be expired or incorrect - run `/rune:configure` to update"
+     - enVector unreachable: "Check network connectivity and enVector endpoint"
+     - enVector API key invalid: "API key may be incorrect - run `/rune:configure` to update"
+   - Suggest: `/rune:status` for more detailed diagnostics
 
 **Note**: This is the ONLY command that makes network requests to validate infrastructure.

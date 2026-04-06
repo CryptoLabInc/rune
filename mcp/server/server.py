@@ -168,6 +168,27 @@ def _read_capture_log(limit: int = 20, domain: str = None, since: str = None) ->
     return entries
 
 
+def _set_dormant_with_reason(reason: str):
+    """Update config.json to dormant state with a reason and timestamp"""
+    config_path = os.path.join(os.path.expanduser("~"), ".rune", "config.json")
+    try:
+        if not os.path.exists(config_path):
+            return
+        with open(config_path) as f:
+            data = json.load(f)
+        if data.get("state") == "dormant" and data.get("dormant_reason") == reason:
+            return  # already set to this reason — no change needed
+        data["state"] = "dormant"
+        data["dormant_reason"] = reason
+        data["dormant_since"] = datetime.now(timezone.utc).isoformat()
+        fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        logger.warning("Switched to dormant state: %s", reason)
+    except Exception as e:
+        logger.debug("Failed to update config dormant state: %s", e)
+
+
 async def _async_fetch_keys_from_vault(
     vault_endpoint: str,
     vault_token: str,
@@ -488,8 +509,8 @@ class MCPServerApp:
         @self.mcp.tool(
             name="diagnostics",
             description=(
-                "System health check tool for the Rune."
-                "Reporst status of Vault connection, encryption keys, "
+                "System health check tool for the Rune. "
+                "Reports status of Vault connection, encryption keys, "
                 "pipeline initialization, and enVector cloud reachability."
             ),
             annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False)
@@ -502,8 +523,33 @@ class MCPServerApp:
                 Dict with subsystem health information
             """
             import time
+            import sys
 
             report: Dict[str, Any] = {"ok": True}
+
+            # Environment Info
+            try:
+                report["environment"] = {
+                    "os": sys.platform,
+                    "python_version": sys.version.split(" ")[0],
+                    "cwd": os.getcwd(),
+                }
+            except Exception as e:
+                report["environment"] = {"error": str(e)}
+
+            # Dormant state info
+            config_path = os.path.join(os.path.expanduser("~"), ".rune", "config.json")
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path) as _cf:
+                        _cfg_data = json.load(_cf)
+                    report["state"] = _cfg_data.get("state", "unknown")
+                    if _cfg_data.get("dormant_reason"):
+                        report["dormant_reason"] = _cfg_data["dormant_reason"]
+                    if _cfg_data.get("dormant_since"):
+                        report["dormant_since"] = _cfg_data["dormant_since"]
+                except Exception:
+                    pass
 
             # Vault connection
             vault_info: Dict[str, Any] = {
@@ -603,7 +649,8 @@ class MCPServerApp:
 
             if self._scribe is None:
                 return make_error(PipelineNotReadyError(
-                    "Scribe pipeline not initialized. Run reload_pipelines or check Rune configuration."
+                    "Scribe pipeline not initialized.",
+                    recovery_hint="Run /rune:activate to reinitialize pipelines, or restart Claude Code if the problem persists.",
                 ))
 
             if not self._vault_index_name:
@@ -667,10 +714,28 @@ class MCPServerApp:
 
             except VaultError as e:
                 logger.error(f"Capture failed (Vault): {e}", exc_info=True)
-                return make_error(VaultDecryptionError(str(e)))
+                _set_dormant_with_reason("vault_unreachable")
+                return make_error(VaultConnectionError(
+                    str(e),
+                    recovery_hint=(
+                        "Vault error during capture. Check: "
+                        "(1) Is the Vault server running? "
+                        "(2) Is your token valid? "
+                        "Run /rune:status for diagnostics."
+                    ),
+                ))
             except (ConnectionError, OSError) as e:
                 logger.error(f"Capture failed (network): {e}", exc_info=True)
-                return make_error(EnvectorConnectionError(str(e)))
+                _set_dormant_with_reason("envector_unreachable")
+                return make_error(EnvectorConnectionError(
+                    str(e),
+                    recovery_hint=(
+                        "Network error during capture. Check: "
+                        "(1) Is the enVector endpoint reachable? "
+                        "(2) Is your API key valid? "
+                        "Run /rune:status for diagnostics."
+                    ),
+                ))
             except ValueError as e:
                 logger.error(f"Capture failed (input): {e}", exc_info=True)
                 return make_error(InvalidInputError(str(e)))
@@ -788,7 +853,8 @@ class MCPServerApp:
 
             if self._retriever is None:
                 return make_error(PipelineNotReadyError(
-                    "Retriever pipeline not initialized. Run reload_pipelines or check Rune configuration."
+                    "Retriever pipeline not initialized.",
+                    recovery_hint="Run /rune:activate to reinitialize pipelines, or restart Claude Code if the problem persists.",
                 ))
 
             if topk > 10:
@@ -868,10 +934,28 @@ class MCPServerApp:
 
             except VaultError as e:
                 logger.error(f"Recall failed (Vault): {e}", exc_info=True)
-                return make_error(VaultDecryptionError(str(e)))
+                _set_dormant_with_reason("vault_unreachable")
+                return make_error(VaultDecryptionError(
+                    str(e),
+                    recovery_hint=(
+                        "Vault decryption failed during recall. Check: "
+                        "(1) Is your Vault token valid? "
+                        "(2) Does the token have permission for this team index? "
+                        "Run /rune:status for diagnostics or /rune:configure to update credentials."
+                    ),
+                ))
             except (ConnectionError, OSError) as e:
                 logger.error(f"Recall failed (network): {e}", exc_info=True)
-                return make_error(EnvectorConnectionError(str(e)))
+                _set_dormant_with_reason("envector_unreachable")
+                return make_error(EnvectorConnectionError(
+                    str(e),
+                    recovery_hint=(
+                        "Network error during recall. Check: "
+                        "(1) Is the enVector endpoint reachable? "
+                        "(2) Is your API key still valid? "
+                        "Run /rune:status for diagnostics."
+                    ),
+                ))
             except ValueError as e:
                 logger.error(f"Recall failed (input): {e}", exc_info=True)
                 return make_error(InvalidInputError(str(e)))
@@ -935,7 +1019,10 @@ class MCPServerApp:
             record_id: Annotated[str, Field(description="The record ID to soft-delete (e.g. dec_20260316_arch_abc)")],
         ) -> Dict[str, Any]:
             if self._retriever is None or self._scribe is None:
-                return {"ok": False, "error": "Pipelines not initialized. Is Rune active?"}
+                return make_error(PipelineNotReadyError(
+                    "Pipelines not initialized.",
+                    recovery_hint="Run /rune:activate to reinitialize pipelines, or restart Claude Code if the problem persists.",
+                ))
 
             try:
                 searcher = self._retriever["searcher"]
@@ -944,7 +1031,10 @@ class MCPServerApp:
                 from agents.retriever.query_processor import ParsedQuery, TimeScope
                 target = await searcher.search_by_id(record_id)
                 if not target:
-                    return {"ok": False, "error": f"Record '{record_id}' not found in search results."}
+                    return make_error(InvalidInputError(
+                        f"Record '{record_id}' not found in search results. "
+                        "Use capture_history to find valid record IDs."
+                    ))
 
                 # Update status to reverted in metadata
                 metadata = target.metadata
@@ -965,7 +1055,9 @@ class MCPServerApp:
                 )
 
                 if not insert_result.get("ok"):
-                    return {"ok": False, "error": f"Re-insert failed: {insert_result.get('error')}"}
+                    return make_error(EnvectorInsertError(
+                        f"Re-insert failed: {insert_result.get('error')}"
+                    ))
 
                 _append_capture_log(record_id, target.title, target.domain, "soft-delete", action="deleted")
                 return {
@@ -976,9 +1068,33 @@ class MCPServerApp:
                     "method": "soft-delete (status=reverted)",
                 }
 
+            except VaultError as e:
+                logger.error(f"Delete failed (Vault): {e}", exc_info=True)
+                _set_dormant_with_reason("vault_unreachable")
+                return make_error(VaultConnectionError(
+                    str(e),
+                    recovery_hint=(
+                        "Vault error during delete. Check: "
+                        "(1) Is the Vault server running? "
+                        "(2) Is your token valid? "
+                        "Run /rune:status for diagnostics."
+                    ),
+                ))
+            except (ConnectionError, OSError) as e:
+                logger.error(f"Delete failed (network): {e}", exc_info=True)
+                _set_dormant_with_reason("envector_unreachable")
+                return make_error(EnvectorConnectionError(
+                    str(e),
+                    recovery_hint=(
+                        "Network error during delete. Check: "
+                        "(1) Is the enVector endpoint reachable? "
+                        "(2) Is your API key valid? "
+                        "Run /rune:status for diagnostics."
+                    ),
+                ))
             except Exception as e:
                 logger.error(f"Delete failed: {e}", exc_info=True)
-                return {"ok": False, "error": str(e)}
+                return make_error(e)
 
     async def _capture_single(
         self,
@@ -1325,6 +1441,7 @@ class MCPServerApp:
                     else:
                         result["errors"].append("Failed to fetch keys from Vault")
                         logger.error("Failed to fetch keys from Vault — capture/search will fail")
+                        _set_dormant_with_reason("vault_unreachable")
 
             if not key_id:
                 result["errors"].append("key_id not available. Vault must provide key_id.")
@@ -1485,10 +1602,22 @@ class MCPServerApp:
                     logger.info("Retriever pipeline initialized (agent-delegated mode — raw results returned)")
 
         except VaultError as e:
-            result["errors"].append({"code": "VAULT_CONNECTION_ERROR", "message": str(e), "retryable": True})
+            result["errors"].append({
+                "code": "VAULT_CONNECTION_ERROR",
+                "message": str(e),
+                "retryable": True,
+                "recovery_hint": "Vault connection failed during pipeline initialization. Check Vault endpoint and token via /rune:status.",
+            })
+            _set_dormant_with_reason("vault_unreachable")
             logger.warning(f"Pipeline init failed (Vault): {e}")
         except Exception as e:
-            result["errors"].append({"code": "INTERNAL_ERROR", "message": str(e), "retryable": False})
+            result["errors"].append({
+                "code": "INTERNAL_ERROR",
+                "message": str(e),
+                "retryable": False,
+                "recovery_hint": "Unexpected error during pipeline initialization. Try /rune:activate or restart Claude Code.",
+            })
+            _set_dormant_with_reason("pipeline_init_failed")
             logger.warning(f"Pipeline init failed: {e}")
 
         return result
@@ -1627,6 +1756,7 @@ if __name__ == "__main__":
             AGENT_DEK = vault_agent_dek
         else:
             logger.error("Failed to fetch keys/key_id from Vault. Operations requiring encryption will fail.")
+            _set_dormant_with_reason("vault_unreachable")
             AUTO_KEY_SETUP = False
     elif RUNEVAULT_ENDPOINT and not RUNEVAULT_TOKEN:
         logger.warning("Vault endpoint provided but no token specified. Skipping Vault integration.")

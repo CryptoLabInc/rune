@@ -91,6 +91,8 @@ class RuneConfig:
     scribe: ScribeConfig = field(default_factory=ScribeConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     state: str = "dormant"  # "active" or "dormant"
+    dormant_reason: str = ""  # raeson why plugin entered dormant state (e.g., "vault_unreachable", "user_deactivated")
+    dormant_since: str = ""   # Timestamp of when dormant state was entered
     _env_sourced_keys: set = field(default_factory=set, repr=False)
 
 
@@ -194,6 +196,10 @@ def load_config() -> RuneConfig:
     """
     Load configuration from file and environment variables.
 
+    Credentials managed by /rune:configure (vault, envector) are loaded
+    exclusively from ~/.rune/config.json. Other settings (embedding, scribe,
+    LLM keys) can be overridden via environment variables.
+
     Priority (highest to lowest):
     1. Environment variables
     2. Config file (~/.rune/config.json)
@@ -214,34 +220,32 @@ def load_config() -> RuneConfig:
             config.scribe = _parse_scribe_config(data)
             config.retriever = _parse_retriever_config(data)
             config.state = data.get("state", "dormant")
+            config.dormant_reason = data.get("dormant_reason", "")
+            config.dormant_since = data.get("dormant_since", "")
         except (json.JSONDecodeError, IOError) as e:
             print(f"[Config] Warning: Failed to load config file: {e}")
 
     # Environment variable overrides
-    if os.getenv("RUNEVAULT_ENDPOINT"):
-        config.vault.endpoint = os.getenv("RUNEVAULT_ENDPOINT")
-    if os.getenv("RUNEVAULT_TOKEN"):
-        config.vault.token = os.getenv("RUNEVAULT_TOKEN")
-    if os.getenv("VAULT_CA_CERT"):
-        config.vault.ca_cert = os.getenv("VAULT_CA_CERT")
-    if os.getenv("VAULT_TLS_DISABLE", "").lower() == "true":
-        config.vault.tls_disable = True
-
-    if os.getenv("ENVECTOR_ENDPOINT"):
-        config.envector.endpoint = os.getenv("ENVECTOR_ENDPOINT")
-    if os.getenv("ENVECTOR_API_KEY"):
-        config.envector.api_key = os.getenv("ENVECTOR_API_KEY")
     if os.getenv("EMBEDDING_MODE"):
         config.embedding.mode = os.getenv("EMBEDDING_MODE")
     if os.getenv("EMBEDDING_MODEL"):
         config.embedding.model = os.getenv("EMBEDDING_MODEL")
 
     if os.getenv("SCRIBE_PORT"):
-        config.scribe.slack_webhook_port = int(os.getenv("SCRIBE_PORT"))
+        try:
+            config.scribe.slack_webhook_port = int(os.getenv("SCRIBE_PORT"))
+        except ValueError:
+            print(f"[Config] Warning: invalid SCRIBE_PORT value: {os.getenv('SCRIBE_PORT')}")
     if os.getenv("SCRIBE_THRESHOLD"):
-        config.scribe.similarity_threshold = float(os.getenv("SCRIBE_THRESHOLD"))
+        try:
+            config.scribe.similarity_threshold = float(os.getenv("SCRIBE_THRESHOLD"))
+        except ValueError:
+            print(f"[Config] Warning: invalid SCRIBE_THRESHOLD value: {os.getenv('SCRIBE_THRESHOLD')}")
     if os.getenv("SCRIBE_AUTO_THRESHOLD"):
-        config.scribe.auto_capture_threshold = float(os.getenv("SCRIBE_AUTO_THRESHOLD"))
+        try:
+            config.scribe.auto_capture_threshold = float(os.getenv("SCRIBE_AUTO_THRESHOLD"))
+        except ValueError:
+            print(f"[Config] Warning: invalid SCRIBE_AUTO_THRESHOLD value: {os.getenv('SCRIBE_AUTO_THRESHOLD')}")
     if os.getenv("SLACK_SIGNING_SECRET"):
         config.scribe.slack_signing_secret = os.getenv("SLACK_SIGNING_SECRET")
     if os.getenv("NOTION_SIGNING_SECRET"):
@@ -334,6 +338,13 @@ def save_config(config: RuneConfig) -> None:
         },
         "state": config.state,
     }
+
+    # Include dormant metadata
+    if config.state == "dormant":
+        if config.dormant_reason:
+            data["dormant_reason"] = config.dormant_reason
+        if config.dormant_since:
+            data["dormant_since"] = config.dormant_since
 
     with open(CONFIG_PATH, "w") as f:
         json.dump(data, f, indent=2)
