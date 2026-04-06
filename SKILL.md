@@ -320,6 +320,9 @@ Check activation state with `/rune:status` (or `$rune status` for Codex CLI)
 2. Check Vault is accessible: `curl <vault-url>/health`
 3. Reconfigure with `/rune:configure` (or `$rune configure` for Codex CLI)
 
+### enVector not provisioned?
+Vault admin must configure `ENVECTOR_ENDPOINT` and `ENVECTOR_API_KEY` on the Vault server. Contact your Vault administrator.
+
 ### Need to switch teams?
 Use `/rune:reset` (or `$rune reset` for Codex CLI) then `/rune:configure` (or `$rune configure` for Codex CLI) with new team credentials
 
