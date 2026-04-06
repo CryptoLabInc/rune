@@ -363,6 +363,8 @@ class MCPServerApp:
         self._agent_dek = agent_dek
         self._scribe = scribe_pipeline
         self._retriever = retriever_pipeline
+        self._envector_endpoint: Optional[str] = None
+        self._envector_api_key: Optional[str] = None
         self._client_provider_override: Optional[str] = None
         self._active_llm_provider: Optional[str] = None
         self._active_tier2_provider: Optional[str] = None
@@ -1440,6 +1442,10 @@ class MCPServerApp:
                             self._agent_id = vault_agent_id
                         if vault_agent_dek:
                             self._agent_dek = vault_agent_dek
+                        if vault_ev_endpoint:
+                            self._envector_endpoint = vault_ev_endpoint
+                        if vault_ev_api_key:
+                            self._envector_api_key = vault_ev_api_key
                     else:
                         result["errors"].append("Failed to fetch keys from Vault")
                         logger.error("Failed to fetch keys from Vault — capture/search will fail")
@@ -1463,10 +1469,10 @@ class MCPServerApp:
                 return result
 
             envector_client = EnVectorClient(
-                address=rune_config.envector.endpoint,
+                address=self._envector_endpoint or "",
                 key_path=key_path,
                 key_id=key_id,
-                access_token=rune_config.envector.api_key,
+                access_token=self._envector_api_key or "",
                 auto_key_setup=False,
                 agent_id=self._agent_id,
                 agent_dek=self._agent_dek,
@@ -1817,6 +1823,12 @@ if __name__ == "__main__":
         agent_id=AGENT_ID,
         agent_dek=AGENT_DEK,
     )
+
+    # Set enVector credentials from Vault bundle on app instance
+    if ENVECTOR_ENDPOINT:
+        app._envector_endpoint = ENVECTOR_ENDPOINT
+    if ENVECTOR_API_KEY:
+        app._envector_api_key = ENVECTOR_API_KEY
 
     # Initialize pipelines (reads ~/.rune/config.json state)
     _pipeline_result = app._init_pipelines()
