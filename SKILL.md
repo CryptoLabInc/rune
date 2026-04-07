@@ -88,12 +88,10 @@ If in Active state but operations fail:
 **Purpose**: Configure plugin credentials
 
 **Steps**:
-1. Ask user for enVector Endpoint (required, e.g., `cluster-xxx.envector.io`)
-2. Ask user for enVector API Key (required, e.g., `envector_xxx`)
-3. Ask user for Vault Endpoint (optional, e.g., `tcp://vault-TEAM.oci.envector.io:50051`)
+1. Ask user for Vault Endpoint (required, e.g., `tcp://vault-TEAM.oci.envector.io:50051`)
    - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
-4. Ask user for Vault Token (optional, e.g., `evt_xxx`)
-5. If Vault Endpoint and Token were both provided, ask the TLS question:
+2. Ask user for Vault Token (required, e.g., `evt_xxx`)
+3. Ask the TLS question:
 
    **"How does your Vault server handle TLS?"**
 
@@ -113,16 +111,16 @@ If in Active state but operations fail:
       - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
       - → config: `ca_cert: ""`, `tls_disable: true`
 
-   If Vault fields are skipped, note that the plugin will start in dormant state.
+   Note: enVector credentials are delivered automatically via the Vault bundle — no user input needed.
 
-6. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
+4. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
    - If validation fails: Create config with `state: "dormant"`, warn user
-   - If validation passes: Continue to step 7
-7. Create `~/.rune/config.json` with proper structure
-8. Set state based on validation:
+   - If validation passes: Continue to step 5
+5. Create `~/.rune/config.json` with proper structure
+6. Set state based on validation:
    - Infrastructure ready: `state: "active"`
    - Infrastructure not ready: `state: "dormant"`
-9. Confirm configuration and show next steps if dormant
+7. Confirm configuration and show next steps if dormant
 
 ### `/rune:status`
 (or `$rune status` for Codex CLI)
@@ -321,6 +319,9 @@ Check activation state with `/rune:status` (or `$rune status` for Codex CLI)
 1. Verify with team admin that credentials are correct
 2. Check Vault is accessible: `curl <vault-url>/health`
 3. Reconfigure with `/rune:configure` (or `$rune configure` for Codex CLI)
+
+### enVector not provisioned?
+Vault admin must configure `ENVECTOR_ENDPOINT` and `ENVECTOR_API_KEY` on the Vault server. Contact your Vault administrator.
 
 ### Need to switch teams?
 Use `/rune:reset` (or `$rune reset` for Codex CLI) then `/rune:configure` (or `$rune configure` for Codex CLI) with new team credentials

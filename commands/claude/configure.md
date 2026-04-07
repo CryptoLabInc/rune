@@ -9,15 +9,13 @@ Single entrypoint after `claude plugin install rune`. Handles environment setup,
 
 ## Quick Update Mode
 
-If $ARGUMENTS contains any of: `--vault-token`, `--vault-endpoint`, `--envector-endpoint`, `--api-key`:
+If $ARGUMENTS contains any of: `--vault-token`, `--vault-endpoint`:
 
 1. Read existing `~/.rune/config.json`
    - If not found: respond "Not configured yet. Run `/rune:configure` without arguments first." and stop.
 2. Update only the specified field(s):
    - `--vault-token <value>` → `vault.token`
    - `--vault-endpoint <value>` → `vault.endpoint` (auto-prepend `tcp://` if no scheme)
-   - `--envector-endpoint <value>` → `envector.endpoint`
-   - `--api-key <value>` → `envector.api_key`
 3. Write back to `~/.rune/config.json` with `chmod 600`
 4. Update `metadata.lastUpdated` to current ISO timestamp
 5. If state is "active", call `reload_pipelines` MCP tool to apply changes
@@ -57,14 +55,12 @@ Check if `~/.rune/config.json` already exists.
 - If user declines: skip to Step 5.
 
 Ask user for each credential one at a time:
-- **enVector Endpoint** (required, format: `cluster-xxx.envector.io`)
-- **enVector API Key** (required, format: `envector_xxx`)
-- **Vault Endpoint** (optional, format: `tcp://vault-TEAM.oci.envector.io:50051`)
+- **Vault Endpoint** (required, format: `tcp://vault-TEAM.oci.envector.io:50051`)
   - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
   - Example: user enters `vault.example.com:50051` → store as `tcp://vault.example.com:50051`
-- **Vault Token** (optional, format: `evt_xxx`)
+- **Vault Token** (required, format: `evt_xxx`)
 
-If Vault Endpoint and Token were both provided, ask the TLS question:
+Then ask the TLS question:
 
 **"How does your Vault server handle TLS?"**
 
@@ -84,8 +80,6 @@ If Vault Endpoint and Token were both provided, ask the TLS question:
    - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
    - → config: `ca_cert: ""`, `tls_disable: true`
 
-If Vault fields are skipped, note that the plugin will start in dormant state.
-
 ### 4. Write ~/.rune/config.json
 
 ```bash
@@ -96,11 +90,12 @@ Write the config file:
 ```json
 {
   "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>", "ca_cert": "<ca_cert_path or empty>", "tls_disable": false},
-  "envector": {"endpoint": "<envector_endpoint>", "api_key": "<envector_api_key>"},
   "state": "dormant",
-  "metadata": {"configVersion": "1.0", "lastUpdated": "<ISO timestamp>", "installedFrom": "<PLUGIN_ROOT>"}
+  "metadata": {"configVersion": "2.0", "lastUpdated": "<ISO timestamp>", "installedFrom": "<PLUGIN_ROOT>"}
 }
 ```
+
+Note: enVector credentials are no longer stored locally — they are delivered automatically via the Vault bundle at session start.
 
 Then: `chmod 600 ~/.rune/config.json`
 
@@ -112,7 +107,7 @@ This registers the envector MCP server via `claude mcp add --scope user` (Claude
 
 ### 6. Auto-Activate (if Vault configured)
 
-If both Vault endpoint and token were provided in Step 3:
+Vault endpoint and token are always provided (required). Proceed to auto-activate:
 
 1. Run infrastructure validation:
    - Check Vault connectivity by parsing the scheme from `vault.endpoint`:
@@ -153,5 +148,4 @@ Next steps:
   2. After restart, run /rune:activate to validate and enable
 ```
 
-If Vault was not configured, add: "Vault not configured — plugin will start in dormant state. Reconfigure anytime with `/rune:configure`."
 If auto-activation succeeded, show: "Rune is active. Organizational memory is now online."

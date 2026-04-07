@@ -202,10 +202,14 @@ Even if the cloud is compromised, your organizational knowledge remains mathemat
 
 ### Install
 
-Claude Code in terminal:
+In a terminal:
 ```bash
+# For Claude Code
 $ claude plugin marketplace add https://github.com/CryptoLabInc/rune.git
 $ claude plugin install rune
+
+# For Gemini CLI
+$ gemini extensions install https://github.com/CryptoLabInc/rune.git
 ```
 
 In a Claude Code session:
@@ -217,11 +221,6 @@ In a Claude Code session:
 In a Codex CLI session:
 ```
 > $skill-installer install https://github.com/CryptoLabInc/rune.git
-```
-
-Gemini CLI in terminal:
-```bash
-$ gemini extensions install https://github.com/CryptoLabInc/rune.git
 ```
 
 ### Configure
@@ -236,8 +235,9 @@ In Codex CLI:
 ```
 
 You'll need credentials from your team admin:
-- **Vault endpoint** + token (for decryption)
-- **enVector endpoint** + API key (for encrypted storage)
+- **Vault endpoint** + token (for decryption and encrypted storage)
+
+enVector Cloud credentials are delivered automatically via the Vault bundle at session start — you don't need to configure them separately.
 
 Don't have these? See [rune-admin](https://github.com/CryptoLabInc/rune-admin) for deployment instructions, or [examples/team-setup-example.md](examples/team-setup-example.md) for a team onboarding walkthrough.
 
@@ -339,7 +339,8 @@ See the [Rune-Admin Repository](https://github.com/CryptoLabInc/rune-admin):
 
 Give each member:
 - Vault gRPC endpoint + authentication token
-- enVector cluster endpoint + API key
+
+enVector Cloud credentials are included in the Vault bundle and delivered automatically at session start.
 
 They install the plugin, run the Rune configure command (`/rune:configure` in slash-command clients, `$rune configure` in Codex CLI), and they're connected to the team memory.
 
@@ -359,10 +360,6 @@ They install the plugin, run the Rune configure command (`/rune:configure` in sl
   "vault": {
     "endpoint": "your-vault-host:50051",
     "token": "your-vault-token"
-  },
-  "envector": {
-    "endpoint": "runestone-xxx.clusters.envector.io",
-    "api_key": "your-api-key"
   },
   "state": "active"
 }

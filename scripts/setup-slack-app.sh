@@ -8,11 +8,11 @@
 #   bash rune/scripts/setup-slack-app.sh [--ngrok]
 #
 # Environment Variables (set before running):
-#   ENVECTOR_ENDPOINT     — enVector Cloud endpoint (required)
-#   ENVECTOR_API_KEY      — enVector API key (required)
 #   SLACK_SIGNING_SECRET  — Slack signing secret (optional for dev)
 #   ANTHROPIC_API_KEY     — For Tier 2/3 LLM (optional)
 #   SCRIBE_PORT           — Server port (default: 8080)
+#
+# Note: enVector credentials are delivered via Vault bundle at runtime.
 #
 set -euo pipefail
 
@@ -49,18 +49,15 @@ fi
 PYTHON_VERSION=$(python3 --version 2>&1)
 echo "  ✓ $PYTHON_VERSION"
 
-# Check required env vars
-if [ -z "${ENVECTOR_ENDPOINT:-}" ] && [ ! -f "$CONFIG_FILE" ]; then
-    echo "  ✗ ENVECTOR_ENDPOINT not set and no config file found"
+# Check for Vault configuration (enVector credentials come from Vault bundle)
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "  ✗ No config file found at $CONFIG_FILE"
     echo ""
-    echo "  Set environment variables:"
-    echo "    export ENVECTOR_ENDPOINT=<cloud-endpoint>"
-    echo "    export ENVECTOR_API_KEY=<api-key>"
-    echo ""
-    echo "  Or create $CONFIG_FILE (see SLACK_SETUP.md)"
+    echo "  Run /rune:configure to set up Vault credentials,"
+    echo "  or create $CONFIG_FILE (see SLACK_SETUP.md)"
     exit 1
 fi
-echo "  ✓ enVector config available"
+echo "  ✓ Vault config available"
 
 # Check ngrok (if requested)
 if [ "$USE_NGROK" = true ]; then
@@ -92,10 +89,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
     "similarity_threshold": 0.35,
     "auto_capture_threshold": 0.7,
     "tier2_enabled": true
-  },
-  "envector": {
-    "endpoint": "",
-    "api_key": ""
   },
   "retriever": {
     "anthropic_api_key": ""
