@@ -207,7 +207,10 @@ class VaultClient:
             )
             if response.error:
                 raise VaultError(f"GetPublicKey failed: {response.error}")
-            return json.loads(response.key_bundle_json)
+            try:
+                return json.loads(response.key_bundle_json)
+            except (json.JSONDecodeError, ValueError) as e:
+                raise VaultError("GetPublicKey returned invalid JSON") from e
         except grpc.aio.AioRpcError as e:
             raise VaultError(f"gRPC GetPublicKey failed: {e.code()} {e.details()}")
 
@@ -286,7 +289,10 @@ class VaultClient:
                 raise VaultError(f"DecryptMetadata failed: {response.error}")
 
             # Parse each JSON string back to Python object
-            return [json.loads(s) for s in response.decrypted_metadata]
+            try:
+                return [json.loads(s) for s in response.decrypted_metadata]
+            except (json.JSONDecodeError, ValueError) as e:
+                raise VaultError("DecryptMetadata returned invalid JSON in metadata entry") from e
         except grpc.aio.AioRpcError as e:
             raise VaultError(
                 f"gRPC DecryptMetadata failed: {e.code()} {e.details()}"

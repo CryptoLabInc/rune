@@ -1,6 +1,6 @@
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 from pypdf import PdfReader
@@ -34,7 +34,7 @@ class DocumentPreprocessingAdapter:
     def preprocess_document_from_text(
         self,
         texts: List[str],
-    ) -> None:
+    ) -> List[Dict[str, Any]]:
         """
         Preprocess documents from the given text inputs
         """
@@ -51,8 +51,8 @@ class DocumentPreprocessingAdapter:
     def preprocess_documents_from_path(
         self,
         path: str,
-        language: str = None,
-    ) -> None:
+        language: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Preprocess documents from the given path
         """
@@ -66,7 +66,7 @@ class DocumentPreprocessingAdapter:
         chunks = self._chunk_documents(documents, splitter)
         return chunks
 
-    def _check_language_supported(self, language: str) -> bool:
+    def _check_language_supported(self, language: Optional[str] = None) -> str:
         if language is None:
             language = "DOCUMENT"
         language = language.upper()
@@ -82,7 +82,7 @@ class DocumentPreprocessingAdapter:
         logger.info(f"{len(doc_files)} text document loaded")
         return doc_files
 
-    def _load_documents_from_path(self, path: str, language: str = None) -> List[DocumentFile]:
+    def _load_documents_from_path(self, path: str, language: Optional[str] = None) -> List[DocumentFile]:
         root = Path(path)
         doc_files: List[DocumentFile] = []
 

@@ -22,6 +22,7 @@ python-json-logger>=2.0.0
 pydantic[email]>=2.11.7
 python-dotenv>=1.2.1
 fastembed>=0.7.4
+sentence-transformers>=3.0.0
 langchain-text-splitters>=1.0.0
 pypdf>=6.4.1
 
