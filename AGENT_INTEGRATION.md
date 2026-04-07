@@ -46,13 +46,14 @@ This prepares runtime using the shared bootstrap flow for Claude usage.
 
 ```bash
 claude mcp add --scope user --transport stdio \
-  -e ENVECTOR_CONFIG="$HOME/.rune/config.json" \
-  -e ENVECTOR_AUTO_KEY_SETUP=false \
+  -e RUNE_CONFIG="$HOME/.rune/config.json" \
   -e PYTHONPATH="/path/to/rune/mcp" \
-  envector -- \
+  rune -- \
   /path/to/rune/.venv/bin/python3 \
   /path/to/rune/mcp/server/server.py --mode stdio
 ```
+
+> enVector Cloud credentials are delivered automatically via the Vault bundle at session start.
 
 Restart Claude Code → MCP tools auto-load.
 
@@ -92,7 +93,8 @@ codex mcp list
 After installation, configure credentials:
 ```bash
 cp config/config.template.json ~/.rune/config.json
-# Edit with your vault/envector credentials
+# Edit with your Vault endpoint and token
+# enVector credentials are delivered automatically via the Vault bundle
 ```
 
 
@@ -147,7 +149,7 @@ Edit `~/.gemini/mcp_config.json`:
 ```json
 {
   "mcpServers": {
-    "envector": {
+    "rune": {
       "command": "/path/to/rune/.venv/bin/python3",
       "args": ["/path/to/rune/mcp/server/server.py"],
       "env": {
@@ -270,12 +272,13 @@ codex mcp list
 cat ~/.rune/config.json
 
 # Or set environment variables directly:
-export ENVECTOR_ENDPOINT="runestone-xxx.clusters.envector.io"
-export ENVECTOR_API_KEY="your-api-key"
 export RUNEVAULT_ENDPOINT="vault-yourteam.oci.envector.io:50051"
 export RUNEVAULT_TOKEN="your-token"
 # Optional: explicit gRPC target override (auto-derived from RUNEVAULT_ENDPOINT if omitted)
 # export RUNEVAULT_GRPC_TARGET="vault-host:50051"
+
+# enVector credentials are delivered automatically via the Vault bundle.
+# You do NOT need to set ENVECTOR_ENDPOINT or ENVECTOR_API_KEY.
 ```
 
 ### Verify MCP tools are available
