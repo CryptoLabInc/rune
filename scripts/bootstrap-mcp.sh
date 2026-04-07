@@ -139,19 +139,16 @@ fi
 [ "${SETUP_ONLY:-}" = "1" ] && exit 0
 
 # Configuration safety net:
-# If ~/.rune/config.json is missing but environment variables are set, generate it.
+# If ~/.rune/config.json is missing but Vault environment variables are set, generate it.
+# enVector credentials are delivered via the Vault bundle at runtime.
 CONFIG_FILE="$HOME/.rune/config.json"
-if [ ! -f "$CONFIG_FILE" ] && [ -n "${ENVECTOR_ENDPOINT:-}" ] && [ -n "${ENVECTOR_API_KEY:-}" ]; then
+if [ ! -f "$CONFIG_FILE" ] && [ -n "${RUNEVAULT_ENDPOINT:-${VAULT_ENDPOINT:-}}" ] && [ -n "${RUNEVAULT_TOKEN:-${VAULT_TOKEN:-}}" ]; then
     mkdir -p "$HOME/.rune" && chmod 700 "$HOME/.rune"
     cat <<EOF > "$CONFIG_FILE"
 {
   "vault": {
     "endpoint": "${RUNEVAULT_ENDPOINT:-${VAULT_ENDPOINT:-}}",
     "token": "${RUNEVAULT_TOKEN:-${VAULT_TOKEN:-}}"
-  },
-  "envector": {
-    "endpoint": "${ENVECTOR_ENDPOINT}",
-    "api_key": "${ENVECTOR_API_KEY}"
   },
   "state": "dormant",
   "metadata": {
