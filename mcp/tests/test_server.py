@@ -43,18 +43,6 @@ def mcp_server():
         def invoke_get_index_list(self) -> List[str]:
             return ["index_a", "index_b"]
 
-        # ----------- Mocked method: Get Index Info ----------- #
-        def invoke_get_index_info(self, index_name: str) -> Dict[str, Any]:
-            if index_name not in ("index_a", "index_b"):
-                raise ValueError(f"Index '{index_name}' not found")
-            return {"index_name": index_name, "dim": 128, "row_count": 42}
-
-        # ----------- Mocked method: Create Index ----------- #
-        def invoke_create_index(self, index_name: str, dim: int, index_params: Dict[str, Any] = None) -> Dict[str, Any]:
-            if index_params is not None and not isinstance(index_params, dict):
-                raise TypeError("index_params must be a dict or None")
-            return {"index_name": index_name, "dim": dim, "index_params": index_params}
-
         # ----------- Mocked method: Insert ----------- #
         def invoke_insert(
                 self,
@@ -63,12 +51,6 @@ def mcp_server():
                 metadata: Union[Any, List[Any]] = None
             ) -> Dict[str, Any]:
             return {"index_name": index_name, "vectors": vectors, "metadata": metadata}
-
-        # ----------- Mocked method: Search ----------- #
-        def invoke_search(self, index_name: str, query: Union[List[float], List[List[float]]], topk: int) -> List[Dict[str, Any]]:
-            # Return a fake response
-            #   - Expected Return Type: List[Dict[str, Any]]
-            return [{"id": 1, "score": 0.9, "metadata": {"fieldA": "valueA"}}]
 
     app = MCPServerApp(envector_adapter=FakeAdapter(), mcp_server_name="test-mcp", embedding_adapter=FakeEmbeddingAdapter())
     return app.mcp  # FastMCP Instance
@@ -145,19 +127,8 @@ def mcp_server_with_vault():
         def invoke_get_index_list(self) -> List[str]:
             return ["index_a", "index_b"]
 
-        def invoke_get_index_info(self, index_name: str) -> Dict[str, Any]:
-            if index_name not in ("index_a", "index_b"):
-                raise ValueError(f"Index '{index_name}' not found")
-            return {"index_name": index_name, "dim": 128, "row_count": 42}
-
-        def invoke_create_index(self, index_name: str, dim: int, index_params: Dict[str, Any] = None) -> Dict[str, Any]:
-            return {"index_name": index_name, "dim": dim, "index_params": index_params}
-
         def invoke_insert(self, index_name: str, vectors, metadata=None):
             return {"index_name": index_name, "vectors": vectors, "metadata": metadata}
-
-        def invoke_search(self, index_name: str, query, topk: int):
-            return [{"id": 1, "score": 0.9, "metadata": {"fieldA": "valueA"}}]
 
     app = MCPServerApp(
         envector_adapter=FakeAdapterWithVault(),

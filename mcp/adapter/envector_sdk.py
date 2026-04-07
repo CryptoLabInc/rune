@@ -123,47 +123,6 @@ class EnVectorSDKAdapter:
         self._agent_dek = agent_dek
         ev.init(address=address, key_path=key_path, key_id=key_id, eval_mode=eval_mode, auto_key_setup=auto_key_setup, access_token=access_token)
 
-    #------------------- Create Index ------------------#
-
-    def call_create_index(self, index_name, dim, index_params) -> Dict[str, Any]:
-        """
-        Create a new empty index.
-
-        Args
-        ----------
-            index_name (str): The name of the index.
-            dim (int): The dimensionality of the index.
-            index_params (dict, optional): The parameters for the index.
-
-        Returns
-        -------
-            Dict[str, Any]: If succeed, converted format of the create index results. Otherwise, error message.
-        """
-        try:
-            results = self.invoke_create_index(index_name=index_name, dim=dim, index_params=index_params)
-            return self._to_json_available({"ok": True, "results": results})
-        except Exception as e:
-            # Handle exceptions and return an appropriate error message
-            return {"ok": False, "error": repr(e)}
-
-    def invoke_create_index(self, index_name: str, dim: int, index_params: Dict[str, Any] = None):
-        """
-        Invokes the enVector SDK's create_index functionality.
-
-        Args:
-            index_name (str): The name of the index.
-            dim (int): The dimensionality of the index.
-            index_params (dict, optional): The parameters for the index.
-
-        Returns:
-            Any: Raw create index results from the enVector SDK.
-        """
-        # Return the created index instance
-        if self.query_encryption:
-            return ev.create_index(index_name=index_name, dim=dim, index_params=index_params, query_encryption="cipher")
-        else:
-            return ev.create_index(index_name=index_name, dim=dim, index_params=index_params, query_encryption="plain")
-
     #--------------- Get Index List --------------#
     def call_get_index_list(self) -> Dict[str, Any]:
         """
@@ -187,36 +146,6 @@ class EnVectorSDKAdapter:
             List[str]: List of index names from the enVector SDK.
         """
         return ev.get_index_list()
-
-    #--------------- Get Index Info --------------#
-    def call_get_index_info(self, index_name: str) -> Dict[str, Any]:
-        """
-        Calls the enVector SDK to get the information of a specific index.
-
-        Args:
-            index_name (str): The name of the index.
-
-        Returns:
-            Dict[str, Any]: If succeed, converted format of the index info. Otherwise, error message.
-        """
-        try:
-            results = self.invoke_get_index_info(index_name=index_name)
-            return self._to_json_available({"ok": True, "results": results})
-        except Exception as e:
-            # Handle exceptions and return an appropriate error message
-            return {"ok": False, "error": repr(e)}
-
-    def invoke_get_index_info(self, index_name: str) -> Dict[str, Any]:
-        """
-        Invokes the enVector SDK's get_index_info functionality.
-
-        Args:
-            index_name (str): The name of the index.
-
-        Returns:
-            Dict[str, Any]: Index information from the enVector SDK.
-        """
-        return ev.get_index_info(index_name=index_name)
 
     #------------------- Insert ------------------#
 
@@ -270,44 +199,7 @@ class EnVectorSDKAdapter:
         # Insert vectors with optional metadata
         return index.insert(data=vectors, metadata=metadata) # Return list of inserted vectors' IDs
 
-    #------------------- Search ------------------#
-
-    def call_search(self, index_name: str, query: Union[List[float], List[List[float]]], topk: int) -> Dict[str, Any]:
-        """
-        Calls the enVector SDK to perform a search operation.
-
-        Args:
-            index_name (str): The name of the index to search.
-            query (Union[List[float], List[List[float]]]): The search query.
-            topk (int): The number of top results to return.
-
-        Returns:
-            Dict[str, Any]: If succeed, converted format of the search results. Otherwise, error message.
-        """
-        try:
-            results = self.invoke_search(index_name=index_name, query=query, topk=topk)
-            return self._to_json_available({"ok": True, "results": results})
-        except Exception as e:
-            # Handle exceptions and return an appropriate error message
-            return {"ok": False, "error": repr(e)}
-
-    def invoke_search(self, index_name: str, query: Union[List[float], List[List[float]]], topk: int):
-        """
-        Invokes the enVector SDK's search functionality.
-
-        Args:
-            index_name (str): The name of the index to search.
-            query (Union[List[float], List[List[float]]]): The search query.
-            topk (int): The number of top results to return.
-
-        Returns:
-            Any: Raw search results from the enVector SDK.
-        """
-        index = ev.Index(index_name)  # Create an index instance with the given index name
-        # Search with the provided query and topk. Fixed output_fields parameter for now.
-        return index.search(query, top_k=topk, output_fields=["metadata"])
-
-    #------------------- Remember (Vault-Secured Pipeline) ------------------#
+    #------------------- Scoring (Vault-Secured Pipeline) ------------------#
 
     def call_score(
         self, index_name: str, query: Union[List[float], List[List[float]]]

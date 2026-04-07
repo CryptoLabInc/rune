@@ -369,10 +369,8 @@ class Searcher:
     # ================================================================
 
     async def _search_single(self, query_text: str, topk: int) -> List[SearchResult]:
-        """Execute a single search query via the appropriate pipeline."""
-        if self._vault:
-            return await self._search_via_vault(query_text, topk)
-        return self._search_direct(query_text, topk)
+        """Execute a single search query via Vault-secured pipeline."""
+        return await self._search_via_vault(query_text, topk)
 
     async def _search_via_vault(self, query_text: str, topk: int) -> List[SearchResult]:
         """
@@ -469,27 +467,6 @@ class Searcher:
 
         except Exception as e:
             logger.error("Vault search error: %s", e, exc_info=True)
-            return []
-
-    def _search_direct(self, query_text: str, topk: int) -> List[SearchResult]:
-        """Fallback: direct search without Vault (for non-Vault deployments)."""
-        try:
-            raw_result = self._client.search_with_text(
-                index_name=self._index_name,
-                query_text=query_text,
-                embedding_service=self._embedding,
-                topk=topk
-            )
-
-            if not raw_result.get("ok"):
-                logger.warning("Direct search failed: %s", raw_result.get("error"))
-                return []
-
-            parsed = self._client.parse_search_results(raw_result)
-            return [self._to_search_result(r) for r in parsed]
-
-        except Exception as e:
-            logger.error("Direct search error: %s", e)
             return []
 
     def _to_search_result(self, raw: Dict[str, Any]) -> SearchResult:

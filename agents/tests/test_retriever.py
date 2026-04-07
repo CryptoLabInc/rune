@@ -98,47 +98,53 @@ class TestSearcher:
     @pytest.fixture
     def mock_client(self):
         client = Mock()
-        client.search_with_text.return_value = {
-            "ok": True,
-            "results": [
-                {
-                    "id": "1",
-                    "distance": 0.2,
-                    "metadata": {
-                        "id": "dec_2024-01-01_arch_postgres",
-                        "title": "Adopt PostgreSQL",
-                        "domain": "architecture",
-                        "why": {"certainty": "supported"},
-                        "payload": {"text": "# Decision Record: Adopt PostgreSQL\n..."},
-                    }
-                }
-            ]
-        }
-        client.parse_search_results.return_value = [
-            {
-                "id": "1",
-                "score": 0.8,
-                "metadata": {
-                    "id": "dec_2024-01-01_arch_postgres",
-                    "title": "Adopt PostgreSQL",
-                    "domain": "architecture",
-                    "why": {"certainty": "supported"},
-                    "payload": {"text": "# Decision Record: Adopt PostgreSQL\n..."},
-                }
-            }
-        ]
+        client.score.return_value = {"ok": True, "encrypted_blobs": ["fake_blob"]}
+        client.remind.return_value = {"ok": True, "results": [
+            {"score": 0.8, "metadata": {
+                "id": "dec_2024-01-01_arch_postgres",
+                "title": "Adopt PostgreSQL",
+                "domain": "architecture",
+                "why": {"certainty": "supported"},
+                "payload": {"text": "# Decision Record: Adopt PostgreSQL\n..."},
+            }}
+        ]}
         return client
 
     @pytest.fixture
     def mock_embedding(self):
         embedding = Mock()
-        embedding.embed_single.return_value = [0.1] * 384
+        embedding.embed_single.return_value = [0.1] * 1024
         return embedding
 
     @pytest.fixture
-    def searcher(self, mock_client, mock_embedding):
+    def mock_vault(self):
+        from unittest.mock import AsyncMock
+        from dataclasses import dataclass
+
+        @dataclass
+        class VaultResult:
+            ok: bool = True
+            error: str = ""
+            results: list = None
+
+        vault = AsyncMock()
+        vault.decrypt_search_results.return_value = VaultResult(
+            ok=True,
+            results=[{"shard_idx": 0, "row_idx": 0, "score": 0.8}],
+        )
+        vault.decrypt_metadata.return_value = [
+            {"id": "dec_2024-01-01_arch_postgres",
+             "title": "Adopt PostgreSQL",
+             "domain": "architecture",
+             "why": {"certainty": "supported"},
+             "payload": {"text": "# Decision Record: Adopt PostgreSQL\n..."}}
+        ]
+        return vault
+
+    @pytest.fixture
+    def searcher(self, mock_client, mock_embedding, mock_vault):
         from agents.retriever.searcher import Searcher
-        return Searcher(mock_client, mock_embedding, "test-collection")
+        return Searcher(mock_client, mock_embedding, "test-collection", vault_client=mock_vault)
 
     @pytest.mark.asyncio
     async def test_search_returns_results(self, searcher):
@@ -193,22 +199,36 @@ class TestExpandPhaseChains:
 
     @pytest.fixture
     def mock_client(self):
-        from unittest.mock import AsyncMock
         client = Mock()
-        client.search_with_text = Mock(return_value={"ok": True, "results": []})
-        client.parse_search_results = Mock(return_value=[])
+        client.score.return_value = {"ok": True, "encrypted_blobs": ["fake_blob"]}
+        client.remind.return_value = {"ok": True, "results": []}
         return client
 
     @pytest.fixture
     def mock_embedding(self):
         embedding = Mock()
-        embedding.embed_single.return_value = [0.1] * 384
+        embedding.embed_single.return_value = [0.1] * 1024
         return embedding
 
     @pytest.fixture
-    def searcher(self, mock_client, mock_embedding):
+    def mock_vault(self):
+        from unittest.mock import AsyncMock
+        from dataclasses import dataclass
+
+        @dataclass
+        class VaultResult:
+            ok: bool = True
+            error: str = ""
+            results: list = None
+
+        vault = AsyncMock()
+        vault.decrypt_search_results.return_value = VaultResult(ok=True, results=[])
+        return vault
+
+    @pytest.fixture
+    def searcher(self, mock_client, mock_embedding, mock_vault):
         from agents.retriever.searcher import Searcher
-        return Searcher(mock_client, mock_embedding, "test-collection")
+        return Searcher(mock_client, mock_embedding, "test-collection", vault_client=mock_vault)
 
     def _make_result(self, record_id, group_id=None, group_type=None, phase_seq=None, phase_total=None, score=0.8):
         from agents.retriever.searcher import SearchResult
