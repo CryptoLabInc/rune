@@ -42,8 +42,8 @@ class EnVectorConfig:
 @dataclass
 class EmbeddingConfig:
     """Embedding model configuration"""
-    mode: str = "femb"  # fastembed (on-device)
-    model: str = "BAAI/bge-base-en-v1.5"
+    mode: str = "sbert"  # sentence-transformers (on-device)
+    model: str = "Qwen/Qwen3-Embedding-0.6B"
 
 
 @dataclass
@@ -120,8 +120,8 @@ def _parse_embedding_config(data: dict) -> EmbeddingConfig:
     """Parse embedding section from config dict"""
     embedding_data = data.get("embedding", {})
     return EmbeddingConfig(
-        mode=embedding_data.get("mode", "femb"),
-        model=embedding_data.get("model", "BAAI/bge-base-en-v1.5"),
+        mode=embedding_data.get("mode", "sbert"),
+        model=embedding_data.get("model", "Qwen/Qwen3-Embedding-0.6B"),
     )
 
 

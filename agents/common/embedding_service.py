@@ -30,7 +30,7 @@ class EmbeddingService:
     _instance: Optional["EmbeddingService"] = None
     _adapter = None
 
-    def __new__(cls, mode: str = "femb", model: str = "BAAI/bge-base-en-v1.5"):
+    def __new__(cls, mode: str = "femb", model: str = "Qwen/Qwen3-Embedding-0.6B"):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._init_adapter(mode, model)
@@ -157,8 +157,8 @@ _service_instance: Optional[EmbeddingService] = None
 
 
 def get_embedding_service(
-    mode: str = "femb",
-    model: str = "BAAI/bge-base-en-v1.5"
+    mode: str = "sbert",
+    model: str = "Qwen/Qwen3-Embedding-0.6B"
 ) -> EmbeddingService:
     """
     Get the singleton EmbeddingService instance.
