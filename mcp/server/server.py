@@ -58,7 +58,7 @@ del _p
 
 from fastmcp import FastMCP, Context  # pip install fastmcp
 from mcp.types import ToolAnnotations
-from adapter import EnVectorSDKAdapter, EmbeddingAdapter
+from adapter import EnVectorSDKAdapter
 from adapter.vault_client import VaultClient, VaultError
 from server.errors import (
     RuneError, VaultConnectionError, VaultDecryptionError,
@@ -296,20 +296,35 @@ def fetch_keys_from_vault(
         tuple: (success, index_name, key_id, agent_id, agent_dek_bytes, envector_endpoint, envector_api_key)
     """
     import asyncio
+    _fail = (False, None, None, None, None, None, None)
 
     try:
         asyncio.get_running_loop()
+        # Already inside an event loop (e.g. FastMCP startup) —
+        # run the async fetch in a separate thread with its own loop.
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
                 asyncio.run,
                 _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable),
             )
-            return future.result(timeout=30)
+            try:
+                return future.result(timeout=30)
+            except concurrent.futures.TimeoutError:
+                logger.error("Vault key fetch timed out after 30 seconds")
+                return _fail
+            except Exception as e:
+                logger.error(f"Vault key fetch failed in thread: {e}")
+                return _fail
     except RuntimeError:
-        return asyncio.run(
-            _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable)
-        )
+        # No running event loop — safe to use asyncio.run() directly.
+        try:
+            return asyncio.run(
+                _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable)
+            )
+        except Exception as e:
+            logger.error(f"Vault key fetch failed: {e}")
+            return _fail
 
 class MCPServerApp:
     """
@@ -327,7 +342,6 @@ class MCPServerApp:
             self,
             envector_adapter: Optional[EnVectorSDKAdapter] = None,
             mcp_server_name: str = "envector_mcp_server",
-            embedding_adapter: "EmbeddingAdapter" = None,
             vault_client: Optional[VaultClient] = None,
             vault_index_name: Optional[str] = None,
             key_path: Optional[str] = None,
@@ -343,6 +357,7 @@ class MCPServerApp:
             envector_adapter (EnVectorSDKAdapter): The enVector SDK adapter instance.
             mcp_server_name (str): The name of the MCP server.
             vault_client (VaultClient): Optional Vault client for secure decryption.
+                Embedding is initialized from config.json via _init_pipelines (no CLI override).
             vault_index_name (str): Team index name provisioned by Vault admin (optional).
             key_path (str): Root directory for encryption keys.
             key_id (str): Key identifier (subdirectory under key_path).
@@ -354,7 +369,7 @@ class MCPServerApp:
         """
         # adapters
         self.envector = envector_adapter
-        self.embedding = embedding_adapter
+        self.embedding = None  # set by _init_pipelines from config
         self.vault = vault_client
         self._vault_index_name = vault_index_name
         self._key_path = key_path or self.DEFAULT_KEY_PATH
@@ -400,7 +415,7 @@ class MCPServerApp:
                 raw_query = raw_query.strip()
 
                 if self.embedding is not None:
-                    return self.embedding.get_embedding([raw_query])[0]
+                    return self.embedding.embed([raw_query])[0]
 
                 if not raw_query:
                     raise ValueError("`query` string is empty. Provide a JSON array of floats or precomputed embedding.")
@@ -1416,40 +1431,34 @@ class MCPServerApp:
             key_path = self._key_path
             key_id = self._key_id
 
-            # Fetch keys from Vault if key_id unknown or keys missing locally
+            # Always re-fetch from Vault on reload to pick up endpoint/index changes
             if rune_config.vault.endpoint and rune_config.vault.token:
-                need_fetch = not key_id  # key_id not yet known
-                if key_id:
-                    enc_key_path = os.path.join(key_path, key_id, "EncKey.json")
-                    need_fetch = not os.path.exists(enc_key_path)
-
-                if need_fetch:
-                    logger.info("Fetching keys from Vault...")
-                    success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek, vault_ev_endpoint, vault_ev_api_key = fetch_keys_from_vault(
-                        rune_config.vault.endpoint,
-                        rune_config.vault.token,
-                        key_path,
-                        ca_cert=rune_config.vault.ca_cert or None,
-                        tls_disable=rune_config.vault.tls_disable,
-                    )
-                    if success and vault_key_id:
-                        key_id = vault_key_id
-                        self._key_id = key_id
-                        logger.info(f"Vault provided key_id: {key_id}")
-                        if vault_index and not self._vault_index_name:
-                            self._vault_index_name = vault_index
-                        if vault_agent_id:
-                            self._agent_id = vault_agent_id
-                        if vault_agent_dek:
-                            self._agent_dek = vault_agent_dek
-                        if vault_ev_endpoint:
-                            self._envector_endpoint = vault_ev_endpoint
-                        if vault_ev_api_key:
-                            self._envector_api_key = vault_ev_api_key
-                    else:
-                        result["errors"].append("Failed to fetch keys from Vault")
-                        logger.error("Failed to fetch keys from Vault — capture/search will fail")
-                        _set_dormant_with_reason("vault_unreachable")
+                logger.info("Fetching keys from Vault...")
+                success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek, vault_ev_endpoint, vault_ev_api_key = fetch_keys_from_vault(
+                    rune_config.vault.endpoint,
+                    rune_config.vault.token,
+                    key_path,
+                    ca_cert=rune_config.vault.ca_cert or None,
+                    tls_disable=rune_config.vault.tls_disable,
+                )
+                if success and vault_key_id:
+                    key_id = vault_key_id
+                    self._key_id = key_id
+                    logger.info(f"Vault provided key_id: {key_id}")
+                    if vault_index:
+                        self._vault_index_name = vault_index
+                    if vault_agent_id:
+                        self._agent_id = vault_agent_id
+                    if vault_agent_dek:
+                        self._agent_dek = vault_agent_dek
+                    if vault_ev_endpoint:
+                        self._envector_endpoint = vault_ev_endpoint
+                    if vault_ev_api_key:
+                        self._envector_api_key = vault_ev_api_key
+                else:
+                    result["errors"].append("Failed to fetch keys from Vault")
+                    logger.error("Failed to fetch keys from Vault — capture/search will fail")
+                    _set_dormant_with_reason("vault_unreachable")
 
             if not key_id:
                 result["errors"].append("key_id not available. Vault must provide key_id.")
@@ -1568,6 +1577,8 @@ class MCPServerApp:
                 "detector": detector,
                 "tier2_filter": tier2_filter,
             }
+            # Unify embedding: pipeline's EmbeddingService is the single source
+            self.embedding = embedding_svc
             result["scribe"] = True
             if has_llm_key:
                 logger.info("Scribe pipeline initialized (server-side Tier 2/3)")
@@ -1671,17 +1682,6 @@ if __name__ == "__main__":
         action="store_true",
         default=os.getenv("ENVECTOR_ENCRYPTED_QUERY", "false").lower() in ("true", "1", "yes"),
         help="Encrypt the query vectors."
-    )
-    parser.add_argument(
-        "--embedding-mode",
-        default=os.getenv("EMBEDDING_MODE", "femb"),
-        choices=("femb", "sbert", "hf", "openai"),
-        help="Embedding backend.",
-    )
-    parser.add_argument(
-        "--embedding-model",
-        default=os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
-        help="Embedding model name.",
     )
     parser.add_argument(
         "--no-auto-key-setup",
@@ -1789,15 +1789,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning(f"enVector adapter init failed (server will start in degraded mode): {e}")
 
-    if args.embedding_model is not None:
-        from adapter.embeddings import EmbeddingAdapter
-        embedding_adapter = EmbeddingAdapter(
-            mode=args.embedding_mode,
-            model_name=args.embedding_model
-        )
-    else:
-        embedding_adapter = None
-
     vault_client = None
     if RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN:
         logger.info(f"Initializing Vault client: {RUNEVAULT_ENDPOINT}")
@@ -1815,7 +1806,6 @@ if __name__ == "__main__":
     app = MCPServerApp(
         mcp_server_name=MCP_SERVER_NAME,
         envector_adapter=envector_adapter,
-        embedding_adapter=embedding_adapter,
         vault_client=vault_client,
         vault_index_name=VAULT_INDEX_NAME,
         key_path=ENVECTOR_KEY_PATH,

@@ -15,19 +15,17 @@ if MCP_ROOT not in sys.path:
 
 from fastmcp import Client
 from server.server import MCPServerApp
-from adapter import EnVectorSDKAdapter, EmbeddingAdapter
+from adapter import EnVectorSDKAdapter
 from adapter.vault_client import VaultClient, DecryptResult
 
-# embedding fake adapter
-class FakeEmbeddingAdapter(EmbeddingAdapter):
-    def __init__(self):
-        pass  # Actual initialization not needed
 
-    # ----------- Mocked method: get_embedding ----------- #
-    def get_embedding(self, texts: List[str]) -> np.ndarray:
-        # Return a fake response
-        #   - Expected Return Type: List[Dict[str, Any]]
-        return np.array([[0.1, 0.2, 0.3] * (i+1) for i in range(len(texts))])
+class FakeEmbeddingService:
+    """Fake embedding service matching EmbeddingService.embed() API."""
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        return [[0.1, 0.2, 0.3] * (i+1) for i in range(len(texts))]
+
+    def embed_single(self, text: str) -> List[float]:
+        return self.embed([text])[0]
 
 @pytest.fixture
 def mcp_server():
@@ -52,7 +50,8 @@ def mcp_server():
             ) -> Dict[str, Any]:
             return {"index_name": index_name, "vectors": vectors, "metadata": metadata}
 
-    app = MCPServerApp(envector_adapter=FakeAdapter(), mcp_server_name="test-mcp", embedding_adapter=FakeEmbeddingAdapter())
+    app = MCPServerApp(envector_adapter=FakeAdapter(), mcp_server_name="test-mcp")
+    app.embedding = FakeEmbeddingService()
     return app.mcp  # FastMCP Instance
 
 
@@ -133,10 +132,10 @@ def mcp_server_with_vault():
     app = MCPServerApp(
         envector_adapter=FakeAdapterWithVault(),
         mcp_server_name="test-mcp-vault",
-        embedding_adapter=FakeEmbeddingAdapter(),
         vault_client=FakeVaultClient(),
         vault_index_name="team-decisions",
     )
+    app.embedding = FakeEmbeddingService()
     return app.mcp
 
 
