@@ -1,320 +1,118 @@
 ---
 name: rune
-description: Encrypted organizational memory workflow for Rune with activation checks and /rune command behaviors across MCP-compatible agents.
+description: "Captures, stores, and retrieves FHE-encrypted organizational memories (decisions, rationale, lessons learned) via Rune's MCP tools. Use when the user invokes /rune commands, asks to store or recall team decisions, references organizational memory, or discusses past choices that may have prior context."
 ---
 
 # Rune - Organizational Memory System
 
-**Context**: This skill provides encrypted organizational memory capabilities using Fully Homomorphic Encryption (FHE). It allows teams to capture, store, and retrieve institutional knowledge while maintaining zero-knowledge privacy. Works with Claude Code, Codex CLI, Gemini CLI, and any MCP-compatible agent.
+Encrypted organizational memory using FHE (Fully Homomorphic Encryption). Captures team decisions, retrieves institutional knowledge, and maintains zero-knowledge privacy across Claude Code, Codex CLI, Gemini CLI, and any MCP-compatible agent.
 
-## Execution Model (Single Source of Truth)
+## Execution Model
 
-**Cross-agent invariant**:
-- `scripts/bootstrap-mcp.sh` is the **single source of truth** for local runtime preparation (venv, deps, self-healing).
-- All agent integrations must reuse this bootstrap flow. Do not duplicate dependency/setup logic in agent-specific scripts.
-
-**Agent-specific boundary**:
-- **Common (all agents)**: plugin root detection, runtime bootstrap, local MCP server readiness checks.
-- **Agent-specific (thin adapter only)**:
-  - Codex: `codex mcp add/remove/list` registration actions
-  - Claude/Gemini/others: their native MCP registration mechanism
-
-Keep agent-specific instructions clearly labeled and never mix Codex-only commands into cross-agent/common instructions.
+- `scripts/bootstrap-mcp.sh` is the **single source of truth** for runtime preparation (venv, deps, self-healing). All agent integrations reuse this bootstrap flow.
+- **Agent-specific adapters** handle only registration (e.g., `codex mcp add` for Codex, native MCP registration for Claude/Gemini). Never mix Codex-only commands into cross-agent instructions.
 
 ## Activation State
 
-**IMPORTANT**: This skill has two states based on configuration AND infrastructure availability.
+Two states: **Active** or **Dormant**, determined by local config checks only.
 
-### Activation Check (CRITICAL - Check EVERY Session Start)
+### Activation Check (Run Every Session Start)
 
-**BEFORE doing anything, run this check:**
+**No network calls during this check.**
 
-0. **Local Runtime Check (No Vault network calls)**:
-   - Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
-     1. `$RUNE_PLUGIN_ROOT` environment variable (if set)
-     2. `~/.claude/plugins/cache/*/rune/*/scripts/bootstrap-mcp.sh`
-     3. `~/.codex/skills/rune/scripts/bootstrap-mcp.sh`
-     4. Current working directory and its parent directories
-   - Ensure runtime via:
-     - `SETUP_ONLY=1 scripts/bootstrap-mcp.sh`
-   - If the runtime/bootstrap step fails, treat as **Dormant State** and show setup guidance.
+0. **Runtime check**: Locate `scripts/bootstrap-mcp.sh` by searching (in order): `$RUNE_PLUGIN_ROOT`, `~/.claude/plugins/cache/*/rune/*/scripts/`, `~/.codex/skills/rune/scripts/`, then CWD and parents. Run `SETUP_ONLY=1 scripts/bootstrap-mcp.sh`. If it fails → Dormant.
+1. **Config check**: Does `~/.rune/config.json` exist? NO → Dormant.
+2. **Validation**: Config must have `vault.endpoint`, `vault.token`, `envector.endpoint`, `envector.api_key`, and `state: "active"`. Missing any → Dormant.
+3. **State**: `state` is `"active"` → Active. Otherwise → Dormant.
 
-1. **Config File Check**: Does `~/.rune/config.json` exist?
-   - NO → **Go to Dormant State**
-   - YES → Continue to step 2
+### Active State
 
-2. **Config Validation**: Does config contain all required fields?
-   - `vault.endpoint` and `vault.token`
-   - `envector.endpoint` and `envector.api_key`
-   - `state` is set to `"active"`
-   - NO → **Go to Dormant State**
-   - YES → Continue to step 3
+- All MCP tools enabled. Automatically capture significant context and respond to recall queries.
+- **On failure**: Immediately switch to Dormant, update `config.json` state to `"dormant"`, notify user once: "Infrastructure unavailable. Switched to dormant mode. Run /rune:status for details." Do not retry.
 
-3. **State Check**:
-   - `state` is `"active"` → **Go to Active State**
-   - Otherwise → **Go to Dormant State**
+### Dormant State
 
-**IMPORTANT**: Do NOT attempt to ping Vault or make network requests during activation check. This wastes tokens. Only local runtime/config checks are allowed.
+- Do NOT attempt capture, retrieval, or network requests.
+- When `/rune` commands are used, show setup instructions: run `scripts/check-infrastructure.sh`, then `/rune:configure`, then `scripts/start-mcp-servers.sh`.
 
-### If Active ✅
-- All functionality enabled
-- Automatically capture significant context
-- Respond to recall queries
-- Full organizational memory access
-- **If capture/retrieval fails**: Immediately switch to Dormant and notify user
+## MCP Tools
 
-### If Dormant ⏸️
-- **Do NOT attempt context capture or retrieval**
-- **Do NOT make network requests**
-- **Do NOT waste tokens on failed operations**
-- Show setup instructions when `/rune` commands are used
-- Prompt user to:
-  1. Check infrastructure: `scripts/check-infrastructure.sh`
-  2. Configure: `/rune:configure`
-  3. Start MCP servers: `scripts/start-mcp-servers.sh`
+The MCP server (`mcp/server/server.py`) exposes these tools. Use them when Active:
 
-### Fail-Safe Behavior
-If in Active state but operations fail:
-- Switch to Dormant immediately
-- Update config.json `state` to `"dormant"`
-- Notify user once: "Infrastructure unavailable. Switched to dormant mode. Run /rune:status for details."
-- **Do not retry** - wait for user to fix infrastructure
+| Tool | Purpose | Key Parameters |
+|------|---------|---------------|
+| `capture` | Store organizational context with metadata | `text` (content), `title`, `domain` |
+| `recall` | Semantic search over encrypted memories | `query` (natural language) |
+| `vault_status` | Check Vault connectivity and health | — |
+| `diagnostics` | Full system diagnostics | — |
+| `capture_history` | List recent captures | `limit`, `domain`, `since` |
+| `delete_capture` | Remove a stored capture by ID | `record_id` |
+| `reload_pipelines` | Reload Scribe/Retriever pipelines | — |
 
 ## Commands
 
 ### `/rune:configure`
-**Purpose**: Configure plugin credentials
 
-**Steps**:
-1. Ask user for enVector Endpoint (required, e.g., `cluster-xxx.envector.io`)
-2. Ask user for enVector API Key (required, e.g., `envector_xxx`)
-3. Ask user for Vault Endpoint (optional, e.g., `tcp://vault-TEAM.oci.envector.io:50051`)
-   - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
-4. Ask user for Vault Token (optional, e.g., `evt_xxx`)
-5. If Vault Endpoint and Token were both provided, ask the TLS question:
+Collect credentials and validate infrastructure:
 
-   **"How does your Vault server handle TLS?"**
-
-   1. **Self-signed certificate** — "My team uses a self-signed CA (provide CA cert path)"
-      - Follow-up: "Enter the path to your CA certificate PEM file:"
-      - Support `~` expansion in the path
-      - Copy the file to `~/.rune/certs/ca.pem` (`mkdir -p ~/.rune/certs && cp <user_path> ~/.rune/certs/ca.pem && chmod 600 ~/.rune/certs/ca.pem`)
-      - If copy fails (file not found, permission denied), show error and ask again
-      - Inform user: "CA certificate copied to ~/.rune/certs/ca.pem"
-      - → config: `ca_cert: "~/.rune/certs/ca.pem"`, `tls_disable: false`
-
-   2. **Public CA (default)** — "Vault uses a publicly-signed certificate (e.g., Let's Encrypt)"
-      - No additional input needed, system CA handles verification
-      - → config: `ca_cert: ""`, `tls_disable: false`
-
-   3. **No TLS** — "Connect without TLS (not recommended — traffic is unencrypted)"
-      - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
-      - → config: `ca_cert: ""`, `tls_disable: true`
-
-   If Vault fields are skipped, note that the plugin will start in dormant state.
-
-6. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
-   - If validation fails: Create config with `state: "dormant"`, warn user
-   - If validation passes: Continue to step 7
-7. Create `~/.rune/config.json` with proper structure
-8. Set state based on validation:
-   - Infrastructure ready: `state: "active"`
-   - Infrastructure not ready: `state: "dormant"`
-9. Confirm configuration and show next steps if dormant
+1. Ask for **enVector Endpoint** (required, e.g., `cluster-xxx.envector.io`) and **API Key** (required, e.g., `envector_xxx`).
+2. Ask for **Vault Endpoint** (optional, e.g., `tcp://vault-TEAM.oci.envector.io:50051`) — auto-prepend `tcp://` if no scheme given. Ask for **Vault Token** (optional, e.g., `evt_xxx`).
+3. If both Vault fields provided, ask **TLS mode**:
+   - **Self-signed CA**: Get cert path, copy to `~/.rune/certs/ca.pem` (chmod 600) → `tls_disable: false`
+   - **Public CA** (default): No extra input → `tls_disable: false`
+   - **No TLS**: Warn about plaintext traffic → `tls_disable: true`
+   - If Vault fields skipped, plugin starts Dormant.
+4. Validate via `scripts/check-infrastructure.sh`. Create `~/.rune/config.json` with `state: "active"` or `"dormant"` based on result.
 
 ### `/rune:status`
-**Purpose**: Check plugin activation status and infrastructure health
 
-**Steps**:
-1. Check if config exists
-2. Show current state (Active/Dormant)
-3. Run infrastructure checks:
-   - Config file: ✓/✗
-   - Vault Endpoint configured: ✓/✗
-   - enVector endpoint configured: ✓/✗
-   - MCP server logs recent: ✓/✗
-   - Virtual environment: ✓/✗
-
-**Response Format**:
-```
-Rune Plugin Status
-==================
-State: Active ✅ (or Dormant ⏸️)
-
-Configuration:
-  ✓ Config file: ~/.rune/config.json
-  ✓ Vault Endpoint: configured
-  ✓ enVector: configured
-
-Infrastructure:
-  ✓ Python venv: /path/to/.venv
-  ✗ MCP servers: Not running (last log: 2 days ago)
-
-Recommendations:
-  - Start MCP servers: scripts/start-mcp-servers.sh
-  - Check full status: scripts/check-infrastructure.sh
-```
+Check config existence, show Active/Dormant state, run infrastructure checks (config file, Vault endpoint, enVector endpoint, MCP server logs, venv). Display checklist with recommendations.
 
 ### `/rune:capture <context>`
-**Purpose**: Manually store organizational context when Scribe's automatic capture missed it or the user wants to force-store specific information.
 
-**When to use**: Scribe automatically captures significant decisions from conversation (see Automatic Behavior below). This command is an **override** for cases where:
-- Scribe didn't detect the context as significant
-- The user wants to store something that isn't part of the current conversation
-- Bulk-importing existing documentation
+Manual override to store context when automatic capture missed it. If Dormant, prompt to configure. If Active, call the `capture` MCP tool.
 
-**Behavior**:
-- If dormant: Prompt user to configure first
-- If active: Store context to organizational memory with timestamp and metadata
-
-**Example**:
 ```
 /rune:capture "We chose PostgreSQL over MongoDB for better ACID guarantees"
 ```
 
 ### `/rune:recall <query>`
-**Purpose**: Explicitly search organizational memory. Retriever already handles this automatically when users ask questions about past decisions in natural conversation.
 
-**When to use**: Retriever automatically detects recall-intent queries (see Automatic Behavior below). This command is an **explicit override** for cases where:
-- The user wants to force a memory search without Retriever's intent detection
-- Debugging whether specific context was stored
-- The user prefers direct command syntax
+Explicit memory search. If Dormant, prompt to configure. If Active, call the `recall` MCP tool. Note: natural questions like "Why did we choose PostgreSQL?" trigger Retriever automatically.
 
-**Behavior**:
-- If dormant: Prompt user to configure first
-- If active: Search encrypted vectors and return relevant context with sources
-
-**Example**:
 ```
 /rune:recall "Why PostgreSQL?"
 ```
 
-**Note**: In most cases, simply asking naturally ("Why did we choose PostgreSQL?") triggers Retriever automatically — no command needed.
-
 ### `/rune:activate` (or `/rune:wakeup`)
-**Purpose**: Attempt to activate plugin after infrastructure is ready
 
-**Use Case**: Infrastructure was not ready during configure, but now it's deployed and running.
-
-**Steps**:
-1. Check if config exists
-   - NO → Redirect to `/rune:configure`
-   - YES → Continue
-2. Run full infrastructure validation:
-   - Check Vault connectivity (curl vault-url/health)
-   - Check MCP server processes
-   - Check Python environment
-3. If all checks pass:
-   - Update config.json `state` to `"active"`
-   - Notify: "Plugin activated ✅"
-4. If checks fail:
-   - Keep state as `"dormant"`
-   - Show detailed error report
-   - Suggest: `/rune:status` for more info
-
-**Important**: This is the ONLY command that makes network requests to validate infrastructure.
+Re-validate infrastructure after deployment. This is the **only** command that makes network requests. If checks pass, set state to Active. If config missing, redirect to `/rune:configure`.
 
 ### `/rune:reset`
-**Purpose**: Clear configuration and return to dormant state
 
-**Steps**:
-1. Confirm with user
-2. Stop MCP servers if running
-3. Delete `~/.rune/config.json`
-4. Set state to dormant
-5. Show reconfiguration instructions
+Confirm with user, stop MCP servers, delete `~/.rune/config.json`, return to Dormant.
 
 ## Automatic Behavior (When Active)
 
-### Context Capture
+### Context Capture (Scribe)
 
-Automatically identify and capture significant organizational context across all domains:
+Automatically identifies and stores significant decisions, rationale, and lessons learned. Redacts API keys, passwords, tokens, and PII before storage. Significance threshold: 0.7.
 
-**Categories**:
-- **Technical Decisions**: Architecture, technology choices, implementation patterns
-- **Security & Compliance**: Security requirements, compliance policies, audit needs
-- **Performance**: Optimization strategies, scalability decisions, bottlenecks
-- **Product & Business**: Feature requirements, customer insights, strategic decisions
-- **Design & UX**: Design rationale, user research findings, accessibility requirements
-- **Data & Analytics**: Analysis methodology, key insights, statistical findings
-- **Process & Operations**: Deployment procedures, team coordination, workflows
-- **People & Culture**: Policies, team agreements, hiring decisions
+See [patterns/capture-triggers.md](patterns/capture-triggers.md) for 200+ trigger phrases by role and domain.
 
-**Common Trigger Pattern Examples**:
-- "We decided... because..."
-- "We chose X over Y for..."
-- "The reason we..."
-- "Our policy is..."
-- "Let's remember that..."
-- "The key insight is..."
-- "Based on [data/research/testing]..."
+### Context Retrieval (Retriever)
 
-**Full Pattern Reference**: See [patterns/capture-triggers.md](patterns/capture-triggers.md) for 200+ comprehensive trigger phrases organized by role and domain.
+Automatically detects recall-intent questions about past decisions and searches encrypted memory. Returns results ranked by relevance and recency with source attribution.
 
-**Significance Threshold**: 0.7 (captures meaningful decisions, filters trivial content)
+See [patterns/retrieval-patterns.md](patterns/retrieval-patterns.md) for 150+ query patterns by intent and domain.
 
-**Automatic Redaction**: Always redact API keys, passwords, tokens, PII, and sensitive data before capture.
+## Security
 
-### Context Retrieval
+- All data stored as FHE-encrypted vectors — enVector Cloud cannot read plaintext.
+- Credentials stored locally in `~/.rune/config.json` (permissions 600). Redact sensitive data before capture.
+- Same Vault Endpoint + Token = shared team memory. Revoke access by rotating Vault tokens.
 
-When users ask questions about past decisions, automatically search organizational memory:
+## References
 
-**Query Intent Types**:
-- **Decision Rationale**: "Why did we choose X?", "What was the reasoning..."
-- **Implementation Details**: "How did we implement...", "What patterns do we use..."
-- **Security & Compliance**: "What were the security considerations...", "What compliance requirements..."
-- **Performance & Scale**: "What performance requirements...", "What scalability concerns..."
-- **Historical Context**: "When did we decide...", "Have we discussed this before..."
-- **Team & Attribution**: "Who decided...", "Which team owns..."
-
-**Common Query Pattern Examples**:
-- "Why did we choose X over Y?"
-- "What was the reasoning behind..."
-- "Have we discussed [topic] before?"
-- "What's our approach to..."
-- "What were the trade-offs..."
-- "Who decided on..."
-
-**Full Pattern Reference**: See [patterns/retrieval-patterns.md](patterns/retrieval-patterns.md) for 150+ comprehensive query patterns organized by intent and domain.
-
-**Search Strategy**: Semantic similarity search on FHE-encrypted vectors, ranked by relevance and recency.
-
-**Result Format**: Always include source attribution (who/when), relevant excerpts, and offer to elaborate.
-
-## Security & Privacy
-
-**Zero-Knowledge Encryption**:
-- All data stored as FHE-encrypted vectors
-- enVector Cloud cannot read plaintext
-- Only team members with Vault access can decrypt
-
-**Credential Storage**:
-- Tokens stored locally in `~/.rune/config.json`
-- Never transmitted except to authenticated Vault
-- File permissions: 600 (user-only access)
-
-**Team Sharing**:
-- Same Vault Endpoint + Token = shared organizational memory
-- Team admin controls access via Vault authentication
-- Revoke access by rotating Vault tokens
-
-## Troubleshooting
-
-### Plugin not responding?
-Check activation state with `/rune:status`
-
-### Credentials not working?
-1. Verify with team admin that credentials are correct
-2. Check Vault is accessible: `curl <vault-url>/health`
-3. Reconfigure with `/rune:configure`
-
-### Need to switch teams?
-Use `/rune:reset` then `/rune:configure` with new team credentials
-
-## For Administrators
-
-This plugin requires a deployed Rune-Vault infrastructure. See:
-- **Rune-Admin Repository (for deployment)**: https://github.com/CryptoLabInc/rune-admin
-- **Deployment Guide**: https://github.com/CryptoLabInc/rune-admin/blob/main/deployment/README.md
-
-Team members only need this lightweight plugin + credentials you provide.
+- Troubleshooting: Run `/rune:status` for diagnostics, `scripts/check-infrastructure.sh` for full checks.
+- Admin deployment: [rune-admin](https://github.com/CryptoLabInc/rune-admin) and its [deployment guide](https://github.com/CryptoLabInc/rune-admin/blob/main/deployment/README.md).
