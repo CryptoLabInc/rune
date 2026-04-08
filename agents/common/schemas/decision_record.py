@@ -205,7 +205,7 @@ class DecisionRecord(BaseModel):
         description=(
             "Dense natural-language paragraph capturing the core knowledge. "
             "PRIMARY text embedded in enVector for semantic search. "
-            "128-512 tokens, no markdown, self-contained, causality-preserving."
+            "256-768 tokens, no markdown, self-contained, causality-preserving."
         ),
     )
 

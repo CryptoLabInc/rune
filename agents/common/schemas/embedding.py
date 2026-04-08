@@ -12,9 +12,10 @@ if TYPE_CHECKING:
 
 
 # Novelty thresholds (Memory-as-Filter)
-NOVELTY_THRESHOLD_NOVEL = 0.3
+# Calibrated for Qwen3-Embedding-0.6B (1024dim) via benchmark 2026-04-08
+NOVELTY_THRESHOLD_NOVEL = 0.4
 NOVELTY_THRESHOLD_RELATED = 0.7
-NOVELTY_THRESHOLD_NEAR_DUPLICATE = 0.95
+NOVELTY_THRESHOLD_NEAR_DUPLICATE = 0.93
 
 
 def embedding_text_for_record(record: "DecisionRecord") -> str:
@@ -39,10 +40,10 @@ def classify_novelty(
 
     Returns dict with 'score' (0-1, higher=more novel) and 'class'.
     Classes (annotation-only except near_duplicate):
-      - near_duplicate (>= 0.95): blocks capture
+      - near_duplicate (>= 0.93): blocks capture
       - related (>= 0.7): annotation only
-      - evolution (>= 0.3): annotation only
-      - novel (< 0.3): annotation only
+      - evolution (>= 0.4): annotation only
+      - novel (< 0.4): annotation only
     """
     novelty_score = 1.0 - max_similarity
     if max_similarity >= threshold_near_duplicate:
