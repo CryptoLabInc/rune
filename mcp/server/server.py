@@ -626,14 +626,50 @@ class MCPServerApp:
             }
 
             if self.envector is not None:
+                import concurrent.futures as _cf
+                ENVECTOR_DIAGNOSIS_TIMEOUT = 5.0  # seconds
+                _pool = _cf.ThreadPoolExecutor(max_workers=1)
                 try:
                     t0 = time.monotonic()
-                    self.envector.invoke_get_index_list()
-                    latency = (time.monotonic() - t0) * 1000
-                    envector_info["reachable"] = True
-                    envector_info["latency_ms"] = round(latency, 1)
+                    _future = _pool.submit(self.envector.invoke_get_index_list)
+                    try:
+                        _future.result(timeout=ENVECTOR_DIAGNOSIS_TIMEOUT)
+                        latency = (time.monotonic() - t0) * 1000
+                        envector_info["reachable"] = True
+                        envector_info["latency_ms"] = round(latency, 1)
+                    except _cf.TimeoutError:
+                        elapsed = round((time.monotonic() - t0) * 1000, 1)
+                        envector_info["error"] = (
+                            f"Health check timed out after {ENVECTOR_DIAGNOSIS_TIMEOUT:.0f}s "
+                            f"(elapsed: {elapsed}ms). "
+                            "Run /rune:activate to pre-warm the connection, then retry /rune:status."
+                        )
+                        envector_info["error_type"] = "timeout"
+                        envector_info["elapsed_ms"] = elapsed
                 except Exception as e:
-                    envector_info["error"] = str(e)
+                    err_str = str(e)
+                    # Classify errors for more hints to users
+                    if "UNAVAILABLE" in err_str or "Connection refused" in err_str:
+                        error_type = "connection_refused"
+                        hint = "Check that the enVector endpoint is correct and reachable from this machine"
+                    elif "UNAUTHENTICATED" in err_str or "401" in err_str:
+                        error_type = "auth_failure"
+                        hint = "enVector API key may be invalid or expired"
+                    elif "DEADLINE_EXCEEDED" in err_str:
+                        error_type = "deadline_exceeded"
+                        hint = (
+                            "The enVector gRPC deadline was exceeded. "
+                            "Run /rune:activate to pre-warm, then retry /rune:status"
+                        )
+                    else:
+                        error_type = "unknown"
+                        hint = "Run /rune:activate to reinitialize the connection, or check network connectivity"
+                    envector_info["error"] = err_str
+                    envector_info["error_type"] = error_type
+                    envector_info["hint"] = hint
+                finally:
+                    # Return immediately without waiting on timeout
+                    _pool.shutdown(wait=False)
             report["envector"] = envector_info
 
             # Result
