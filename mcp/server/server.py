@@ -1030,12 +1030,45 @@ class MCPServerApp:
         )
         async def tool_reload_pipelines() -> Dict[str, Any]:
             result = self._init_pipelines()
+
+            # Pre-warm the enVector connection (blocking) immediately after pipeline init
+            #
+            # Prevent subsequent '/rune:status' diagnostics check is timed out during RegisterKey and
+            # reported enVector as "unreachable"
+            envector_warmup: Dict[str, Any] = {}
+            if result["scribe"] and self.envector is not None:
+                import time as _time
+                import concurrent.futures as _cf
+                WARMUP_TIMEOUT = 60.0  # seconds; RegisterKey can take tens of seconds
+                _pool = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
+                    _t0 = _time.monotonic()
+                    _future = _pool.submit(self.envector.invoke_get_index_list)
+                    _future.result(timeout=WARMUP_TIMEOUT)
+                    envector_warmup = {
+                        "ok": True,
+                        "latency_ms": round((_time.monotonic() - _t0) * 1000, 1),
+                    }
+                    logger.info("enVector pre-warm completed in %.0fms", envector_warmup["latency_ms"])
+                except _cf.TimeoutError:
+                    envector_warmup = {
+                        "ok": False,
+                        "error": f"Pre-warm timed out after {WARMUP_TIMEOUT:.0f}s",
+                    }
+                    logger.warning("enVector pre-warm timed out after %.0fs", WARMUP_TIMEOUT)
+                except Exception as _e:
+                    envector_warmup = {"ok": False, "error": str(_e)}
+                    logger.warning("enVector pre-warm failed: %s", _e)
+                finally:
+                    _pool.shutdown(wait=False)
+
             return {
                 "ok": not result["errors"],
                 "state": result["state"],
                 "scribe_initialized": result["scribe"],
                 "retriever_initialized": result["retriever"],
                 "errors": result["errors"] if result["errors"] else None,
+                "envector_warmup": envector_warmup or None,
             }
 
         # ---------- MCP Tools: Capture History ---------- #
