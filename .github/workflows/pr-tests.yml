@@ -1,0 +1,80 @@
+# Test detection rules (ci_changed_tests.py + grep pattern):
+#   - Files must live under a `tests/` subdirectory and be named `test_*.py`
+#   - Test classes must start with `Test`
+#   - Test functions/methods must start with `test_`
+name: PR Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  run-tests:
+    name: Run all tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed test node IDs
+        id: detect
+        run: |
+          BASE=${{ github.event.pull_request.base.sha }}
+          HEAD=${{ github.event.pull_request.head.sha }}
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD" | grep -E '(^|/)tests/test_[^/]+\.py$' || true)
+
+          if [ -z "$CHANGED" ]; then
+            echo "has_changed=false" >> "$GITHUB_OUTPUT"
+            echo "test_ids=" >> "$GITHUB_OUTPUT"
+          else
+            python .github/scripts/ci_changed_tests.py "$BASE" "$HEAD" $CHANGED
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run all tests
+        id: pytest
+        run: |
+          TEST_DIRS=$(find . -type d -name "tests" | grep -v __pycache__ | grep -v "/.git/" | tr '\n' ' ') \
+          && python -m pytest $TEST_DIRS \
+            -v --tb=long -rs \
+            2>&1 | tee pytest_output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        continue-on-error: true
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          EXIT_CODE: ${{ steps.pytest.outputs.exit_code }}
+          HAS_CHANGED: ${{ steps.detect.outputs.has_changed }}
+          TEST_IDS: ${{ steps.detect.outputs.test_ids }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const fn = require('./.github/scripts/post_pr_comment.js')
+            await fn({ github, context })
+
+      - name: Fail if tests failed
+        if: always() && steps.pytest.outputs.exit_code != '0'
+        run: exit 1
