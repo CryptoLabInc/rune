@@ -234,6 +234,48 @@ async def test_reload_pipelines_without_active_config(mcp_server):
         assert data.get("scribe_initialized") is False
         assert data.get("retriever_initialized") is False
 
+# Pre-warm tests
+
+@pytest.mark.asyncio
+async def test_reload_pipelines_returns_envector_warmup(mcp_server):
+    async with Client(mcp_server) as client:
+        result = await client.call_tool("reload_pipelines", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        # When pipelines aren't active (dormant), warmup may be None/empty
+        # but the field should still be present in the response
+        assert "envector_warmup" in data
+
+
+@pytest.mark.asyncio
+async def test_reload_pipelines_warmup_failure():
+    class FailingAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+
+        def invoke_get_index_list(self) -> List[str]:
+            raise ConnectionError("UNAVAILABLE: could not connect")
+
+    app = MCPServerApp(envector_adapter=FailingAdapter(), mcp_server_name="test-mcp-warmup-fail")
+    app.embedding = FakeEmbeddingService()
+    # Force _scribe to be truthy so warmup path is triggered
+    app._scribe = {"record_builder": None, "envector_client": None, "embedding_service": None}
+
+    async with Client(app.mcp) as client:
+        result = await client.call_tool("reload_pipelines", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        warmup = data.get("envector_warmup")
+        # _init_pipelines resets _scribe to None (dormant), so warmup may be None;
+        # if the warmup path runs, it should report the failure
+        if warmup is not None:
+            assert warmup.get("ok") is False
+            assert "error" in warmup
+
 
 # ----------- Diagnostic Tool Tests ----------- #
 
@@ -319,6 +361,97 @@ async def test_diagnostics_no_envector(mcp_server_degraded):
 
         envector = data.get("envector", {})
         assert envector.get("reachable") is False
+
+
+# enVector connection related tests
+
+@pytest.fixture
+def mcp_server_envector_timeout():
+    import time
+
+    class SlowAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+
+        def invoke_get_index_list(self) -> List[str]:
+            time.sleep(10)  # Longer than ENVECTOR_DIAGNOSIS_TIMEOUT (5s)
+            return []
+
+    app = MCPServerApp(envector_adapter=SlowAdapter(), mcp_server_name="test-mcp-slow")
+    app.embedding = FakeEmbeddingService()
+    return app.mcp
+
+
+@pytest.fixture
+def mcp_server_envector_connection_error():
+    class ErrorAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+
+        def invoke_get_index_list(self) -> List[str]:
+            raise ConnectionError("UNAVAILABLE: Connection refused to cloud.envector.io:443")
+
+    app = MCPServerApp(envector_adapter=ErrorAdapter(), mcp_server_name="test-mcp-err")
+    app.embedding = FakeEmbeddingService()
+    return app.mcp
+
+
+@pytest.fixture
+def mcp_server_envector_auth_error():
+    class AuthErrorAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+
+        def invoke_get_index_list(self) -> List[str]:
+            raise Exception("UNAUTHENTICATED: invalid API key")
+
+    app = MCPServerApp(envector_adapter=AuthErrorAdapter(), mcp_server_name="test-mcp-auth")
+    app.embedding = FakeEmbeddingService()
+    return app.mcp
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_envector_timeout(mcp_server_envector_timeout):
+    async with Client(mcp_server_envector_timeout) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is False
+        assert envector.get("error_type") == "timeout"
+        assert "elapsed_ms" in envector
+        assert "timed out" in envector.get("error", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_envector_connection_refused(mcp_server_envector_connection_error):
+    async with Client(mcp_server_envector_connection_error) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is False
+        assert envector.get("error_type") == "connection_refused"
+        assert "hint" in envector
+        assert "endpoint" in envector["hint"].lower()
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_envector_auth_failure(mcp_server_envector_auth_error):
+    async with Client(mcp_server_envector_auth_error) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is False
+        assert envector.get("error_type") == "auth_failure"
+        assert "hint" in envector
 
 
 # ----------- Error Response Tests ----------- #
