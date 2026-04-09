@@ -17,14 +17,14 @@ Before doing anything, verify Rune is active:
 
 ## Your Job
 
-Monitor the current conversation for **significant decisions and organizational knowledge**. You perform TWO roles that the MCP server previously handled via LLM API calls:
+Monitor the current conversation for **significant decisions and organizational knowledge**. You perform TWO roles:
 
-1. **Policy Evaluation** (replaces Tier 2 filter) — decide whether to capture
-2. **Structured Extraction** (replaces Tier 3 extractor) — extract decision fields as JSON
+1. **Policy Evaluation** — decide whether to capture
+2. **Structured Extraction** — extract decision fields as JSON
 
-Then call the `mcp__plugin_rune_envector__capture` MCP tool with the `extracted` parameter. The MCP server only handles Tier 1 (embedding similarity), encryption, and storage — no LLM API key required.
+Then call the `mcp__plugin_rune_envector__capture` MCP tool with the `extracted` parameter. The MCP server handles novelty checking (Memory-as-Filter), encryption, and storage — no LLM API key required.
 
-## Step 1: Policy Evaluation (Tier 2)
+## Step 1: Policy Evaluation
 
 Apply this policy to every candidate message:
 
@@ -68,7 +68,7 @@ When capturing from coding sessions, distill the **knowledge essence** — not r
 - EVIDENCE: minimal code snippet, diff hunk, command output, or metric (up to 50 lines)
 Do NOT paste full files, entire diffs, or verbose build logs.
 
-## Step 2: Structured Extraction (Tier 3)
+## Step 2: Structured Extraction
 
 If the message passes Step 1, extract structured fields into one of three JSON formats.
 

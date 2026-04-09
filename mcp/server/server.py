@@ -1312,41 +1312,34 @@ class MCPServerApp:
         records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
 
         # ===== Novelty check (Memory-as-Filter) =====
-        # Compare reusable_insight against existing memory
+        # Vault-secured: embed → score → Vault decrypt → compare max similarity
         embedding_text = _embedding_text_for_record(records[0])
         novelty_info = {"score": 1.0, "class": "novel", "related": []}
 
         try:
-            search_result = envector_client.search_with_text(
-                index_name=self._vault_index_name,
-                query_text=embedding_text,
-                embedding_service=embedding_service,
-                topk=3,
-            )
-            parsed = envector_client.parse_search_results(search_result)
-            if parsed:
-                max_sim = max(r.get("score", 0.0) for r in parsed)
-                novelty_info = _classify_novelty(max_sim)
-                novelty_info["related"] = [
-                    {
-                        "id": r.get("metadata", {}).get("id", ""),
-                        "title": r.get("metadata", {}).get("title", ""),
-                        "similarity": round(r.get("score", 0.0), 3),
-                    }
-                    for r in parsed[:3]
-                ]
+            query_vector = embedding_service.embed_single(embedding_text)
+            scoring_result = envector_client.score(self._vault_index_name, query_vector)
+            if scoring_result.get("ok") and scoring_result.get("encrypted_blobs") and self.vault:
+                blobs = scoring_result["encrypted_blobs"]
+                vault_result = await self.vault.decrypt_search_results(
+                    encrypted_blob_b64=blobs[0],
+                    top_k=3,
+                )
+                if vault_result.ok and vault_result.results:
+                    max_sim = max(r.get("score", 0.0) for r in vault_result.results)
+                    novelty_info = _classify_novelty(max_sim)
 
-                # NEAR-DUPLICATE -> skip capture (only blocking case)
-                if novelty_info["class"] == "near_duplicate":
-                    return {
-                        "ok": True,
-                        "captured": False,
-                        "reason": "Near-duplicate — virtually identical insight already stored",
-                        "novelty": novelty_info,
-                    }
+                    # NEAR-DUPLICATE -> skip capture (only blocking case)
+                    if novelty_info["class"] == "near_duplicate":
+                        return {
+                            "ok": True,
+                            "captured": False,
+                            "reason": "Near-duplicate — virtually identical insight already stored",
+                            "novelty": novelty_info,
+                        }
         except Exception as e:
             # Novelty check failure is non-fatal — proceed with capture
-            logger.warning("Novelty check failed: %s", e)
+            logger.warning("Novelty check failed (non-fatal): %s", e)
 
         # Embed reusable_insight (schema 2.1) or payload.text (fallback)
         texts = [_embedding_text_for_record(r) for r in records]
