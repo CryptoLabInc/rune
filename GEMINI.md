@@ -14,12 +14,44 @@ Use the `recall` MCP tool when:
 - Any topic where **knowledge beyond this session** could inform the outcome
 - Deliberation, planning, or architecture discussions — not just explicit questions
 
-Use the `capture` MCP tool when:
+Use `capture` MCP tool (with `extracted` JSON parameter) when:
 - A decision is made with rationale
 - Trade-offs are analyzed and a choice is committed
 - Lessons learned or post-mortem insights emerge
 
-### What to Capture
+### Automatic Capture (Proactive Scribe)
+
+When Rune state is `"active"`, **proactively capture significant decisions** when you detect any of the following in the conversation:
+
+- A choice is made among alternatives ("A로 가자", "let's go with X")
+- Trade-offs are weighed and committed ("X의 단점이 있지만 Y 때문에 감수")
+- Strategy or direction is confirmed ("이 방향이 맞아", "this approach works")
+- A lesson or insight crystallizes ("안 된 이유는...", "the root cause was...")
+- A framework, process, or standard is established
+
+**How to capture:**
+- Follow the **Agent-Delegated Mode** instructions in `agents/gemini/scribe.md`.
+- Evaluate if the conversation segment contains a significant decision (Tier 2).
+- Extract structured JSON (Tier 3) according to Format A, B, or C in `scribe.md`.
+- Call `mcp_envector_capture` with the `extracted` parameter.
+- In the `text` parameter, include ONLY the relevant conversation excerpt (not the full context).
+- Do NOT pause or interrupt the main conversation — continue responding to the user.
+- Do NOT announce the capture to the user unless they ask.
+
+**Do NOT auto-capture:**
+- Brainstorming in progress without commitment (options listed but none chosen)
+- Questions, status updates, or casual discussion
+- Decisions that are hypothetical or deferred ("maybe later", "let's revisit")
+
+**Session-end sweep:** A `SessionEnd` hook will remind you when the session is ending. Review the conversation for any uncaptured significant decisions and use the `mcp_envector_batch_capture` tool to capture them now as a batch if needed.
+
+### State Gate
+
+**Before calling `capture` or `recall` MCP tools, check `~/.rune/config.json` state:**
+- `"active"` — proceed normally.
+- `"dormant"` or missing — **do NOT call MCP tools.** Skip silently. This avoids unnecessary overhead when Rune is deactivated.
+
+### Routing Rules
 
 - Architectural decisions and their reasoning
 - Trade-off analyses where a direction was chosen
