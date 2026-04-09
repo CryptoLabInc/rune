@@ -252,6 +252,32 @@ Automatically identify and capture significant organizational context across all
 - **Process & Operations**: Deployment procedures, team coordination, workflows
 - **People & Culture**: Policies, team agreements, hiring decisions
 
+### Automatic Capture (Proactive Scribe)
+
+When Rune is active, proactively capture significant decisions when you detect any of the following in the conversation:
+
+- A choice is made among alternatives ("A로 가자", "let's go with X")
+- Trade-offs are weighed and committed ("X의 단점이 있지만 Y 때문에 감수")
+- Strategy or direction is confirmed ("이 방향이 맞아", "this approach works")
+- A lesson or insight crystallizes ("안 된 이유는...", "the root cause was...")
+- A framework, process, or standard is established
+
+**How to capture in Codex**:
+- Follow the agent-delegated instructions in `agents/codex/scribe.md`
+- Evaluate whether the relevant excerpt contains a significant decision
+- Extract structured JSON and call `capture` with the `extracted` parameter
+- In the `text` parameter, include ONLY the relevant conversation excerpt, not the full session
+- Do NOT pause or interrupt the main conversation
+- Do NOT announce the capture to the user unless they ask
+- Default Codex path is direct MCP capture; use a delegated subagent only when the user explicitly asks for multi-agent work
+
+**Do NOT auto-capture**:
+- Brainstorming in progress without commitment (options listed but none chosen)
+- Questions, status updates, or casual discussion
+- Decisions that are hypothetical or deferred ("maybe later", "let's revisit")
+
+**Session-end sweep**: When the conversation is ending or the user is wrapping up a task, review the conversation for any uncaptured significant decisions and submit them via a single `batch_capture` call if needed.
+
 **Common Trigger Pattern Examples**:
 - "We decided... because..."
 - "We chose X over Y for..."
