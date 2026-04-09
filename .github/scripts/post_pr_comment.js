@@ -121,7 +121,7 @@ module.exports = async ({ github, context }) => {
   // Warn if corrected total still doesn't match summary after reconciliation
   const stillMismatched = pytestSummary && correctedTotal !== authoritativeTotal;
 
-  const runUrl = `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+  const runUrl = `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.CI_RUN_ID || process.env.GITHUB_RUN_ID}`;
 
   let tableSection = '';
   if (testResults.length > 0) {
@@ -184,7 +184,7 @@ module.exports = async ({ github, context }) => {
   const { data: comments } = await github.rest.issues.listComments({
     owner: context.repo.owner,
     repo: context.repo.repo,
-    issue_number: context.issue.number,
+    issue_number: parseInt(process.env.PR_NUMBER) || context.issue.number,
   });
 
   const existing = comments.find(c => c.body && c.body.includes(marker));
@@ -200,7 +200,7 @@ module.exports = async ({ github, context }) => {
     await github.rest.issues.createComment({
       owner: context.repo.owner,
       repo: context.repo.repo,
-      issue_number: context.issue.number,
+      issue_number: parseInt(process.env.PR_NUMBER) || context.issue.number,
       body,
     });
   }
