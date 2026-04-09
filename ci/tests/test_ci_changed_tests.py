@@ -54,10 +54,68 @@ class TestFindTestNodeIds:
         assert ids == [str(f)]
 
     def test_ignores_method_not_starting_with_test_(self, tmp_path):
+        # helper is real code, but there are no test_ methods to return → fallback to filepath
         f = tmp_path / "test_sample.py"
         f.write_text("class TestFoo:\n    def helper(self):\n        pass\n")
         ids = find_test_node_ids(str(f), changed_lines={2})
-        assert ids == [f"{f}::TestFoo"]
+        assert ids == [str(f)]
+
+    def test_skips_multiline_hash_comment_change(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    # comment line 1\n"   # line 2
+            "    # comment line 2\n"   # line 3
+            "    # comment line 3\n"   # line 4
+            "    def test_bar(self):\n"
+            "        assert True\n"
+        )
+        # lines 2-4 are # comments — no test should be detected
+        ids = find_test_node_ids(str(f), changed_lines={2, 3, 4})
+        assert ids == [str(f)]
+
+    def test_skips_multiline_docstring_change(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            '    """\n'                 # line 2
+            "    Class docstring.\n"    # line 3
+            '    """\n'                 # line 4
+            "    def test_bar(self):\n"
+            "        assert True\n"
+        )
+        # lines 2-4 are a docstring — no test should be detected
+        ids = find_test_node_ids(str(f), changed_lines={2, 3, 4})
+        assert ids == [str(f)]
+
+    def test_class_variable_change_returns_all_test_methods(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    shared = 'value'\n"   # line 2
+            "    def test_bar(self):\n"
+            "        assert True\n"
+            "    def test_baz(self):\n"
+            "        assert True\n"
+        )
+        # class variable changed → all test methods in the class should be returned
+        ids = find_test_node_ids(str(f), changed_lines={2})
+        assert ids == [f"{f}::TestFoo::test_bar", f"{f}::TestFoo::test_baz"]
+
+    def test_setup_method_change_returns_all_test_methods(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    def setUp(self):\n"   # line 2
+            "        self.x = 1\n"    # line 3
+            "    def test_bar(self):\n"
+            "        assert self.x\n"
+            "    def test_baz(self):\n"
+            "        assert self.x\n"
+        )
+        # setUp changed → all test methods in the class should be returned
+        ids = find_test_node_ids(str(f), changed_lines={2, 3})
+        assert ids == [f"{f}::TestFoo::test_bar", f"{f}::TestFoo::test_baz"]
 
     def test_detects_top_level_test_function(self, tmp_path):
         f = tmp_path / "test_sample.py"
