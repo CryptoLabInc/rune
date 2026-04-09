@@ -1,0 +1,41 @@
+name: Post PR Comment
+
+on:
+  workflow_run:
+    workflows: ["PR Tests"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  post-comment:
+    name: Post test results comment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        env:
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const info = JSON.parse(fs.readFileSync('pr_info.json', 'utf8'));
+            process.env.EXIT_CODE = info.EXIT_CODE;
+            process.env.HAS_CHANGED = info.HAS_CHANGED;
+            process.env.TEST_IDS = info.TEST_IDS;
+            process.env.HEAD_SHA = info.HEAD_SHA;
+            process.env.PR_NUMBER = info.PR_NUMBER;
+            const fn = require('./.github/scripts/post_pr_comment.js');
+            await fn({ github, context });
