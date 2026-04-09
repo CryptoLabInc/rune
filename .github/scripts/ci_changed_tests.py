@@ -62,8 +62,22 @@ def find_test_node_ids(filepath: str, changed_lines: set[int]) -> list[str]:
                     f"{filepath}::{node.name}::{m.name}" for m in methods
                 )
             else:
-                # Non-method lines changed (e.g. new class, fixture, docstring)
-                node_ids.append(f"{filepath}::{node.name}")
+                # Non-method lines changed: skip if only comments/docstrings,
+                # otherwise return all test methods in the class.
+                real_code_lines: set[int] = set()
+                for child in node.body:
+                    if isinstance(child, ast.Expr) and isinstance(child.value, ast.Constant) and isinstance(child.value.value, str):
+                        continue
+                    real_code_lines.update(range(child.lineno, child.end_lineno + 1))
+                if real_code_lines & (class_lines & changed_lines):
+                    all_methods = [
+                        child for child in node.body
+                        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                        and child.name.startswith("test_")
+                    ]
+                    node_ids.extend(
+                        f"{filepath}::{node.name}::{m.name}" for m in all_methods
+                    )
 
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.name.startswith("test_"):
