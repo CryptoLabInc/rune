@@ -1627,6 +1627,20 @@ class MCPServerApp:
                 agent_dek=self._agent_dek,
             )
 
+            # Refresh 'self.envector' to reflect updated endpoint/API key from Vault
+            try:
+                self.envector = EnVectorSDKAdapter(
+                    address=self._envector_endpoint or "",
+                    key_id=key_id,
+                    key_path=key_path,
+                    eval_mode="rmp",
+                    query_encryption=False,
+                    access_token=self._envector_api_key or "",
+                    auto_key_setup=False,
+                )
+            except Exception as e:
+                logger.warning("enVector adapter refresh failed: %s", e)
+
             llm_cfg = rune_config.llm
             configured_llm_provider = (llm_cfg.provider or os.getenv("RUNE_LLM_PROVIDER", "anthropic")).lower()
             configured_tier2_provider = (llm_cfg.tier2_provider or os.getenv("RUNE_TIER2_LLM_PROVIDER", configured_llm_provider)).lower()
