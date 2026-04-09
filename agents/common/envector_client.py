@@ -91,6 +91,25 @@ class EnVectorClient:
             logger.error("Error initializing: %s", e)
             raise
 
+    def _reset(self) -> None:
+        self._adapter = None
+        self._initialized = False
+
+    def _with_reconnect(self, fn, *args, **kwargs):
+        self._ensure_initialized()
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            if not self._adapter._is_connection_error(exc):
+                raise
+            logger.warning(
+                "enVector connection lost (%s: %s). Reconnecting to %s ...",
+                type(exc).__name__, exc, self._address,
+            )
+            self._reset()
+            self._ensure_initialized()
+            return fn(*args, **kwargs)
+
     @property
     def is_available(self) -> bool:
         """Check if client is available"""
@@ -102,8 +121,7 @@ class EnVectorClient:
 
     def get_index_list(self) -> Dict[str, Any]:
         """Get list of all indexes"""
-        self._ensure_initialized()
-        return self._adapter.call_get_index_list()
+        return self._with_reconnect(lambda: self._adapter.call_get_index_list())
 
     def insert(
         self,
@@ -122,8 +140,6 @@ class EnVectorClient:
         Returns:
             Result dict with ok/error status
         """
-        self._ensure_initialized()
-
         if metadata:
             # Serialize metadata to JSON strings
             meta_list = [
@@ -133,10 +149,12 @@ class EnVectorClient:
         else:
             meta_list = [json.dumps({"index": i}) for i in range(len(vectors))]
 
-        return self._adapter.call_insert(
-            index_name=index_name,
-            vectors=vectors,
-            metadata=meta_list
+        return self._with_reconnect(
+            lambda: self._adapter.call_insert(
+                index_name=index_name,
+                vectors=vectors,
+                metadata=meta_list,
+            )
         )
 
     def insert_with_text(
@@ -188,10 +206,11 @@ class EnVectorClient:
         Returns:
             Result dict with encrypted_blobs list
         """
-        self._ensure_initialized()
-        return self._adapter.call_score(
-            index_name=index_name,
-            query=[query_vector],
+        return self._with_reconnect(
+            lambda: self._adapter.call_score(
+                index_name=index_name,
+                query=[query_vector],
+            )
         )
 
     def remind(
@@ -211,10 +230,12 @@ class EnVectorClient:
         Returns:
             Result dict with metadata entries
         """
-        self._ensure_initialized()
-        return self._adapter.call_remind(
-            index_name=index_name,
-            indices=indices,
-            output_fields=output_fields,
+        return self._with_reconnect(
+            lambda: self._adapter.call_remind(
+                index_name=index_name,
+                indices=indices,
+                output_fields=output_fields,
+            )
         )
+
 

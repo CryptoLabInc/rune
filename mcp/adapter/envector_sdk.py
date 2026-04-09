@@ -85,6 +85,22 @@ KeyParameter.metadata_key = property(_safe_metadata_key_getter, KeyParameter.met
 KeyParameter.metadata_key_path = property(_safe_metadata_key_path_getter)
 KeyParameter.metadata_encryption = property(_safe_metadata_encryption_getter, KeyParameter.metadata_encryption.fset)
 
+# gRPC error messages realted to dead/stale connection
+CONNECTION_ERROR_PATTERNS = (
+    "UNAVAILABLE",
+    "DEADLINE_EXCEEDED",
+    "Connection refused",
+    "Connection reset",
+    "Stream removed",
+    "RST_STREAM",
+    "Broken pipe",
+    "Transport closed",
+    "Socket closed",
+    "EOF",
+    "failed to connect",
+)
+
+
 class EnVectorSDKAdapter:
     """
     Adapter class to interact with the enVector SDK.
@@ -121,7 +137,18 @@ class EnVectorSDKAdapter:
         self.query_encryption = query_encryption
         self._agent_id = agent_id
         self._agent_dek = agent_dek
-        ev.init(address=address, key_path=key_path, key_id=key_id, eval_mode=eval_mode, auto_key_setup=auto_key_setup, access_token=access_token)
+
+        # Store init params for reinitialization on connection loss
+        self._init_params = {
+            "address": address,
+            "key_path": key_path,
+            "key_id": key_id,
+            "eval_mode": eval_mode,
+            "auto_key_setup": auto_key_setup,
+            "access_token": access_token,
+        }
+
+        ev.init(**self._init_params)
 
     #--------------- Get Index List --------------#
     def call_get_index_list(self) -> Dict[str, Any]:
@@ -138,6 +165,36 @@ class EnVectorSDKAdapter:
             # Handle exceptions and return an appropriate error message
             return {"ok": False, "error": repr(e)}
 
+    #--------------- Connection resilience helpers --------------#
+
+    @staticmethod
+    def _is_connection_error(exc: Exception) -> bool:
+        if isinstance(exc, (ConnectionError, OSError)):
+            return True
+        msg = str(exc)
+        return any(pattern in msg for pattern in CONNECTION_ERROR_PATTERNS)
+
+    def _reinit(self) -> None:
+        logger.warning(
+            "enVector connection lost - reconnecting to %s ...",
+            self._init_params["address"],
+        )
+        ev.init(**self._init_params)
+        logger.info("enVector reconnection complete.")
+
+    def _with_reconnect(self, fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            if not self._is_connection_error(exc):
+                raise
+            logger.warning(
+                "enVector operation failed (%s: %s). Attempting reconnect...",
+                type(exc).__name__, exc,
+            )
+            self._reinit()
+            return fn(*args, **kwargs)
+
     def invoke_get_index_list(self) -> List[str]:
         """
         Invokes the enVector SDK's get_index_list functionality.
@@ -145,7 +202,7 @@ class EnVectorSDKAdapter:
         Returns:
             List[str]: List of index names from the enVector SDK.
         """
-        return ev.get_index_list()
+        return self._with_reconnect(ev.get_index_list)
 
     #------------------- Insert ------------------#
 
@@ -195,9 +252,12 @@ class EnVectorSDKAdapter:
             else:
                 metadata = [self._app_encrypt_metadata(m) for m in metadata]
 
-        index = ev.Index(index_name)  # Create an index instance with the given index name
-        # Insert vectors with optional metadata
-        return index.insert(data=vectors, metadata=metadata) # Return list of inserted vectors' IDs
+        def _do_insert():
+            index = ev.Index(index_name) # Create an index instance with the given index name
+            # Insert vectors with optional metadata
+            return index.insert(data=vectors, metadata=metadata) # Return list of inserted vectors' IDs
+
+        return self._with_reconnect(_do_insert)
 
     #------------------- Scoring (Vault-Secured Pipeline) ------------------#
 
@@ -214,7 +274,7 @@ class EnVectorSDKAdapter:
         Returns:
             Dict with ok, encrypted_blobs (List[str] of base64-encoded CiphertextScore protobuf), or error.
         """
-        try:
+        def _do_score():
             index = ev.Index(index_name)
             scores = index.scoring(query)  # List[CipherBlock] with is_score=True
             encoded_blobs = []
@@ -224,6 +284,9 @@ class EnVectorSDKAdapter:
                 encoded_blob = base64.b64encode(serialized).decode('utf-8')
                 encoded_blobs.append(encoded_blob)
             return {"ok": True, "encrypted_blobs": encoded_blobs}
+
+        try:
+            return self._with_reconnect(_do_score)
         except Exception as e:
             return {"ok": False, "error": repr(e)}
 
@@ -244,23 +307,24 @@ class EnVectorSDKAdapter:
         Returns:
             Dict with ok, results (List[dict]), or error.
         """
-        try:
-            if output_fields is None:
-                output_fields = ["metadata"]
+        if output_fields is None:
+            output_fields = ["metadata"]
 
+        # Pre-validate before network call
+        idx_list = []
+        for entry in indices:
+            row_idx = entry.get("row_idx")
+            if row_idx is None:
+                raise ValueError("Missing required 'row_idx' in index entry: " + repr(entry))
+            idx_list.append(
+                {
+                    "shard_idx": entry.get("shard_idx", 0),
+                    "row_idx": row_idx,
+                }
+            )
+
+        def _do_remind():
             index = ev.Index(index_name)
-            # Indexer.get_metadata expects [{"shard_idx": int, "row_idx": int}]
-            idx_list = []
-            for entry in indices:
-                row_idx = entry.get("row_idx")
-                if row_idx is None:
-                    raise ValueError("Missing required 'row_idx' in index entry: " + repr(entry))
-                idx_list.append(
-                    {
-                        "shard_idx": entry.get("shard_idx", 0),
-                        "row_idx": row_idx,
-                    }
-                )
             results = index.indexer.get_metadata(
                 index_name=index_name,
                 idx=idx_list,
@@ -285,6 +349,9 @@ class EnVectorSDKAdapter:
                     result_dict["score"] = entry.get("score", 0.0)
                     results_with_scores.append(result_dict)
             return self._to_json_available({"ok": True, "results": results_with_scores})
+
+        try:
+            return self._with_reconnect(_do_remind)
         except Exception as e:
             return {"ok": False, "error": repr(e)}
 
