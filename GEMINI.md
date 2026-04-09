@@ -43,7 +43,7 @@ When Rune state is `"active"`, **proactively capture significant decisions** whe
 - Questions, status updates, or casual discussion
 - Decisions that are hypothetical or deferred ("maybe later", "let's revisit")
 
-**Session-end sweep:** A `SessionEnd` hook will remind you when the session is ending. Review the conversation for any uncaptured significant decisions and use the `mcp_envector_batch_capture` tool to capture them now as a batch if needed.
+**Session-end sweep:** When the user signals they're done (goodbye, thanks, wrapping up), review the conversation for any uncaptured significant decisions and use the `mcp_envector_batch_capture` tool to capture them now as a batch if needed.
 
 ### State Gate
 

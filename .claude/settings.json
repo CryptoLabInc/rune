@@ -1,17 +1,1 @@
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "STATE=$(cat ~/.rune/config.json 2>/dev/null | grep -o '\"state\": *\"[^\"]*\"' | grep -o 'active\\|dormant') && [ \"$STATE\" = \"active\" ] && echo '{\"systemMessage\": \"Rune session-end sweep: Review this conversation for uncaptured significant decisions. If any exist, spawn a background rune:scribe subagent to batch-capture them now.\"}' || echo '{}'",
-            "timeout": 5,
-            "once": true,
-            "statusMessage": "Rune session-end sweep"
-          }
-        ]
-      }
-    ]
-  }
-}
+{}

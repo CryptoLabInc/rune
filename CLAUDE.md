@@ -40,7 +40,7 @@ When Rune state is `"active"`, **proactively spawn a background `rune:scribe` su
 - Questions, status updates, or casual discussion
 - Decisions that are hypothetical or deferred ("maybe later", "let's revisit")
 
-**Session-end sweep:** A `Stop` hook will remind you when the session is ending. Review the conversation for any uncaptured significant decisions and spawn a background `rune:scribe` subagent with `batch_capture` if needed.
+**Session-end sweep:** When the user signals they're done (goodbye, thanks, wrapping up), review the conversation for any uncaptured significant decisions and spawn a background `rune:scribe` subagent with `batch_capture` if needed.
 
 ### State Gate
 
