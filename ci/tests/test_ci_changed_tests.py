@@ -3,10 +3,11 @@
 import re
 import sys
 import os
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '.github', 'scripts'))
 
-from ci_changed_tests import find_test_node_ids
+from ci_changed_tests import find_test_node_ids, get_changed_line_numbers
 
 # Grep pattern used in pr-tests.yml to filter changed test files
 _FILE_PATTERN = re.compile(r'(^|/)tests/test_[^/]+\.py$')
@@ -69,3 +70,56 @@ class TestFindTestNodeIds:
         f.write_text("def helper():\n    pass\n")
         ids = find_test_node_ids(str(f), changed_lines={1})
         assert ids == [str(f)]
+
+    def test_detects_method_when_decorator_line_changed(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "import pytest\n"
+            "class TestFoo:\n"
+            "    @pytest.mark.slow\n"
+            "    def test_bar(self):\n"
+            "        assert True\n"
+        )
+        # line 3 is the decorator — changing it alone should still detect test_bar
+        ids = find_test_node_ids(str(f), changed_lines={3})
+        assert ids == [f"{f}::TestFoo::test_bar"]
+
+    def test_detects_method_when_multiple_decorators_and_first_decorator_line_changed(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "import pytest\n"
+            "class TestFoo:\n"
+            "    @pytest.mark.slow\n"
+            "    @pytest.mark.parametrize('x', [1])\n"
+            "    def test_bar(self, x):\n"
+            "        assert x\n"
+        )
+        # line 3 is the first decorator — range should start from there
+        ids = find_test_node_ids(str(f), changed_lines={3})
+        assert ids == [f"{f}::TestFoo::test_bar"]
+
+
+class TestGetChangedLineNumbers:
+    def _run_with_diff(self, diff_output: str) -> set:
+        mock_result = MagicMock()
+        mock_result.stdout = diff_output
+        with patch("ci_changed_tests.subprocess.run", return_value=mock_result):
+            return get_changed_line_numbers("base_sha", "head_sha", "test_sample.py")
+
+    def test_deletion_only_hunk_adds_anchor(self):
+        # @@ -2 +1,0 @@ means 1 line deleted; new_count=0 → deletion anchor at new line 1
+        diff = "@@ -2 +1,0 @@\n-    # setup comment\n"
+        changed = self._run_with_diff(diff)
+        assert 1 in changed
+
+    def test_deletion_only_hunk_with_multiple_lines_adds_anchor(self):
+        # @@ -5,3 +4,0 @@ means 3 lines deleted; anchor at new line 4
+        diff = "@@ -5,3 +4,0 @@\n-line5\n-line6\n-line7\n"
+        changed = self._run_with_diff(diff)
+        assert 4 in changed
+
+    def test_normal_addition_hunk_adds_range(self):
+        # @@ -1,0 +1,3 @@ means 3 lines added starting at new line 1
+        diff = "@@ -1,0 +1,3 @@\n+line1\n+line2\n+line3\n"
+        changed = self._run_with_diff(diff)
+        assert changed == {1, 2, 3}
