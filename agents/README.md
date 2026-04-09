@@ -9,3 +9,4 @@ This directory contains the agent specifications for Rune:
 
 - **Scribe**: For capturing organizational context.
 - **Retriever**: For searching and synthesizing organizational context.
+- **Agent adapters**: `claude/`, `gemini/`, and `codex/` contain client-specific prompt variants where needed.

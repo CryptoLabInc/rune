@@ -172,8 +172,8 @@ class TestLLMConfig:
         assert "anthropic_api_key" not in retriever_section
         assert "openai_api_key" not in retriever_section
 
-    def test_save_config_no_envector_section(self, tmp_path):
-        """save_config must not write an envector section (credentials come from Vault)."""
+    def test_save_config_has_envector_section(self, tmp_path):
+        """save_config must write an envector section (cached from Vault bundle)."""
         from agents.common.config import load_config, save_config
         config_file = tmp_path / "config.json"
         config_file.write_text("{}")
@@ -184,7 +184,9 @@ class TestLLMConfig:
             save_config(cfg)
 
         saved = json.loads(config_file.read_text())
-        assert "envector" not in saved, "envector section should not exist in saved config"
+        assert "envector" in saved, "envector section should exist in saved config"
+        assert "endpoint" in saved["envector"]
+        assert "api_key" in saved["envector"]
 
     def test_save_config_no_retriever_llm_keys(self, tmp_path):
         """Retriever section in saved output must not contain LLM fields."""
@@ -224,11 +226,11 @@ class TestLLMConfig:
         cfg = RuneConfig()
         assert isinstance(cfg.llm, LLMConfig)
 
-    def test_rune_config_no_envector_field(self):
-        """RuneConfig should not have an envector field (credentials come from Vault)."""
-        from agents.common.config import RuneConfig
+    def test_rune_config_has_envector_field(self):
+        """RuneConfig should have an envector field (cached from Vault bundle)."""
+        from agents.common.config import RuneConfig, EnVectorConfig
         cfg = RuneConfig()
-        assert not hasattr(cfg, "envector")
+        assert isinstance(cfg.envector, EnVectorConfig)
 
     def test_retriever_config_no_llm_fields(self):
         """RetrieverConfig should not have LLM-specific fields."""

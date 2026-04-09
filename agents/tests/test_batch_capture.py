@@ -267,7 +267,7 @@ class TestBatchCaptureE2E:
             assert "error" in r
 
     def test_scribe_prompts_contain_batch_capture(self):
-        """Verify both scribe prompts mention batch_capture and Session-End Sweep."""
+        """Verify all scribe prompts mention batch_capture and Session-End Sweep."""
         with open("agents/claude/scribe.md") as f:
             claude_scribe = f.read()
         assert "batch_capture" in claude_scribe
@@ -279,6 +279,12 @@ class TestBatchCaptureE2E:
         assert "batch_capture" in gemini_scribe
         assert "Session-End Sweep" in gemini_scribe
         assert "gemini_agent" in gemini_scribe
+
+        with open("agents/codex/scribe.md") as f:
+            codex_scribe = f.read()
+        assert "batch_capture" in codex_scribe
+        assert "Session-End Sweep" in codex_scribe
+        assert "codex_agent" in codex_scribe
 
     def test_batch_capture_item_format_compatible_with_capture(self):
         """Verify _make_item() produces format compatible with capture tool's extracted param."""

@@ -19,6 +19,29 @@ Use `rune:scribe` (or `capture` MCP tool) when:
 - Trade-offs are analyzed and a choice is committed
 - Lessons learned or post-mortem insights emerge
 
+### Automatic Capture (Proactive Scribe)
+
+When Rune state is `"active"`, **proactively spawn a background `rune:scribe` subagent** when you detect any of the following in the conversation:
+
+- A choice is made among alternatives ("A로 가자", "let's go with X")
+- Trade-offs are weighed and committed ("X의 단점이 있지만 Y 때문에 감수")
+- Strategy or direction is confirmed ("이 방향이 맞아", "this approach works")
+- A lesson or insight crystallizes ("안 된 이유는...", "the root cause was...")
+- A framework, process, or standard is established
+
+**How to spawn:**
+- Use `Agent` tool with `subagent_type: "rune:scribe"` and `run_in_background: true`
+- In the prompt, include ONLY the relevant conversation excerpt (not the full context)
+- Do NOT pause or interrupt the main conversation — continue responding to the user
+- Do NOT announce the capture to the user unless they ask
+
+**Do NOT auto-capture:**
+- Brainstorming in progress without commitment (options listed but none chosen)
+- Questions, status updates, or casual discussion
+- Decisions that are hypothetical or deferred ("maybe later", "let's revisit")
+
+**Session-end sweep:** When the user signals they're done (goodbye, thanks, wrapping up), review the conversation for any uncaptured significant decisions and spawn a background `rune:scribe` subagent with `batch_capture` if needed.
+
 ### State Gate
 
 **Before spawning `rune:scribe` or `rune:retriever` subagents, or calling `capture`/`recall` MCP tools, check `~/.rune/config.json` state:**

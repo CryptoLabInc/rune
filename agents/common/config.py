@@ -55,6 +55,13 @@ class LLMConfig:
 
 
 @dataclass
+class EnVectorConfig:
+    """enVector Cloud credentials (cached from Vault bundle)"""
+    endpoint: str = ""
+    api_key: str = ""
+
+
+@dataclass
 class ScribeConfig:
     """Scribe agent configuration"""
     slack_webhook_port: int = 8080
@@ -78,6 +85,7 @@ class RetrieverConfig:
 class RuneConfig:
     """Main Rune configuration"""
     vault: VaultConfig = field(default_factory=VaultConfig)
+    envector: EnVectorConfig = field(default_factory=EnVectorConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     scribe: ScribeConfig = field(default_factory=ScribeConfig)
@@ -132,6 +140,15 @@ def _parse_retriever_config(data: dict) -> RetrieverConfig:
     )
 
 
+def _parse_envector_config(data: dict) -> EnVectorConfig:
+    """Parse envector section from config dict"""
+    ev_data = data.get("envector", {})
+    return EnVectorConfig(
+        endpoint=ev_data.get("endpoint", ""),
+        api_key=ev_data.get("api_key", ""),
+    )
+
+
 def _parse_llm_config(data: dict) -> LLMConfig:
     """Parse LLM configuration with backward-compatible migration.
 
@@ -180,7 +197,8 @@ def load_config() -> RuneConfig:
     Load configuration from file and environment variables.
 
     Vault credentials are loaded from ~/.rune/config.json.
-    enVector credentials are delivered via Vault bundle (not stored locally).
+    enVector credentials are cached in config.json (populated from Vault bundle
+    during pipeline initialization).
     Other settings (embedding, scribe, LLM keys) can be overridden via
     environment variables.
 
@@ -198,6 +216,7 @@ def load_config() -> RuneConfig:
                 data = json.load(f)
 
             config.vault = _parse_vault_config(data)
+            config.envector = _parse_envector_config(data)
             config.embedding = _parse_embedding_config(data)
             config.llm = _parse_llm_config(data)
             config.scribe = _parse_scribe_config(data)
@@ -295,6 +314,10 @@ def save_config(config: RuneConfig) -> None:
             "token": config.vault.token,
             "ca_cert": config.vault.ca_cert,
             "tls_disable": config.vault.tls_disable,
+        },
+        "envector": {
+            "endpoint": config.envector.endpoint,
+            "api_key": config.envector.api_key,
         },
         "embedding": {
             "mode": config.embedding.mode,

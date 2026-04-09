@@ -1312,41 +1312,43 @@ class MCPServerApp:
         records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
 
         # ===== Novelty check (Memory-as-Filter) =====
-        # Compare reusable_insight against existing memory
+        # Vault-secured: embed → score → Vault decrypt → compare max similarity
         embedding_text = _embedding_text_for_record(records[0])
         novelty_info = {"score": 1.0, "class": "novel", "related": []}
 
         try:
-            search_result = envector_client.search_with_text(
-                index_name=self._vault_index_name,
-                query_text=embedding_text,
-                embedding_service=embedding_service,
-                topk=3,
-            )
-            parsed = envector_client.parse_search_results(search_result)
-            if parsed:
-                max_sim = max(r.get("score", 0.0) for r in parsed)
-                novelty_info = _classify_novelty(max_sim)
-                novelty_info["related"] = [
-                    {
-                        "id": r.get("metadata", {}).get("id", ""),
-                        "title": r.get("metadata", {}).get("title", ""),
-                        "similarity": round(r.get("score", 0.0), 3),
-                    }
-                    for r in parsed[:3]
-                ]
+            query_vector = embedding_service.embed_single(embedding_text)
+            scoring_result = envector_client.score(self._vault_index_name, query_vector)
+            if scoring_result.get("ok") and scoring_result.get("encrypted_blobs") and self.vault:
+                blobs = scoring_result["encrypted_blobs"]
+                vault_result = await self.vault.decrypt_search_results(
+                    encrypted_blob_b64=blobs[0],
+                    top_k=3,
+                )
+                if vault_result.ok and vault_result.results:
+                    parsed = vault_result.results
+                    max_sim = max(r.get("score", 0.0) for r in parsed)
+                    novelty_info = _classify_novelty(max_sim)
+                    novelty_info["related"] = [
+                        {
+                            "id": r.get("metadata", {}).get("id", ""),
+                            "title": r.get("metadata", {}).get("title", ""),
+                            "similarity": round(r.get("score", 0.0), 3),
+                        }
+                        for r in parsed[:3]
+                    ]
 
-                # NEAR-DUPLICATE -> skip capture (only blocking case)
-                if novelty_info["class"] == "near_duplicate":
-                    return {
-                        "ok": True,
-                        "captured": False,
-                        "reason": "Near-duplicate — virtually identical insight already stored",
-                        "novelty": novelty_info,
-                    }
+                    # NEAR-DUPLICATE -> skip capture (only blocking case)
+                    if novelty_info["class"] == "near_duplicate":
+                        return {
+                            "ok": True,
+                            "captured": False,
+                            "reason": "Near-duplicate — virtually identical insight already stored",
+                            "novelty": novelty_info,
+                        }
         except Exception as e:
             # Novelty check failure is non-fatal — proceed with capture
-            logger.warning("Novelty check failed: %s", e)
+            logger.warning("Novelty check failed (non-fatal): %s", e)
 
         # Embed reusable_insight (schema 2.1) or payload.text (fallback)
         texts = [_embedding_text_for_record(r) for r in records]
@@ -1524,10 +1526,26 @@ class MCPServerApp:
                         self._envector_endpoint = vault_ev_endpoint
                     if vault_ev_api_key:
                         self._envector_api_key = vault_ev_api_key
+
+                    # Cache enVector credentials to config.json
+                    if vault_ev_endpoint or vault_ev_api_key:
+                        from agents.common.config import save_config as save_rune_config
+                        if vault_ev_endpoint:
+                            rune_config.envector.endpoint = vault_ev_endpoint
+                        if vault_ev_api_key:
+                            rune_config.envector.api_key = vault_ev_api_key
+                        save_rune_config(rune_config)
+                        logger.info("Cached enVector credentials to config.json")
                 else:
                     result["errors"].append("Failed to fetch keys from Vault")
                     logger.error("Failed to fetch keys from Vault — capture/search will fail")
                     _set_dormant_with_reason("vault_unreachable")
+
+            # Use cached enVector credentials from config if not set by Vault
+            if not self._envector_endpoint and rune_config.envector.endpoint:
+                self._envector_endpoint = rune_config.envector.endpoint
+            if not self._envector_api_key and rune_config.envector.api_key:
+                self._envector_api_key = rune_config.envector.api_key
 
             if not key_id:
                 result["errors"].append("key_id not available. Vault must provide key_id.")
