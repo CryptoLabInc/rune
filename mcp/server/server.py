@@ -1326,8 +1326,17 @@ class MCPServerApp:
                     top_k=3,
                 )
                 if vault_result.ok and vault_result.results:
-                    max_sim = max(r.get("score", 0.0) for r in vault_result.results)
+                    parsed = vault_result.results
+                    max_sim = max(r.get("score", 0.0) for r in parsed)
                     novelty_info = _classify_novelty(max_sim)
+                    novelty_info["related"] = [
+                        {
+                            "id": r.get("metadata", {}).get("id", ""),
+                            "title": r.get("metadata", {}).get("title", ""),
+                            "similarity": round(r.get("score", 0.0), 3),
+                        }
+                        for r in parsed[:3]
+                    ]
 
                     # NEAR-DUPLICATE -> skip capture (only blocking case)
                     if novelty_info["class"] == "near_duplicate":
