@@ -29,6 +29,7 @@ jobs:
         env:
           CI_RUN_ID: ${{ github.event.workflow_run.id }}
         with:
+          github-token: ${{ secrets.CI_BOT_TOKEN }}
           script: |
             const fs = require('fs');
             const info = JSON.parse(fs.readFileSync('pr_info.json', 'utf8'));
