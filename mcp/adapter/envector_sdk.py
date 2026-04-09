@@ -85,7 +85,7 @@ KeyParameter.metadata_key = property(_safe_metadata_key_getter, KeyParameter.met
 KeyParameter.metadata_key_path = property(_safe_metadata_key_path_getter)
 KeyParameter.metadata_encryption = property(_safe_metadata_encryption_getter, KeyParameter.metadata_encryption.fset)
 
-# gRPC error messages realted to dead/stale connection
+# gRPC error messages related to dead/stale connection
 CONNECTION_ERROR_PATTERNS = (
     "UNAVAILABLE",
     "DEADLINE_EXCEEDED",
@@ -182,9 +182,9 @@ class EnVectorSDKAdapter:
         ev.init(**self._init_params)
         logger.info("enVector reconnection complete.")
 
-    def _with_reconnect(self, fn, *args, **kwargs):
+    def _with_reconnect(self, fn):
         try:
-            return fn(*args, **kwargs)
+            return fn()
         except Exception as exc:
             if not self._is_connection_error(exc):
                 raise
@@ -193,7 +193,7 @@ class EnVectorSDKAdapter:
                 type(exc).__name__, exc,
             )
             self._reinit()
-            return fn(*args, **kwargs)
+            return fn()
 
     def invoke_get_index_list(self) -> List[str]:
         """

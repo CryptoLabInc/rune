@@ -1566,6 +1566,8 @@ class MCPServerApp:
                     query_encryption=False,
                     access_token=self._envector_api_key or "",
                     auto_key_setup=False,
+                    agent_id=self._agent_id,
+                    agent_dek=self._agent_dek,
                 )
             except Exception as e:
                 logger.warning("enVector adapter refresh failed: %s", e)
