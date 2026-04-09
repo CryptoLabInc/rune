@@ -25,7 +25,10 @@ def get_changed_line_numbers(base_sha: str, head_sha: str, filepath: str) -> set
         if m:
             start = int(m.group(1))
             count = int(m.group(2)) if m.group(2) is not None else 1
-            changed.update(range(start, start + count))
+            if count == 0:
+                changed.add(start)  # deletion anchor: marks where lines were removed
+            else:
+                changed.update(range(start, start + count))
     return changed
 
 
@@ -49,7 +52,10 @@ def find_test_node_ids(filepath: str, changed_lines: set[int]) -> list[str]:
                 for child in node.body
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
                 and child.name.startswith("test_")
-                and set(range(child.lineno, child.end_lineno + 1)) & changed_lines
+                and set(range(
+                    child.decorator_list[0].lineno if child.decorator_list else child.lineno,
+                    child.end_lineno + 1,
+                )) & changed_lines
             ]
             if methods:
                 node_ids.extend(
