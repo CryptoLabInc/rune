@@ -49,3 +49,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Git worktrees
+.worktrees/

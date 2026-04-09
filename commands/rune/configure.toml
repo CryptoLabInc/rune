@@ -8,13 +8,11 @@ Cross-agent rule:
 
 Collect the following credentials from the user, one at a time:
 
-1. **enVector Endpoint** (required) — e.g. `cluster-abc123.envector.io`
-2. **enVector API Key** (required) — a base64url hash, e.g. `xK9mPqR2vLs-Tj7nWcYdF4b-hGe3iUoAZw1-Bx5kNrQyMa`
-3. **Vault Endpoint** (optional) — e.g. `tcp://vault-myteam.oci.envector.io:50051`
+1. **Vault Endpoint** (required) — e.g. `tcp://vault-myteam.oci.envector.io:50051`
    - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
-4. **Vault Token** (optional) — a base64url hash, e.g. `dG9rLWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1`
+2. **Vault Token** (required) — a base64url hash, e.g. `dG9rLWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1`
 
-If Vault Endpoint and Token were both provided, ask the TLS question:
+Then ask the TLS question:
 
 **"How does your Vault server handle TLS?"**
 
@@ -34,8 +32,6 @@ If Vault Endpoint and Token were both provided, ask the TLS question:
    - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
    → config: `ca_cert: ""`, `tls_disable: true`
 
-If Vault fields are skipped, note that the plugin will start in dormant state.
-
 Before writing config, ensure local runtime is prepared:
 - Detect plugin root by finding `scripts/bootstrap-mcp.sh`. Search in order:
   1. `$RUNE_PLUGIN_ROOT` (if set)
@@ -54,13 +50,12 @@ Then write `~/.rune/config.json` with this structure (chmod 600 after writing):
 ```json
 {
   "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>", "ca_cert": "<ca_cert or empty>", "tls_disable": false},
-  "envector": {"endpoint": "<envector_endpoint>", "api_key": "<envector_api_key>"},
   "state": "dormant",
-  "metadata": {"configVersion": "1.0", "lastUpdated": "<ISO timestamp>"}
+  "metadata": {"configVersion": "2.0", "lastUpdated": "<ISO timestamp>"}
 }
 ```
 
-If Vault fields were skipped, set their values to empty strings.
+Note: enVector credentials are no longer stored locally — they are delivered automatically via the Vault bundle at session start.
 
 After writing the config, show a summary:
 
@@ -69,10 +64,8 @@ Rune Configuration Complete
 ============================
   Config    : ~/.rune/config.json
   Vault TLS : <enabled (system CA) | enabled (custom CA) | disabled>
-  State     : dormant (run /rune:activate to enable)
+  State     : dormant (run /rune:activate or $rune activate to enable)
 ```
-
-If Vault was not configured, add: "Vault not configured — plugin will start in dormant state."
 
 Codex only:
 - Optionally suggest `<plugin_root>/scripts/install-codex.sh` if the user wants automatic Codex MCP registration.

@@ -1,179 +1,357 @@
 # Rune
-**FHE-Encrypted Organizational Memory for AI Agents**
+**Your agent already knows what your team knows.**
 
-Rune is an agent-native plugin that transforms organizational memory into a strategic asset by **connecting the isolated activities of local agents through encrypted memory**.
+Rune gives every AI agent on your team the **collective experience** of the entire organization — automatically, privately, and without anyone searching for it.
+
+```
+  Without Rune                         With Rune
+  ━━━━━━━━━━━━                        ━━━━━━━━━
+
+  Developer: "Should we use MongoDB?"   Developer: "Should we use MongoDB?"
+
+  Agent: "MongoDB is great for          Agent: "Your team chose PostgreSQL
+         flexible schemas..."                   over MongoDB in March. ACID
+                                                compliance was non-negotiable
+  (generic advice, no team context)             for transaction integrity."
+
+  Two weeks later: "Wait, the team      The developer never searched.
+  already rejected MongoDB??"           The agent just knew.
+```
 
 Works with **Claude Code, Codex CLI, Gemini CLI**, and any MCP-compatible agent.
 
+---
+
+## How Rune Changes Agent Behavior
+
+### Without Rune: Isolated Agents
+
+Every agent on your team starts from zero. They give generic advice. They can't know that another team member spent four hours debugging a connection pool issue last week, or that the architecture review in January already ruled out a microservices migration.
+
 ```
-# In the Claude Code session
-/plugin install github.com/CryptoLabInc/rune
+  Alice's Agent          Bob's Agent           Carol's Agent
+  ┌───────────┐         ┌───────────┐         ┌───────────┐
+  │           │         │           │         │           │
+  │  No team  │         │  No team  │         │  No team  │
+  │  context  │         │  context  │         │  context  │
+  │           │         │           │         │           │
+  └───────────┘         └───────────┘         └───────────┘
+       ↕                     ↕                     ↕
+     Alice                  Bob                  Carol
 
-# In the Codex CLI session
-$skill-installer install github.com/CryptoLabInc/rune
-```
-
-## What is Rune?
-
-This is the **complete plugin** with everything needed to run Rune locally:
-
-- MCP server with FHE-encrypted vector operations (enVector + Vault integration)
-- Capture filtering and recall via FHE-encrypted pipelines
-- Installation scripts for Claude Code, Codex CLI, and manual setup
-- Agent specifications (Scribe for capture, Retriever for recall)
-
-**Requires external infrastructure** (deploy separately):
-- Rune-Vault server (team-shared, deployed by admin — see [rune-admin](https://github.com/CryptoLabInc/rune-admin))
-- enVector Cloud account (sign up at [envector.io](https://envector.io))
-
-## MCP Tools
-
-Rune exposes these tools via MCP (stdio transport). Any MCP-compatible agent can use them directly.
-
-| Tool | Description |
-|------|-------------|
-| **`capture`** | Capture organizational decisions via FHE-encrypted storage pipeline |
-| **`recall`** | Search encrypted team memory via Vault-secured pipeline (query expansion → encrypted scoring → Vault decryption) |
-| **`vault_status`** | Check Rune-Vault connection status and security mode |
-| **`reload_pipelines`** | Re-read config and reinitialize scribe/retriever pipelines |
-
-**Example — capture a decision:**
-```
-capture(text="We chose PostgreSQL over MongoDB for better ACID guarantees and JSON support.")
+  Each agent is an amnesiac. Every conversation starts fresh.
+  Knowledge dies when the session ends.
 ```
 
-**Example — recall past context:**
+### With Rune: Shared Memory Across the Swarm
+
+Every agent draws from the same pool of team experience. When Alice's agent captures a decision, Bob's agent can recall it tomorrow — without Bob ever knowing it existed.
+
 ```
-recall(query="Why did we choose PostgreSQL?", topk=5)
-→ { found: 3, results: [...], sources: [...] }
+  Alice's Agent          Bob's Agent           Carol's Agent
+  ┌───────────┐         ┌───────────┐         ┌───────────┐
+  │           │         │           │         │           │
+  │  Team     │         │  Team     │         │  Team     │
+  │  memory   │         │  memory   │         │  memory   │
+  │  built in │         │  built in │         │  built in │
+  │           │         │           │         │           │
+  └─────┬─────┘         └─────┬─────┘         └─────┬─────┘
+        │                     │                     │
+        └──────────┬──────────┘──────────┬──────────┘
+                   │                     │
+            ┌──────┴──────────────┴──────────┐
+            │                                │
+            │    Shared Encrypted Memory     │
+            │    (enVector Cloud + Vault)     │
+            │                                │
+            │  Every decision, every lesson, │
+            │  every debugging breakthrough  │
+            │  — encrypted, searchable,      │
+            │  automatically surfaced.       │
+            │                                │
+            └────────────────────────────────┘
+
+  The new hire's agent has the intuition of a veteran.
+  Because it has the team's experience built in.
 ```
+
+### What This Looks Like In Practice
+
+**Architecture review that starts 30 minutes ahead:**
+```
+Lead: "Let's discuss the auth middleware rewrite"
+
+Agent: "Before we start — your team has prior context:
+       - Legal flagged the current middleware for session
+         token storage (compliance issue)
+       - JWT with 24h rotation was chosen over session-based
+         auth in January's security review
+       - Security team requires rotation under 24 hours"
+
+Nobody asked. The context just appeared.
+```
+
+**Debugging session that saves 4 hours:**
+```
+Dev: "The payment service is timing out"
+
+Agent: "A similar timeout was investigated last month — root
+       cause was connection pool exhaustion under concurrent
+       webhook processing. Fix was async batch processing
+       with a 50-connection pool limit."
+
+Knowledge from a teammate's past session, surfaced automatically.
+```
+
+**Onboarding that just works:**
+```
+New hire: "I'm thinking of using Redis for the job queue"
+
+Agent: "Your team evaluated Redis vs SQS for the job queue
+       in February. SQS was chosen because Redis required
+       dedicated ops capacity the team doesn't have.
+       Trade-off: higher per-message cost, but zero
+       operational burden."
+
+The new hire's agent already has institutional knowledge
+they haven't been taught yet.
+```
+
+---
+
+## This Is Not A Search Tool
+
+Rune is **memory**, not a database.
+
+```
+  Database                            Memory
+  ━━━━━━━━                           ━━━━━━
+
+  You open a drawer.                  You're in a conversation.
+  You pull out a document.            A relevant experience surfaces.
+  Exact match.                        You didn't ask for it.
+
+  "I know I don't know.               "I didn't know I knew.
+   Let me search."                     It just came back to me."
+```
+
+You don't "query" Rune. Your agent draws from it unconsciously — the way an experienced engineer draws from years of past projects without thinking about it. The best sign Rune is working is when your agent gives you context you didn't ask for, and it's useful.
+
+### How The Capture Pipeline Works (Brain Analogy)
+
+Rune's capture system is modeled on how the brain forms long-term memories:
+
+```
+  EXPERIENCE                HIPPOCAMPUS               LONG-TERM MEMORY
+  ━━━━━━━━━━               ━━━━━━━━━━━               ━━━━━━━━━━━━━━━━
+
+  Full conversation   ──►   Agent judges:     ──►    Stores the GIST:
+  with all the              "Is this significant?"
+  tangents, greetings,                                "PostgreSQL for
+  weather chat...           enVector checks:          financial data.
+                            "Is this novel?"          ACID required.
+                                                      MongoDB rejected."
+                            Filters ~99% out.
+                            Keeps only the insight.   Not the conversation.
+                                                      The INSIGHT.
+```
+
+| Brain | Rune |
+|-------|------|
+| Prefrontal cortex judges significance | Agent evaluates decisions using full context |
+| Hippocampus detects novelty | enVector recall checks against existing memories |
+| Gist extraction (verbatim fades, meaning persists) | Agent writes a `reusable_insight` — a dense natural-language paragraph |
+| Consolidation (sleep filters and stores) | Capture pipeline encrypts and stores only novel insights |
+| Associative recall (cue → memory surfaces) | Semantic search on encrypted vectors |
+
+The memory itself acts as the filter. An empty memory captures aggressively (everything is novel). A rich memory becomes selective (most things are already known). **The filter improves as the memory grows** — no patterns to maintain, no rules to update.
+
+---
+
+## Privacy: Zero-Knowledge Encryption
+
+Every memory is encrypted **before leaving your machine** using Fully Homomorphic Encryption (FHE).
+
+```
+  Your Machine                           Cloud
+  ━━━━━━━━━━━━                          ━━━━━
+
+  "We chose PostgreSQL     FHE encrypt
+   for ACID compliance"   ──────────►   [encrypted vector]
+                                         │
+  Agent asks:                            │ similarity scoring
+  "database strategy?"    ──────────►   [encrypted query]
+                                         │
+                                         ▼
+                          Vault decrypts scores only
+                          (never sees the content)
+                                         │
+  Results returned        ◄──────────    │
+  (decrypted locally)
+```
+
+- **enVector Cloud** stores and searches **only encrypted vectors** — it cannot read your data
+- **Rune-Vault** holds the team's secret key and decrypts **only similarity scores** — it never sees the actual content
+- **Plaintext never leaves your machine**
+
+Even if the cloud is compromised, your organizational knowledge remains mathematically protected.
+
+---
 
 ## Quick Start
 
-### Claude Code
+### Install
+
+In a terminal:
 ```bash
+# For Claude Code
 $ claude plugin marketplace add https://github.com/CryptoLabInc/rune.git
 $ claude plugin install rune
+
+# For Gemini CLI
+$ gemini extensions install https://github.com/CryptoLabInc/rune.git
 ```
-- In the Claude code session:
+
+In a Claude Code session:
 ```
 > /plugin marketplace add https://github.com/CryptoLabInc/rune.git
 > /plugin install rune
 ```
 
-### Codex CLI
-In the Codex CLI session:
+In a Codex CLI session:
 ```
 > $skill-installer install https://github.com/CryptoLabInc/rune.git
 ```
 
-### Gemini CLI
-```bash
-$ gemini extensions install https://github.com/CryptoLabInc/rune
+### Configure
+
+In slash-command agents:
+```
+> /rune:configure
+```
+In Codex CLI:
+```
+> $rune configure
 ```
 
-### Local Development (from source)
+You'll need credentials from your team admin:
+- **Vault endpoint** + token (for decryption and encrypted storage)
 
-If you're developing or testing a local copy of the plugin:
+enVector Cloud credentials are delivered automatically via the Vault bundle at session start — you don't need to configure them separately.
 
-```bash
-# 1. If you previously installed a versioned plugin, clean up first
-rm -rf ~/.rune
-rm -rf ~/.claude/plugins/cache/*/rune
+Don't have these? See [rune-admin](https://github.com/CryptoLabInc/rune-admin) for deployment instructions, or [examples/team-setup-example.md](examples/team-setup-example.md) for a team onboarding walkthrough.
 
-# 2. Register the local directory as a marketplace source
-claude plugin marketplace add ./
+### That's It
 
-# 3. Install from the local marketplace
-claude plugin install rune
-```
+Once configured, Rune works automatically. Your agent will:
+- **Capture** significant decisions, trade-offs, and lessons learned during your work
+- **Recall** relevant team knowledge when it matters — without being asked
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for full development setup instructions.
+No commands to memorize. No queries to write. Just work with your agent as usual.
 
-### Other Agents
-See [AGENT_INTEGRATION.md](AGENT_INTEGRATION.md) for Gemini CLI, OpenAI, and custom MCP client setup.
+---
 
-### After Installation
-Run `/rune:configure` and follow the instructions given by the agent.
+## MCP Tools
 
+For agents that want explicit control, Rune exposes these tools via MCP:
+
+| Tool | What It Does |
+|------|-------------|
+| `capture` | Store a decision in encrypted team memory. Pass `extracted` JSON with the agent's evaluation and a `reusable_insight` paragraph. |
+| `recall` | Search team memory semantically. Returns relevant decisions with context. |
+| `vault_status` | Check Vault connection and security mode |
+| `reload_pipelines` | Re-read config and reinitialize pipelines |
+| `capture_history` | View recent captures from the local log |
+| `delete_capture` | Soft-delete a captured record |
+
+See [SKILL.md](SKILL.md) for the full tool reference and agent integration protocol.
+
+---
 
 ## Architecture
 
 ```
-Your Machine                    Cloud / Team Infrastructure
-━━━━━━━━━━━━━                  ━━━━━━━━━━━━━━━━━━━━━━━━━━
-AI Agent + Rune Plugin
-  ├─ enVector MCP Server ──→   enVector Cloud (encrypted vectors)
-  │    └─ recall tool    ──→   Rune-Vault (team-shared, secret key holder)
-  ├─ Scribe (capture)               decrypts result ciphertext, returns top-k
-  └─ Retriever (recall)
+  Agent Swarm (your team)              Cloud Infrastructure
+  ━━━━━━━━━━━━━━━━━━━━━━              ━━━━━━━━━━━━━━━━━━━━
 
-Supported Agents: Claude Code, Codex CLI, Gemini CLI, custom MCP clients
+  Alice's Agent ─┐
+  Bob's Agent ───┤── MCP ──► enVector Cloud (encrypted vectors)
+  Carol's Agent ─┘               │
+                            Rune-Vault (secret key holder)
+                            decrypts similarity scores only
 ```
 
 ```mermaid
 flowchart TD
     Cloud[("enVector Cloud<br>(Encrypted Storage)")]
 
-    subgraph MCP [envector-mcp-server]
-        Capture["capture tool<br>(local secret key, owner's data)"]
-        Recall["recall tool<br>(Vault-secured, shared team memory)"]
+    subgraph MCP [Rune MCP Server]
+        Capture["capture<br>(agent-delegated)"]
+        Recall["recall<br>(Vault-secured)"]
     end
 
     subgraph Vault [Rune-Vault]
-        Decrypt["decrypt_scores()<br>(secret key holder)"]
+        Decrypt["decrypt scores<br>(secret key never leaves)"]
     end
 
-    subgraph Client [Client Agents]
-        Agent["Claude / Gemini / Codex / Custom"]
+    subgraph Agents [Agent Swarm]
+        A1["Alice's Agent"]
+        A2["Bob's Agent"]
+        A3["Carol's Agent"]
     end
 
-    %% Capture flow
-    Agent -- "capture" --> Capture
-    Capture -- "|Encrypted Data|" --> Cloud
+    A1 & A2 & A3 -- "capture / recall" --> MCP
+    Capture -- "encrypted vectors" --> Cloud
+    Recall -- "encrypted similarity" --> Cloud
+    Recall -- "decrypt scores" --> Decrypt
+    Decrypt -- "indices + scores" --> Recall
 
-    %% Recall flow (4-step pipeline)
-    Agent -- "recall" --> Recall
-    Recall -- "1. encrypted similarity scoring" --> Cloud
-    Recall -- "2. decrypt result ciphertext<br>(secret key never leaves Vault)" --> Decrypt
-    Decrypt -- "indices + similarity values" --> Recall
-    Recall -- "3. retrieve + decrypt metadata<br>4. return raw results" --> Agent
-
-    %% Styles
     style Cloud fill:#eff,stroke:#333
     style Capture fill:#eef,stroke:#333
     style Recall fill:#eef,stroke:#333
     style Decrypt fill:#fee,stroke:#333
-    style Agent fill:#efe,stroke:#333
+    style A1 fill:#efe,stroke:#333
+    style A2 fill:#efe,stroke:#333
+    style A3 fill:#efe,stroke:#333
 ```
 
-**Data Flow**:
-- **Capture**: Agent evaluates + extracts → MCP `capture` → Tier 1 embedding check → FHE-encrypted insert → enVector Cloud
-- **Recall**: MCP `recall` → query expansion → encrypted similarity scoring on enVector Cloud → Rune-Vault decrypts result ciphertext (secret key held exclusively by Vault) → retrieve and decrypt metadata → return raw results to agent
+**Capture flow:** Agent judges significance → generates reusable insight → novelty check against existing memory → FHE encrypt → store in enVector Cloud
 
-**Key Design**:
-- **Agent** calls MCP tools (`capture`, `recall`). Agent never contacts Vault directly.
-- **`recall` tool** uses a Vault-secured pipeline. The secret key never leaves Vault. This isolation prevents agent tampering attacks from indiscriminately decrypting shared vectors.
-- **Rune-Vault** holds the **secret key** exclusively. It decrypts only score ciphertext and metadata ciphertext — never sees raw vectors.
-- **envector-mcp-server** uses **Public Keys** (EncKey, EvalKey) for encryption and search. No LLM API key required — agents handle evaluation and extraction directly (agent-delegated mode).
+**Recall flow:** Semantic query → encrypted similarity scoring → Vault decrypts scores only → retrieve and decrypt metadata locally → agent weaves context into response
 
-## Prerequisites
+---
 
-Before installing, you need:
+## For Team Administrators
 
-### 1. Rune-Vault Access (from your team admin)
-- **Vault Endpoint**: Your Vault gRPC endpoint (e.g., `vault-host:50051`)
-- **Vault Token**: Authentication token provided by your admin
+Rune requires two infrastructure components:
 
-### 2. enVector Cloud Credentials
-- **Cluster Endpoint**: Your enVector endpoint (e.g., `runestone-xxx.clusters.envector.io`)
-- **API Key**: Your enVector API key
+1. **Rune-Vault** — Holds the team's secret key. Decrypts only similarity scores, never content. Deploy via [rune-admin](https://github.com/CryptoLabInc/rune-admin).
+2. **enVector Cloud** — Encrypted vector storage and search. Sign up at [envector.io](https://envector.io).
 
-**Don't have these?** Contact your team administrator or see the [full Rune deployment guide](https://github.com/CryptoLabInc/rune-admin).
+### Deploying
+
+See the [Rune-Admin Repository](https://github.com/CryptoLabInc/rune-admin):
+1. Deploy Rune-Vault (OCI/AWS via Terraform)
+2. Create enVector Cloud account and cluster
+3. Provision team index on Vault
+
+### Onboarding Members
+
+Give each member:
+- Vault gRPC endpoint + authentication token
+
+enVector Cloud credentials are included in the Vault bundle and delivered automatically at session start.
+
+They install the plugin, run the Rune configure command (`/rune:configure` in slash-command clients, `$rune configure` in Codex CLI), and they're connected to the team memory.
+
+### Security Management
+
+- **Token rotation**: New token → distribute → revoke old. Departed members lose access immediately.
+- **Project isolation**: Separate Vault instances per project for isolated memory spaces.
+
+---
 
 ## Configuration
-
-### Configuration File
 
 `~/.rune/config.json`:
 
@@ -183,118 +361,46 @@ Before installing, you need:
     "endpoint": "your-vault-host:50051",
     "token": "your-vault-token"
   },
-  "envector": {
-    "endpoint": "runestone-xxx.clusters.envector.io",
-    "api_key": "your-api-key"
-  },
   "state": "active"
 }
 ```
 
-### Starting the MCP Server
-
-```bash
-cd rune && ./scripts/start-mcp-servers.sh
-```
-
-Logs: `~/.rune/logs/envector-mcp.log`
-
-> Vault MCP runs on a remote server deployed by the team admin via [rune-admin](https://github.com/CryptoLabInc/rune-admin), not locally.
-
-## Plugin States
-
 | State | Behavior |
 |-------|----------|
-| **Active** | Full functionality — capture and recall enabled, fail-safe switches to Dormant on errors |
-| **Dormant** | No network requests, no token waste — shows setup instructions, ready to activate |
+| **Active** | Full functionality — capture and recall enabled |
+| **Dormant** | No network requests — shows setup instructions |
 
-Set `"state": "active"` in config after infrastructure is ready. The plugin automatically falls back to Dormant if operations fail.
-
-## For Team Administrators
-
-Rune requires a deployed **Rune-Vault** server and an **enVector Cloud** account. The Vault holds the team's secret key for decrypting search results — it is the single point of trust in the system.
-
-### Deploying Infrastructure
-
-See the [Rune-Admin Repository](https://github.com/CryptoLabInc/rune-admin):
-
-1. **Deploy Rune-Vault** — OCI/AWS deployment via Terraform. Vault holds the secret key and enforces access policy (max results per query, audit trail).
-2. **Create enVector Cloud account** — Sign up at [envector.io](https://envector.io), create a cluster, generate API keys.
-3. **Provision team index** — Set the shared index name on the Vault server. All team members connecting to this Vault automatically use the same index.
-
-### Onboarding Team Members
-
-Provide each team member with:
-1. Vault gRPC endpoint and authentication token (same for all members)
-2. enVector cluster endpoint and API key (shared or individual)
-
-Members install the plugin and enter these credentials in `~/.rune/config.json`. See [examples/team-setup-example.md](examples/team-setup-example.md) for a complete walkthrough.
-
-### Security Management
-
-- **Token rotation**: Generate new Vault token, distribute to current members, revoke old token.
-- **Access revocation**: Rotate Vault token — departed members lose access immediately.
-- **Multiple projects**: Deploy separate Vault instances per project for isolated memory spaces.
-
-Full deployment guide: https://github.com/CryptoLabInc/rune-admin/blob/main/deployment/README.md
-
-## Security & Privacy
-
-**Zero-Knowledge Encryption**:
-- All data is encrypted client-side using **Fully Homomorphic Encryption (FHE)** before leaving your machine.
-- enVector Cloud performs similarity scoring on **encrypted data only** — the server never accesses plaintext.
-- Rune-Vault decrypts only score and metadata **ciphertext** (not raw vectors) to select top-k results.
-
-**Data Storage**:
-- **Local**: Credentials in `~/.rune/config.json` (user-only access recommended: `chmod 600`).
-- **Cloud**: Only FHE-encrypted vectors and encrypted metadata on enVector Cloud. No plaintext stored remotely.
-
-**Third-Party Sharing**:
-- Rune does **not** share data with third parties. In team deployments, Vault is operated by your team admin.
-
-**Your Rights**:
-- **Configuration reset**: Delete `~/.rune/config.json` to remove all local credentials.
-- **Full removal**: Uninstall the plugin and delete `~/.rune/`.
+---
 
 ## Troubleshooting
 
-### Plugin not working?
-
 ```bash
+# Check infrastructure health
 cd rune && ./scripts/check-infrastructure.sh
-```
 
-### Missing credentials?
-
-```bash
-cp config/config.template.json ~/.rune/config.json
-# Edit with your credentials, set "state": "active"
-```
-
-### Need to reset?
-
-```bash
+# Reset configuration
 rm ~/.rune/config.json
+
+# Reinstall
+claude plugin install rune
 ```
 
 ## Related Projects
 
-- **[Rune-Admin](https://github.com/CryptoLabInc/rune-admin)** - Infrastructure deployment and admin tools
-- **[pyenvector](https://socket.dev/pypi/package/pyenvector)** - FHE encryption SDK
-- **[enVector Cloud](https://envector.io)** - Encrypted vector database
+- [Rune-Admin](https://github.com/CryptoLabInc/rune-admin) — Infrastructure deployment and admin tools
+- [pyenvector](https://socket.dev/pypi/package/pyenvector) — FHE encryption SDK
+- [enVector Cloud](https://envector.io) — Encrypted vector database
 
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/CryptoLabInc/rune/issues)
-- **Documentation**: [Full Rune Docs](https://github.com/CryptoLabInc/rune-admin/tree/main/docs)
+- **Docs**: [Full Rune Documentation](https://github.com/CryptoLabInc/rune-admin/tree/main/docs)
 - **Email**: zotanika@cryptolab.co.kr
 
 ## License
 
-Apache License 2.0 - See [LICENSE](LICENSE)
+Apache License 2.0 — See [LICENSE](LICENSE)
 
-## Credits
+---
 
-Built by [CryptoLabInc](https://github.com/CryptoLabInc)
-
-Part of the Rune organizational memory ecosystem.
+Built by [CryptoLab](https://github.com/CryptoLabInc) — where FHE meets AI agent memory.

@@ -24,16 +24,20 @@ Key Components:
 """
 
 from .detector import DecisionDetector, DetectionResult
-from .record_builder import RecordBuilder
-from .pattern_parser import parse_capture_triggers
+from .record_builder import RecordBuilder, RawEvent
 from .review_queue import ReviewQueue, ReviewItem, ReviewAnswers
 
 __all__ = [
     "DecisionDetector",
     "DetectionResult",
     "RecordBuilder",
-    "parse_capture_triggers",
+    "RawEvent",
     "ReviewQueue",
     "ReviewItem",
     "ReviewAnswers",
 ]
+
+# Legacy (available via direct import but not promoted)
+# from .tier2_filter import Tier2Filter
+# from .llm_extractor import LLMExtractor
+# from .pattern_parser import parse_capture_triggers

@@ -397,6 +397,44 @@ class TestExtractedJSONParsing:
         assert error is None
         assert result.confidence is None
 
+    def test_agent_delegated_without_detector(self):
+        """Agent-delegated mode should not require DecisionDetector."""
+        from agents.scribe.detector import DetectionResult
+        from agents.scribe.record_builder import RecordBuilder, RawEvent
+        from agents.scribe.llm_extractor import ExtractionResult, ExtractedFields
+
+        builder = RecordBuilder()
+        raw = RawEvent(
+            text="We decided to use PostgreSQL over MongoDB",
+            user="dev", channel="eng", timestamp="1711000000", source="claude_agent",
+        )
+        # Construct DetectionResult from agent data, no PatternCache needed
+        detection = DetectionResult(
+            is_significant=True,
+            confidence=0.85,
+            domain="architecture",
+            category="architecture",
+        )
+        pre_extraction = ExtractionResult(
+            group_title="Use PostgreSQL over MongoDB",
+            status_hint="accepted",
+            tags=["database", "architecture"],
+            confidence=0.85,
+            single=ExtractedFields(
+                title="Use PostgreSQL over MongoDB",
+                rationale="Better ACID compliance for financial data",
+                problem="Need reliable database for transactions",
+                alternatives=["MongoDB"],
+                trade_offs=["Less flexible schema"],
+                status_hint="accepted",
+                tags=["database"],
+            ),
+        )
+        records = builder.build_phases(raw, detection, pre_extraction=pre_extraction)
+        assert len(records) == 1
+        assert records[0].domain.value == "architecture"
+        assert records[0].quality.scribe_confidence == 0.85
+
     def test_single_phase_treated_as_single(self):
         """Test that phases with 1 element is treated as single record"""
         extracted = json.dumps({
@@ -419,3 +457,149 @@ class TestExtractedJSONParsing:
         assert not result.is_multi_phase
         assert result.single is not None
         assert result.single.title == "Only Phase"
+
+
+def test_reusable_insight_used_for_embedding_text():
+    """When reusable_insight is set, it should be the embedding target."""
+    from agents.common.schemas import DecisionRecord, DecisionDetail, Payload
+    from agents.common.schemas.embedding import embedding_text_for_record
+
+    record = DecisionRecord(
+        id="dec_test",
+        title="Test",
+        decision=DecisionDetail(what="Test"),
+        reusable_insight="Dense gist paragraph for embedding.",
+        payload=Payload(text="# Full markdown\n## Decision\nVerbose content"),
+    )
+    assert embedding_text_for_record(record) == "Dense gist paragraph for embedding."
+
+
+def test_embedding_text_fallback_to_payload():
+    """When reusable_insight is empty, fall back to payload.text."""
+    from agents.common.schemas import DecisionRecord, DecisionDetail, Payload
+    from agents.common.schemas.embedding import embedding_text_for_record
+
+    record = DecisionRecord(
+        id="dec_test",
+        title="Test",
+        decision=DecisionDetail(what="Test"),
+        reusable_insight="",
+        payload=Payload(text="Fallback payload text"),
+    )
+    assert embedding_text_for_record(record) == "Fallback payload text"
+
+
+def test_reusable_insight_flows_to_record():
+    """reusable_insight from agent JSON should appear on the built record."""
+    from agents.scribe.detector import DetectionResult
+    from agents.scribe.record_builder import RecordBuilder, RawEvent
+    from agents.scribe.llm_extractor import ExtractionResult, ExtractedFields
+
+    insight = "We chose PostgreSQL over MongoDB for ACID compliance in financial data."
+    builder = RecordBuilder()
+    raw = RawEvent(text="...", user="dev", channel="eng", timestamp="1711000000", source="claude_agent")
+    detection = DetectionResult(is_significant=True, confidence=0.85, domain="architecture")
+    pre_extraction = ExtractionResult(
+        group_title="PostgreSQL selection",
+        status_hint="accepted",
+        tags=["database"],
+        confidence=0.85,
+        group_summary=insight,
+        single=ExtractedFields(
+            title="PostgreSQL selection",
+            rationale="ACID compliance",
+            status_hint="accepted",
+            tags=["database"],
+        ),
+    )
+    records = builder.build_phases(raw, detection, pre_extraction=pre_extraction)
+    assert records[0].reusable_insight == insight
+
+
+def test_single_record_json_reusable_insight_wiring():
+    """reusable_insight from agent JSON must reach DecisionRecord in single-record path.
+
+    Regression test: the server.py single-record path was missing group_summary,
+    so reusable_insight was always empty for Format A captures.
+    """
+    import json
+    from agents.common.llm_utils import parse_llm_json
+    from agents.scribe.detector import DetectionResult
+    from agents.scribe.record_builder import RecordBuilder, RawEvent
+    from agents.scribe.llm_extractor import ExtractionResult, ExtractedFields
+
+    # Simulate agent JSON (Format A — single decision, no phases)
+    agent_json = {
+        "tier2": {"capture": True, "reason": "Architecture decision", "domain": "architecture"},
+        "title": "Adopt PostgreSQL",
+        "reusable_insight": "We chose PostgreSQL over MongoDB because ACID compliance is critical for financial transaction data. MongoDB was rejected due to eventual consistency risks.",
+        "rationale": "ACID compliance",
+        "problem": "Need reliable database",
+        "alternatives": ["MongoDB"],
+        "trade_offs": ["Less flexible schema"],
+        "status_hint": "accepted",
+        "tags": ["database"],
+        "confidence": 0.9,
+    }
+    data = agent_json
+
+    # Reproduce server.py single-record path (no phases or 0 phases)
+    single = ExtractedFields(
+        title=str(data.get("title", ""))[:60],
+        rationale=str(data.get("rationale", "")),
+        problem=str(data.get("problem", "")),
+        alternatives=[str(a) for a in data.get("alternatives", []) if a],
+        trade_offs=[str(t) for t in data.get("trade_offs", []) if t],
+        status_hint=str(data.get("status_hint", "")).lower(),
+        tags=[str(t).lower() for t in data.get("tags", []) if t],
+    )
+    pre_extraction = ExtractionResult(
+        group_title=single.title,
+        group_summary=str(data.get("reusable_insight", "")) or "",
+        status_hint=single.status_hint,
+        tags=single.tags,
+        confidence=0.9,
+        single=single,
+    )
+
+    builder = RecordBuilder()
+    raw = RawEvent(text="...", user="dev", channel="eng", timestamp="1711000000", source="claude_agent")
+    detection = DetectionResult(is_significant=True, confidence=0.9, domain="architecture")
+
+    records = builder.build_phases(raw, detection, pre_extraction=pre_extraction)
+    assert records[0].reusable_insight == agent_json["reusable_insight"]
+
+
+def test_embedding_text_for_metadata_dict():
+    """_embedding_text_for_record should work with metadata dicts (delete_capture path)."""
+    from agents.common.schemas.embedding import embedding_text_for_record as _embedding_text_for_record
+
+    class FakeRecord:
+        reusable_insight = "Dense gist about PostgreSQL choice."
+        class payload:
+            text = "# Full verbose markdown\n## Decision\nLong content..."
+
+    assert _embedding_text_for_record(FakeRecord()) == "Dense gist about PostgreSQL choice."
+
+    class FakeRecordLegacy:
+        reusable_insight = ""
+        class payload:
+            text = "Fallback payload text"
+
+    assert _embedding_text_for_record(FakeRecordLegacy()) == "Fallback payload text"
+
+
+def test_delete_embedding_text_selection():
+    """delete_capture should use reusable_insight from metadata for embedding."""
+    def select_delete_embedding_text(metadata, fallback_payload_text):
+        ri = metadata.get("reusable_insight", "")
+        return ri.strip() if ri and ri.strip() else fallback_payload_text
+
+    metadata_21 = {"reusable_insight": "Dense gist.", "payload": {"text": "Verbose."}}
+    assert select_delete_embedding_text(metadata_21, "Verbose.") == "Dense gist."
+
+    metadata_20 = {"payload": {"text": "Verbose."}}
+    assert select_delete_embedding_text(metadata_20, "Verbose.") == "Verbose."
+
+    metadata_empty = {"reusable_insight": "", "payload": {"text": "Verbose."}}
+    assert select_delete_embedding_text(metadata_empty, "Verbose.") == "Verbose."

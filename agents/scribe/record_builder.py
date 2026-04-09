@@ -249,6 +249,7 @@ class RecordBuilder:
                 detection=detection,
                 extraction=extraction,
                 redaction_notes=redaction_notes,
+                pre_extraction=pre_extraction,
             )]
 
         # ===== Multi-record: phase_chain or bundle =====
@@ -268,6 +269,7 @@ class RecordBuilder:
         detection: DetectionResult,
         extraction: ExtractionResult,
         redaction_notes: Optional[str],
+        pre_extraction: Optional[ExtractionResult] = None,
     ) -> DecisionRecord:
         title = fields.title or self._extract_title(clean_text, detection)
         evidence = self._extract_evidence(raw_event, clean_text)
@@ -307,6 +309,11 @@ class RecordBuilder:
         )
         record.ensure_evidence_certainty_consistency()
         record.payload.text = render_payload_text(record)
+
+        # Populate reusable_insight from pre_extraction group_summary
+        if pre_extraction and getattr(pre_extraction, 'group_summary', None):
+            record.reusable_insight = pre_extraction.group_summary
+
         return record
 
     def _build_multi_record_from_extraction(
@@ -387,6 +394,11 @@ class RecordBuilder:
             )
             record.ensure_evidence_certainty_consistency()
             record.payload.text = render_payload_text(record)
+
+            # Populate reusable_insight from pre_extraction group_summary
+            if getattr(extraction, 'group_summary', None):
+                record.reusable_insight = extraction.group_summary
+
             records.append(record)
 
         return records

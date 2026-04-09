@@ -17,9 +17,7 @@ This guide shows how a team administrator sets up Rune infrastructure and onboar
 
 ## Step 1: Alice Deploys Rune Infrastructure
 
-Alice is the team administrator and needs to deploy:
-1. Rune-Vault (team-shared key management)
-2. enVector Cloud account (encrypted vector storage)
+Alice is the team administrator and needs to deploy Rune-Vault (team-shared key management + enVector Cloud bundled configuration).
 
 ### 1.1 Deploy Rune-Vault
 
@@ -47,18 +45,7 @@ terraform apply
 # vault_token = "evt_acme_abc123def456"
 ```
 
-### 1.2 Sign up for enVector Cloud
-
-```bash
-# Alice visits https://envector.io
-# Creates account: alice@acme.com
-# Creates cluster: acme-us-west-2
-# Generates API key: envector_xyz789
-
-# Note the credentials:
-# endpoint = "https://cluster-us-west-2.envector.io"
-# api_key = "envector_xyz789"
-```
+> **Note**: enVector Cloud credentials are configured as part of the Vault deployment and delivered to clients automatically via the Vault bundle at startup. No separate enVector signup is needed by team members.
 
 ---
 
@@ -75,8 +62,7 @@ cd ~/workspace
 # Enter:
 # Vault Endpoint: vault-acme.oci.envector.io:50051
 # Vault Token: evt_acme_abc123def456
-# enVector Endpoint: https://cluster-us-west-2.envector.io
-# enVector API Key: envector_xyz789
+# (enVector credentials are delivered automatically via Vault bundle)
 
 # Plugin is now active ✅
 ```
@@ -97,17 +83,15 @@ Hi Bob,
 I've set up our team's organizational memory system. Here are your credentials:
 
 **Rune-Vault**:
-- URL: https://vault-acme.oci.envector.io
+- Endpoint: vault-acme.oci.envector.io:50051
 - Token: evt_acme_abc123def456
 
-**enVector Cloud** (shared):
-- Endpoint: https://cluster-us-west-2.envector.io
-- API Key: envector_xyz789
+(enVector Cloud credentials are delivered automatically — no action needed on your end.)
 
 **Setup Instructions**:
 1. Run: /plugin install github.com/CryptoLabInc/rune
 2. Run: /rune:configure
-3. Enter the credentials above
+3. Enter the Vault endpoint and token above
 
 Let me know if you have any issues!
 
@@ -271,10 +255,9 @@ The index name is always managed by the Vault admin and distributed automaticall
 ## Summary
 
 **Admin Tasks** (Alice):
-1. Deploy Rune-Vault (one-time, 1 hour)
-2. Sign up enVector Cloud (one-time, 10 minutes)
-3. Onboard team members (per member, 5 minutes)
-4. Rotate tokens (monthly, 10 minutes)
+1. Deploy Rune-Vault with enVector bundle (one-time, 1 hour)
+2. Onboard team members (per member, 5 minutes)
+3. Rotate tokens (monthly, 10 minutes)
 
 **Team Member Tasks** (Bob, Carol):
 1. Install plugin (one-time, 2 minutes)

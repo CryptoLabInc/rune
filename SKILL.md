@@ -1,6 +1,6 @@
 ---
 name: rune
-description: Encrypted organizational memory workflow for Rune with activation checks and /rune command behaviors across MCP-compatible agents.
+description: Encrypted organizational memory workflow for Rune with activation checks and /rune (or $rune for Codex CLI) command behaviors across MCP-compatible agents.
 ---
 
 # Rune - Organizational Memory System
@@ -67,31 +67,31 @@ Keep agent-specific instructions clearly labeled and never mix Codex-only comman
 - **Do NOT attempt context capture or retrieval**
 - **Do NOT make network requests**
 - **Do NOT waste tokens on failed operations**
-- Show setup instructions when `/rune` commands are used
+- Show setup instructions when `/rune` commands (or `$rune` for Codex CLI) are used
 - Prompt user to:
   1. Check infrastructure: `scripts/check-infrastructure.sh`
-  2. Configure: `/rune:configure`
+  2. Configure: `/rune:configure` (or `$rune configure` for Codex CLI)
   3. Start MCP servers: `scripts/start-mcp-servers.sh`
 
 ### Fail-Safe Behavior
 If in Active state but operations fail:
 - Switch to Dormant immediately
 - Update config.json `state` to `"dormant"`
-- Notify user once: "Infrastructure unavailable. Switched to dormant mode. Run /rune:status for details."
+- Notify user once: "Infrastructure unavailable. Switched to dormant mode. Run `/rune:status` (or `$rune status` for Codex CLI) for details."
 - **Do not retry** - wait for user to fix infrastructure
 
 ## Commands
 
 ### `/rune:configure`
+(or `$rune configure` for Codex CLI)
+
 **Purpose**: Configure plugin credentials
 
 **Steps**:
-1. Ask user for enVector Endpoint (required, e.g., `cluster-xxx.envector.io`)
-2. Ask user for enVector API Key (required, e.g., `envector_xxx`)
-3. Ask user for Vault Endpoint (optional, e.g., `tcp://vault-TEAM.oci.envector.io:50051`)
+1. Ask user for Vault Endpoint (required, e.g., `tcp://vault-TEAM.oci.envector.io:50051`)
    - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
-4. Ask user for Vault Token (optional, e.g., `evt_xxx`)
-5. If Vault Endpoint and Token were both provided, ask the TLS question:
+2. Ask user for Vault Token (required, e.g., `evt_xxx`)
+3. Ask the TLS question:
 
    **"How does your Vault server handle TLS?"**
 
@@ -111,18 +111,20 @@ If in Active state but operations fail:
       - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
       - → config: `ca_cert: ""`, `tls_disable: true`
 
-   If Vault fields are skipped, note that the plugin will start in dormant state.
+   Note: enVector credentials are delivered automatically via the Vault bundle — no user input needed.
 
-6. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
+4. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
    - If validation fails: Create config with `state: "dormant"`, warn user
-   - If validation passes: Continue to step 7
-7. Create `~/.rune/config.json` with proper structure
-8. Set state based on validation:
+   - If validation passes: Continue to step 5
+5. Create `~/.rune/config.json` with proper structure
+6. Set state based on validation:
    - Infrastructure ready: `state: "active"`
    - Infrastructure not ready: `state: "dormant"`
-9. Confirm configuration and show next steps if dormant
+7. Confirm configuration and show next steps if dormant
 
 ### `/rune:status`
+(or `$rune status` for Codex CLI)
+
 **Purpose**: Check plugin activation status and infrastructure health
 
 **Steps**:
@@ -156,12 +158,16 @@ Recommendations:
 ```
 
 ### `/rune:capture <context>`
+(or `$rune capture <context>` for Codex CLI)
+
 **Purpose**: Manually store organizational context when Scribe's automatic capture missed it or the user wants to force-store specific information.
 
 **When to use**: Scribe automatically captures significant decisions from conversation (see Automatic Behavior below). This command is an **override** for cases where:
 - Scribe didn't detect the context as significant
 - The user wants to store something that isn't part of the current conversation
 - Bulk-importing existing documentation
+
+**Mode**: Agent-delegated (primary) — the calling agent evaluates significance and extracts structured fields, passing them as `extracted` JSON to the `capture` MCP tool. The server stores the encrypted record without additional LLM calls. If `extracted` is omitted and API keys are configured, falls back to a legacy 3-tier server-side pipeline.
 
 **Behavior**:
 - If dormant: Prompt user to configure first
@@ -173,6 +179,8 @@ Recommendations:
 ```
 
 ### `/rune:recall <query>`
+(or `$rune recall <query>` for Codex CLI)
+
 **Purpose**: Explicitly search organizational memory. Retriever already handles this automatically when users ask questions about past decisions in natural conversation.
 
 **When to use**: Retriever automatically detects recall-intent queries (see Automatic Behavior below). This command is an **explicit override** for cases where:
@@ -192,13 +200,15 @@ Recommendations:
 **Note**: In most cases, simply asking naturally ("Why did we choose PostgreSQL?") triggers Retriever automatically — no command needed.
 
 ### `/rune:activate` (or `/rune:wakeup`)
+(or `$rune activate` for Codex CLI)
+
 **Purpose**: Attempt to activate plugin after infrastructure is ready
 
 **Use Case**: Infrastructure was not ready during configure, but now it's deployed and running.
 
 **Steps**:
 1. Check if config exists
-   - NO → Redirect to `/rune:configure`
+   - NO → Redirect to `/rune:configure` (or `$rune configure` for Codex CLI)
    - YES → Continue
 2. Run full infrastructure validation:
    - Check Vault connectivity (curl vault-url/health)
@@ -210,11 +220,13 @@ Recommendations:
 4. If checks fail:
    - Keep state as `"dormant"`
    - Show detailed error report
-   - Suggest: `/rune:status` for more info
+   - Suggest: `/rune:status` (or `$rune status` for Codex CLI) for more info
 
 **Important**: This is the ONLY command that makes network requests to validate infrastructure.
 
 ### `/rune:reset`
+(or `$rune reset` for Codex CLI)
+
 **Purpose**: Clear configuration and return to dormant state
 
 **Steps**:
@@ -301,15 +313,18 @@ When users ask questions about past decisions, automatically search organization
 ## Troubleshooting
 
 ### Plugin not responding?
-Check activation state with `/rune:status`
+Check activation state with `/rune:status` (or `$rune status` for Codex CLI)
 
 ### Credentials not working?
 1. Verify with team admin that credentials are correct
 2. Check Vault is accessible: `curl <vault-url>/health`
-3. Reconfigure with `/rune:configure`
+3. Reconfigure with `/rune:configure` (or `$rune configure` for Codex CLI)
+
+### enVector not provisioned?
+Vault admin must configure `ENVECTOR_ENDPOINT` and `ENVECTOR_API_KEY` on the Vault server. Contact your Vault administrator.
 
 ### Need to switch teams?
-Use `/rune:reset` then `/rune:configure` with new team credentials
+Use `/rune:reset` (or `$rune reset` for Codex CLI) then `/rune:configure` (or `$rune configure` for Codex CLI) with new team credentials
 
 ## For Administrators
 

@@ -4,7 +4,7 @@ set -e
 # Rune Plugin Installation Script
 # This script sets up the Python environment and dependencies for the plugin
 
-VERSION="0.2.4"
+VERSION="0.3.0"
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Colors
@@ -82,7 +82,7 @@ echo "✓ Dependencies installed"
 echo "✓ Config directory: ~/.rune"
 echo ""
 echo "Next steps:"
-echo "  1. Configure credentials: /rune:configure"
+echo "  1. Configure credentials: \$rune configure (Codex) or /rune:configure (slash-command agents)"
 echo "  2. Start MCP servers: scripts/start-mcp-servers.sh"
 echo "  3. Restart the agent session"
 echo ""

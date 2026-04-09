@@ -98,47 +98,53 @@ class TestSearcher:
     @pytest.fixture
     def mock_client(self):
         client = Mock()
-        client.search_with_text.return_value = {
-            "ok": True,
-            "results": [
-                {
-                    "id": "1",
-                    "distance": 0.2,
-                    "metadata": {
-                        "id": "dec_2024-01-01_arch_postgres",
-                        "title": "Adopt PostgreSQL",
-                        "domain": "architecture",
-                        "why": {"certainty": "supported"},
-                        "payload": {"text": "# Decision Record: Adopt PostgreSQL\n..."},
-                    }
-                }
-            ]
-        }
-        client.parse_search_results.return_value = [
-            {
-                "id": "1",
-                "score": 0.8,
-                "metadata": {
-                    "id": "dec_2024-01-01_arch_postgres",
-                    "title": "Adopt PostgreSQL",
-                    "domain": "architecture",
-                    "why": {"certainty": "supported"},
-                    "payload": {"text": "# Decision Record: Adopt PostgreSQL\n..."},
-                }
-            }
-        ]
+        client.score.return_value = {"ok": True, "encrypted_blobs": ["fake_blob"]}
+        client.remind.return_value = {"ok": True, "results": [
+            {"score": 0.8, "metadata": {
+                "id": "dec_2024-01-01_arch_postgres",
+                "title": "Adopt PostgreSQL",
+                "domain": "architecture",
+                "why": {"certainty": "supported"},
+                "payload": {"text": "# Decision Record: Adopt PostgreSQL\n..."},
+            }}
+        ]}
         return client
 
     @pytest.fixture
     def mock_embedding(self):
         embedding = Mock()
-        embedding.embed_single.return_value = [0.1] * 384
+        embedding.embed_single.return_value = [0.1] * 1024
         return embedding
 
     @pytest.fixture
-    def searcher(self, mock_client, mock_embedding):
+    def mock_vault(self):
+        from unittest.mock import AsyncMock
+        from dataclasses import dataclass
+
+        @dataclass
+        class VaultResult:
+            ok: bool = True
+            error: str = ""
+            results: list = None
+
+        vault = AsyncMock()
+        vault.decrypt_search_results.return_value = VaultResult(
+            ok=True,
+            results=[{"shard_idx": 0, "row_idx": 0, "score": 0.8}],
+        )
+        vault.decrypt_metadata.return_value = [
+            {"id": "dec_2024-01-01_arch_postgres",
+             "title": "Adopt PostgreSQL",
+             "domain": "architecture",
+             "why": {"certainty": "supported"},
+             "payload": {"text": "# Decision Record: Adopt PostgreSQL\n..."}}
+        ]
+        return vault
+
+    @pytest.fixture
+    def searcher(self, mock_client, mock_embedding, mock_vault):
         from agents.retriever.searcher import Searcher
-        return Searcher(mock_client, mock_embedding, "test-collection")
+        return Searcher(mock_client, mock_embedding, "test-collection", vault_client=mock_vault)
 
     @pytest.mark.asyncio
     async def test_search_returns_results(self, searcher):
@@ -193,22 +199,36 @@ class TestExpandPhaseChains:
 
     @pytest.fixture
     def mock_client(self):
-        from unittest.mock import AsyncMock
         client = Mock()
-        client.search_with_text = Mock(return_value={"ok": True, "results": []})
-        client.parse_search_results = Mock(return_value=[])
+        client.score.return_value = {"ok": True, "encrypted_blobs": ["fake_blob"]}
+        client.remind.return_value = {"ok": True, "results": []}
         return client
 
     @pytest.fixture
     def mock_embedding(self):
         embedding = Mock()
-        embedding.embed_single.return_value = [0.1] * 384
+        embedding.embed_single.return_value = [0.1] * 1024
         return embedding
 
     @pytest.fixture
-    def searcher(self, mock_client, mock_embedding):
+    def mock_vault(self):
+        from unittest.mock import AsyncMock
+        from dataclasses import dataclass
+
+        @dataclass
+        class VaultResult:
+            ok: bool = True
+            error: str = ""
+            results: list = None
+
+        vault = AsyncMock()
+        vault.decrypt_search_results.return_value = VaultResult(ok=True, results=[])
+        return vault
+
+    @pytest.fixture
+    def searcher(self, mock_client, mock_embedding, mock_vault):
         from agents.retriever.searcher import Searcher
-        return Searcher(mock_client, mock_embedding, "test-collection")
+        return Searcher(mock_client, mock_embedding, "test-collection", vault_client=mock_vault)
 
     def _make_result(self, record_id, group_id=None, group_type=None, phase_seq=None, phase_total=None, score=0.8):
         from agents.retriever.searcher import SearchResult
@@ -246,10 +266,11 @@ class TestExpandPhaseChains:
 
         # Should have fetched siblings
         searcher._search_single.assert_called_once()
-        # Should contain siblings ordered by phase_seq
-        assert len(expanded) == 2  # Only siblings (originals filtered by existing_ids)
-        assert expanded[0].phase_seq == 1
-        assert expanded[1].phase_seq == 2
+        # Should contain original + siblings ordered by phase_seq
+        assert len(expanded) == 3  # Original (dec_p0) + 2 fetched siblings
+        assert expanded[0].phase_seq == 0
+        assert expanded[1].phase_seq == 1
+        assert expanded[2].phase_seq == 2
 
     @pytest.mark.asyncio
     async def test_expand_orders_by_phase_seq(self, searcher):
@@ -818,3 +839,33 @@ class TestFormatAnswerForDisplay:
         assert "85%" in formatted
         assert "dec_1" in formatted
         assert "alternatives" in formatted.lower()
+
+
+def test_search_result_has_reusable_insight():
+    """SearchResult should carry reusable_insight from metadata."""
+    from agents.retriever.searcher import SearchResult
+
+    # Schema 2.1
+    r = SearchResult(
+        record_id="dec_test",
+        title="Test",
+        payload_text="Verbose markdown",
+        reusable_insight="Dense gist",
+        domain="architecture",
+        certainty="supported",
+        status="accepted",
+        score=0.8,
+    )
+    assert r.reusable_insight == "Dense gist"
+
+    # Schema 2.0 default
+    r2 = SearchResult(
+        record_id="dec_test2",
+        title="Test2",
+        payload_text="Verbose",
+        domain="architecture",
+        certainty="supported",
+        status="accepted",
+        score=0.8,
+    )
+    assert r2.reusable_insight == ""

@@ -100,45 +100,10 @@ class EnVectorClient:
         except Exception:
             return False
 
-    def create_index(
-        self,
-        index_name: str,
-        dim: int,
-        index_type: str = "FLAT"
-    ) -> Dict[str, Any]:
-        """
-        Create a new vector index.
-
-        Args:
-            index_name: Name of the index
-            dim: Embedding dimension
-            index_type: Index type (FLAT or IVF_FLAT)
-
-        Returns:
-            Result dict with ok/error status
-        """
-        self._ensure_initialized()
-
-        index_params = {"index_type": index_type}
-        if index_type == "IVF_FLAT":
-            index_params["nlist"] = 100
-            index_params["default_nprobe"] = 10
-
-        return self._adapter.call_create_index(
-            index_name=index_name,
-            dim=dim,
-            index_params=index_params
-        )
-
     def get_index_list(self) -> Dict[str, Any]:
         """Get list of all indexes"""
         self._ensure_initialized()
         return self._adapter.call_get_index_list()
-
-    def get_index_info(self, index_name: str) -> Dict[str, Any]:
-        """Get info about a specific index"""
-        self._ensure_initialized()
-        return self._adapter.call_get_index_info(index_name=index_name)
 
     def insert(
         self,
@@ -253,96 +218,3 @@ class EnVectorClient:
             output_fields=output_fields,
         )
 
-    def search(
-        self,
-        index_name: str,
-        query_vector: List[float],
-        topk: int = 10
-    ) -> Dict[str, Any]:
-        """
-        Search for similar vectors.
-
-        Args:
-            index_name: Index to search
-            query_vector: Query embedding vector
-            topk: Number of results to return
-
-        Returns:
-            Result dict with results list
-        """
-        self._ensure_initialized()
-
-        result = self._adapter.call_search(
-            index_name=index_name,
-            query=query_vector,
-            topk=topk
-        )
-
-        return result
-
-    def search_with_text(
-        self,
-        index_name: str,
-        query_text: str,
-        embedding_service,
-        topk: int = 10
-    ) -> Dict[str, Any]:
-        """
-        Embed query text and search.
-
-        Args:
-            index_name: Index to search
-            query_text: Query text to embed
-            embedding_service: EmbeddingService instance
-            topk: Number of results to return
-
-        Returns:
-            Result dict with results list
-        """
-        query_vector = embedding_service.embed_single(query_text)
-        return self.search(index_name, query_vector, topk)
-
-    def parse_search_results(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Parse search results into a cleaner format.
-
-        Args:
-            result: Raw result from search()
-
-        Returns:
-            List of parsed results with text, metadata, score
-        """
-        if not result.get("ok"):
-            return []
-
-        parsed = []
-        raw_results = result.get("results", [])
-
-        # Flatten nested results: index.search() returns [[r1, r2, ...]] per query
-        if isinstance(raw_results, list) and raw_results and isinstance(raw_results[0], list):
-            raw_results = raw_results[0]
-
-        if isinstance(raw_results, list):
-            for item in raw_results:
-                if isinstance(item, dict):
-                    metadata = item.get("metadata", {})
-
-                    # Parse JSON metadata if string
-                    if isinstance(metadata, str):
-                        try:
-                            metadata = json.loads(metadata)
-                        except json.JSONDecodeError:
-                            metadata = {"raw": metadata}
-
-                    parsed.append({
-                        "id": item.get("id"),
-                        "distance": item.get("distance", 0),
-                        "score": 1.0 - item.get("distance", 0),  # Convert distance to similarity
-                        "metadata": metadata,
-                        "text": metadata.get("text", ""),
-                    })
-
-        # Sort by score descending
-        parsed.sort(key=lambda x: x["score"], reverse=True)
-
-        return parsed

@@ -22,29 +22,15 @@ This authenticates you to access your team's Vault. Keep this secure and never s
 
 ---
 
-## Required: enVector Cloud Credentials
+## enVector Cloud (Automatic)
 
-Your team administrator or you personally should have signed up at [https://envector.io](https://envector.io) and obtained:
-
-### 3. Cluster Endpoint
-**Format**: `https://cluster-xxx.envector.io`
-
-**Example**: `https://cluster-us-west-2.envector.io`
-
-This is your encrypted vector database endpoint. All data stored here is FHE-encrypted.
-
-### 4. API Key
-**Format**: `envector_xxx`
-
-**Example**: `envector_abc123def456`
-
-This authenticates your requests to the enVector Cloud API.
+enVector Cloud credentials (endpoint, API key) are delivered automatically via the Vault bundle at startup. You do not need to obtain or configure them separately. Your team administrator manages enVector setup as part of the Vault deployment.
 
 ---
 
 ## Prerequisites Check
 
-Do you have all four pieces of information ready?
+Do you have both pieces of information ready (Vault Endpoint + Token)?
 
 ### ✅ Yes, I have everything
 Great! Run `/rune:configure` to set up your credentials and activate the plugin.
@@ -58,14 +44,8 @@ Great! Run `/rune:configure` to set up your credentials and activate the plugin.
 
 If your team hasn't deployed Rune-Vault yet, see the [full Rune deployment guide](https://github.com/CryptoLabInc/rune-admin).
 
-#### Missing enVector credentials?
-**Sign up at [https://envector.io](https://envector.io)**:
-1. Create an account
-2. Create a cluster (or use existing)
-3. Generate an API key
-4. Note your cluster endpoint
-
-Alternatively, ask your team administrator if they have already set up a shared enVector Cloud account.
+#### enVector credentials?
+enVector credentials are delivered automatically via the Vault bundle. If you see enVector errors, contact your team administrator to verify the Vault deployment includes enVector configuration.
 
 ---
 
@@ -124,7 +104,6 @@ Claude: Stored in organizational memory
 ## Need Help?
 
 - **Setup questions**: Contact your team administrator
-- **enVector signup**: [https://envector.io](https://envector.io)
 - **Technical issues**: [GitHub Issues](https://github.com/CryptoLabInc/rune/issues)
 - **Email support**: zotanika@cryptolab.co.kr
 

@@ -9,10 +9,10 @@ from unittest.mock import patch
 class TestCredentialOverrideConfig:
     """Regression tests for the reconfigure-then-reload_pipelines bug.
 
-    Previously, env vars (RUNEVAULT_TOKEN, ENVECTOR_API_KEY, etc.) silently
-    overrode config.json values on every load_config() call. This meant that
-    after /rune:configure wrote a new token to disk, reload_pipelines still
-    used the old token from the process environment — producing a misleading
+    Previously, env vars (RUNEVAULT_TOKEN, etc.) silently overrode
+    config.json values on every load_config() call. This meant that after
+    /rune:configure wrote a new token to disk, reload_pipelines still used
+    the old token from the process environment — producing a misleading
     "Vault key fetch failed" error instead of picking up the new credential.
     """
 
@@ -21,8 +21,6 @@ class TestCredentialOverrideConfig:
         ("RUNEVAULT_ENDPOINT",("vault", "endpoint"),          "tcp://old:50051", "tcp://new:50051"),
         ("VAULT_CA_CERT",     ("vault", "ca_cert"),           "/old/ca.pem",  "/new/ca.pem"),
         ("VAULT_TLS_DISABLE", ("vault", "tls_disable"),       "true",         False),
-        ("ENVECTOR_API_KEY",  ("envector", "api_key"),        "old-key",      "new-key"),
-        ("ENVECTOR_ENDPOINT", ("envector", "endpoint"),       "old.envector.io", "new.envector.io"),
     ])
     def test_credential_not_overridden_by_env(self, tmp_path, env_var, field_path, env_val, config_val):
         """configure-managed credentials must come from config.json, not env vars."""
@@ -44,8 +42,6 @@ class TestCredentialOverrideConfig:
         ("vault",    "endpoint", "tcp://old:50051", "tcp://new:50051"),
         ("vault",    "ca_cert",  "/old/ca.pem",     "/new/ca.pem"),
         ("vault",    "tls_disable", False,           True),
-        ("envector", "api_key",  "old-key",         "new-key"),
-        ("envector", "endpoint", "old.envector.io", "new.envector.io"),
     ])
     def test_reload_picks_up_reconfigured_credential(self, tmp_path, section, field, old_val, new_val):
         """Simulates reload_pipelines after reconfigure: second load_config() must reflect updated credential."""
@@ -176,6 +172,20 @@ class TestLLMConfig:
         assert "anthropic_api_key" not in retriever_section
         assert "openai_api_key" not in retriever_section
 
+    def test_save_config_no_envector_section(self, tmp_path):
+        """save_config must not write an envector section (credentials come from Vault)."""
+        from agents.common.config import load_config, save_config
+        config_file = tmp_path / "config.json"
+        config_file.write_text("{}")
+
+        with patch("agents.common.config.CONFIG_PATH", config_file), \
+             patch("agents.common.config.CONFIG_DIR", tmp_path):
+            cfg = load_config()
+            save_config(cfg)
+
+        saved = json.loads(config_file.read_text())
+        assert "envector" not in saved, "envector section should not exist in saved config"
+
     def test_save_config_no_retriever_llm_keys(self, tmp_path):
         """Retriever section in saved output must not contain LLM fields."""
         from agents.common.config import load_config, save_config
@@ -213,6 +223,12 @@ class TestLLMConfig:
         from agents.common.config import RuneConfig, LLMConfig
         cfg = RuneConfig()
         assert isinstance(cfg.llm, LLMConfig)
+
+    def test_rune_config_no_envector_field(self):
+        """RuneConfig should not have an envector field (credentials come from Vault)."""
+        from agents.common.config import RuneConfig
+        cfg = RuneConfig()
+        assert not hasattr(cfg, "envector")
 
     def test_retriever_config_no_llm_fields(self):
         """RetrieverConfig should not have LLM-specific fields."""

@@ -50,6 +50,7 @@ class SearchResult:
     certainty: str
     status: str
     score: float
+    reusable_insight: str = ""  # Schema 2.1+: dense NL gist (primary embedding text)
     adjusted_score: float = 0.0  # After recency weighting + status penalty
     metadata: Dict[str, Any] = field(default_factory=dict)
     # Group fields (phase_chain or bundle)
@@ -368,10 +369,8 @@ class Searcher:
     # ================================================================
 
     async def _search_single(self, query_text: str, topk: int) -> List[SearchResult]:
-        """Execute a single search query via the appropriate pipeline."""
-        if self._vault:
-            return await self._search_via_vault(query_text, topk)
-        return self._search_direct(query_text, topk)
+        """Execute a single search query via Vault-secured pipeline."""
+        return await self._search_via_vault(query_text, topk)
 
     async def _search_via_vault(self, query_text: str, topk: int) -> List[SearchResult]:
         """
@@ -470,27 +469,6 @@ class Searcher:
             logger.error("Vault search error: %s", e, exc_info=True)
             return []
 
-    def _search_direct(self, query_text: str, topk: int) -> List[SearchResult]:
-        """Fallback: direct search without Vault (for non-Vault deployments)."""
-        try:
-            raw_result = self._client.search_with_text(
-                index_name=self._index_name,
-                query_text=query_text,
-                embedding_service=self._embedding,
-                topk=topk
-            )
-
-            if not raw_result.get("ok"):
-                logger.warning("Direct search failed: %s", raw_result.get("error"))
-                return []
-
-            parsed = self._client.parse_search_results(raw_result)
-            return [self._to_search_result(r) for r in parsed]
-
-        except Exception as e:
-            logger.error("Direct search error: %s", e)
-            return []
-
     def _to_search_result(self, raw: Dict[str, Any]) -> SearchResult:
         """Convert raw result to SearchResult"""
         metadata = raw.get("metadata", {})
@@ -517,6 +495,8 @@ class Searcher:
             if isinstance(decision, dict):
                 payload_text = decision.get("what", "")
 
+        reusable_insight = metadata.get("reusable_insight", "")
+
         group_id = metadata.get("group_id")
         group_type = metadata.get("group_type")
         phase_seq = metadata.get("phase_seq")
@@ -531,6 +511,7 @@ class Searcher:
             certainty=certainty,
             status=status,
             score=score,
+            reusable_insight=reusable_insight,
             adjusted_score=score,
             metadata=metadata,
             group_id=group_id,
@@ -590,5 +571,6 @@ class Searcher:
         record = await self.search_by_id(record_id)
         if not record:
             return []
-        results = await self._search_single(record.payload_text[:500], topk + 1)
+        search_text = record.reusable_insight.strip() or record.payload_text[:500]
+        results = await self._search_single(search_text, topk + 1)
         return [r for r in results if r.record_id != record_id][:topk]

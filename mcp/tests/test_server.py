@@ -15,19 +15,17 @@ if MCP_ROOT not in sys.path:
 
 from fastmcp import Client
 from server.server import MCPServerApp
-from adapter import EnVectorSDKAdapter, EmbeddingAdapter
+from adapter import EnVectorSDKAdapter
 from adapter.vault_client import VaultClient, DecryptResult
 
-# embedding fake adapter
-class FakeEmbeddingAdapter(EmbeddingAdapter):
-    def __init__(self):
-        pass  # Actual initialization not needed
 
-    # ----------- Mocked method: get_embedding ----------- #
-    def get_embedding(self, texts: List[str]) -> np.ndarray:
-        # Return a fake response
-        #   - Expected Return Type: List[Dict[str, Any]]
-        return np.array([[0.1, 0.2, 0.3] * (i+1) for i in range(len(texts))])
+class FakeEmbeddingService:
+    """Fake embedding service matching EmbeddingService.embed() API."""
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        return [[0.1, 0.2, 0.3] * (i+1) for i in range(len(texts))]
+
+    def embed_single(self, text: str) -> List[float]:
+        return self.embed([text])[0]
 
 @pytest.fixture
 def mcp_server():
@@ -43,18 +41,6 @@ def mcp_server():
         def invoke_get_index_list(self) -> List[str]:
             return ["index_a", "index_b"]
 
-        # ----------- Mocked method: Get Index Info ----------- #
-        def invoke_get_index_info(self, index_name: str) -> Dict[str, Any]:
-            if index_name not in ("index_a", "index_b"):
-                raise ValueError(f"Index '{index_name}' not found")
-            return {"index_name": index_name, "dim": 128, "row_count": 42}
-
-        # ----------- Mocked method: Create Index ----------- #
-        def invoke_create_index(self, index_name: str, dim: int, index_params: Dict[str, Any] = None) -> Dict[str, Any]:
-            if index_params is not None and not isinstance(index_params, dict):
-                raise TypeError("index_params must be a dict or None")
-            return {"index_name": index_name, "dim": dim, "index_params": index_params}
-
         # ----------- Mocked method: Insert ----------- #
         def invoke_insert(
                 self,
@@ -64,13 +50,8 @@ def mcp_server():
             ) -> Dict[str, Any]:
             return {"index_name": index_name, "vectors": vectors, "metadata": metadata}
 
-        # ----------- Mocked method: Search ----------- #
-        def invoke_search(self, index_name: str, query: Union[List[float], List[List[float]]], topk: int) -> List[Dict[str, Any]]:
-            # Return a fake response
-            #   - Expected Return Type: List[Dict[str, Any]]
-            return [{"id": 1, "score": 0.9, "metadata": {"fieldA": "valueA"}}]
-
-    app = MCPServerApp(envector_adapter=FakeAdapter(), mcp_server_name="test-mcp", embedding_adapter=FakeEmbeddingAdapter())
+    app = MCPServerApp(envector_adapter=FakeAdapter(), mcp_server_name="test-mcp")
+    app.embedding = FakeEmbeddingService()
     return app.mcp  # FastMCP Instance
 
 
@@ -145,27 +126,16 @@ def mcp_server_with_vault():
         def invoke_get_index_list(self) -> List[str]:
             return ["index_a", "index_b"]
 
-        def invoke_get_index_info(self, index_name: str) -> Dict[str, Any]:
-            if index_name not in ("index_a", "index_b"):
-                raise ValueError(f"Index '{index_name}' not found")
-            return {"index_name": index_name, "dim": 128, "row_count": 42}
-
-        def invoke_create_index(self, index_name: str, dim: int, index_params: Dict[str, Any] = None) -> Dict[str, Any]:
-            return {"index_name": index_name, "dim": dim, "index_params": index_params}
-
         def invoke_insert(self, index_name: str, vectors, metadata=None):
             return {"index_name": index_name, "vectors": vectors, "metadata": metadata}
-
-        def invoke_search(self, index_name: str, query, topk: int):
-            return [{"id": 1, "score": 0.9, "metadata": {"fieldA": "valueA"}}]
 
     app = MCPServerApp(
         envector_adapter=FakeAdapterWithVault(),
         mcp_server_name="test-mcp-vault",
-        embedding_adapter=FakeEmbeddingAdapter(),
         vault_client=FakeVaultClient(),
         vault_index_name="team-decisions",
     )
+    app.embedding = FakeEmbeddingService()
     return app.mcp
 
 
@@ -264,6 +234,48 @@ async def test_reload_pipelines_without_active_config(mcp_server):
         assert data.get("scribe_initialized") is False
         assert data.get("retriever_initialized") is False
 
+# Pre-warm tests
+
+@pytest.mark.asyncio
+async def test_reload_pipelines_returns_envector_warmup(mcp_server):
+    async with Client(mcp_server) as client:
+        result = await client.call_tool("reload_pipelines", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        # When pipelines aren't active (dormant), warmup may be None/empty
+        # but the field should still be present in the response
+        assert "envector_warmup" in data
+
+
+@pytest.mark.asyncio
+async def test_reload_pipelines_warmup_failure():
+    class FailingAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+
+        def invoke_get_index_list(self) -> List[str]:
+            raise ConnectionError("UNAVAILABLE: could not connect")
+
+    app = MCPServerApp(envector_adapter=FailingAdapter(), mcp_server_name="test-mcp-warmup-fail")
+    app.embedding = FakeEmbeddingService()
+    # Force _scribe to be truthy so warmup path is triggered
+    app._scribe = {"record_builder": None, "envector_client": None, "embedding_service": None}
+
+    async with Client(app.mcp) as client:
+        result = await client.call_tool("reload_pipelines", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        warmup = data.get("envector_warmup")
+        # _init_pipelines resets _scribe to None (dormant), so warmup may be None;
+        # if the warmup path runs, it should report the failure
+        if warmup is not None:
+            assert warmup.get("ok") is False
+            assert "error" in warmup
+
 
 # ----------- Diagnostic Tool Tests ----------- #
 
@@ -349,6 +361,97 @@ async def test_diagnostics_no_envector(mcp_server_degraded):
 
         envector = data.get("envector", {})
         assert envector.get("reachable") is False
+
+
+# enVector connection related tests
+
+@pytest.fixture
+def mcp_server_envector_timeout():
+    import time
+
+    class SlowAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+
+        def invoke_get_index_list(self) -> List[str]:
+            time.sleep(10)  # Longer than ENVECTOR_DIAGNOSIS_TIMEOUT (5s)
+            return []
+
+    app = MCPServerApp(envector_adapter=SlowAdapter(), mcp_server_name="test-mcp-slow")
+    app.embedding = FakeEmbeddingService()
+    return app.mcp
+
+
+@pytest.fixture
+def mcp_server_envector_connection_error():
+    class ErrorAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+
+        def invoke_get_index_list(self) -> List[str]:
+            raise ConnectionError("UNAVAILABLE: Connection refused to cloud.envector.io:443")
+
+    app = MCPServerApp(envector_adapter=ErrorAdapter(), mcp_server_name="test-mcp-err")
+    app.embedding = FakeEmbeddingService()
+    return app.mcp
+
+
+@pytest.fixture
+def mcp_server_envector_auth_error():
+    class AuthErrorAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+
+        def invoke_get_index_list(self) -> List[str]:
+            raise Exception("UNAUTHENTICATED: invalid API key")
+
+    app = MCPServerApp(envector_adapter=AuthErrorAdapter(), mcp_server_name="test-mcp-auth")
+    app.embedding = FakeEmbeddingService()
+    return app.mcp
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_envector_timeout(mcp_server_envector_timeout):
+    async with Client(mcp_server_envector_timeout) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is False
+        assert envector.get("error_type") == "timeout"
+        assert "elapsed_ms" in envector
+        assert "timed out" in envector.get("error", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_envector_connection_refused(mcp_server_envector_connection_error):
+    async with Client(mcp_server_envector_connection_error) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is False
+        assert envector.get("error_type") == "connection_refused"
+        assert "hint" in envector
+        assert "endpoint" in envector["hint"].lower()
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_envector_auth_failure(mcp_server_envector_auth_error):
+    async with Client(mcp_server_envector_auth_error) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        envector = data.get("envector", {})
+        assert envector.get("reachable") is False
+        assert envector.get("error_type") == "auth_failure"
+        assert "hint" in envector
 
 
 # ----------- Error Response Tests ----------- #

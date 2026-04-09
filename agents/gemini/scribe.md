@@ -80,6 +80,7 @@ For a single, self-contained decision:
 {
   "tier2": {"capture": true, "reason": "one sentence why", "domain": "<domain>"},
   "title": "Short decision title (5-60 chars)",
+  "reusable_insight": "Dense natural-language paragraph (256-768 tokens) capturing the core knowledge. No markdown. Self-contained. Must answer: 'If someone in 6 months asks about this topic, what do they need to know?' Include what was decided, why, what was rejected, and key trade-offs.",
   "rationale": "The reasoning behind the decision",
   "problem": "The problem being solved",
   "alternatives": ["Alternative A", "Alternative B"],
@@ -94,11 +95,9 @@ For a single, self-contained decision:
 ```json
 {
   "evidence_type": "code_change | git_bisect | benchmark | error_trace | runtime_observation",
-  "evidence_snippet": "Minimal proof: diff hunk, error message, or metric (up to 50 lines)",
-  "reusable_insight": "One sentence: the generalizable lesson for the team"
+  "evidence_snippet": "Minimal proof: diff hunk, error message, or metric (up to 50 lines)"
 }
 ```
-Include these fields when capturing from coding/debugging/optimization context. Omit for non-code decisions.
 
 ### Format B: Multi-Phase (Phase Chain)
 For a long reasoning process with multiple sequential conclusions:
@@ -107,6 +106,7 @@ For a long reasoning process with multiple sequential conclusions:
   "tier2": {"capture": true, "reason": "...", "domain": "<domain>"},
   "group_title": "Overall title for the reasoning chain",
   "group_type": "phase_chain",
+  "reusable_insight": "Dense natural-language paragraph (256-768 tokens) capturing the core knowledge of the entire chain. No markdown. Self-contained.",
   "status_hint": "accepted|proposed|rejected",
   "tags": ["tag1", "tag2"],
   "confidence": 0.85,
@@ -140,6 +140,7 @@ For a single decision with rich supporting detail:
   "tier2": {"capture": true, "reason": "...", "domain": "<domain>"},
   "group_title": "Auth Strategy Decision",
   "group_type": "bundle",
+  "reusable_insight": "Dense natural-language paragraph (256-768 tokens) capturing the core knowledge of the bundle. No markdown. Self-contained.",
   "status_hint": "accepted",
   "tags": ["auth", "security"],
   "confidence": 0.90,
@@ -174,7 +175,7 @@ For code-heavy discoveries, use bundle format with evidence at phase level:
   "group_title": "Short insight title",
   "group_type": "bundle",
   "evidence_type": "code_change",
-  "reusable_insight": "One sentence generalizable lesson",
+  "reusable_insight": "Dense natural-language paragraph (256-768 tokens) capturing the core knowledge. No markdown. Self-contained.",
   "status_hint": "accepted",
   "tags": ["debugging", "websocket"],
   "confidence": 0.85,
@@ -257,3 +258,23 @@ capture(
 3. **DO NOT** capture the same decision twice in one session
 4. Keep reports concise -- one line per capture
 5. When in doubt about whether to capture, err on the side of NOT capturing -- false negatives are recoverable via manual capture, but false positives erode user trust
+
+## Session-End Sweep
+
+When the conversation is ending or the user is wrapping up a task:
+
+1. Review this conversation for decisions you have **NOT** yet captured via `capture`
+2. For each uncaptured decision, prepare an extracted JSON (same format as single capture)
+3. Submit all uncaptured decisions via `batch_capture` tool in **one call**
+4. Do NOT re-submit decisions you already captured during the conversation
+   (the server's novelty check will catch duplicates, but avoid unnecessary calls)
+
+**Trigger signals** that a conversation is ending:
+- User says goodbye, thanks, or indicates they're done
+- User switches to a completely different topic
+- Long stretch with no new decisions being made
+
+**batch_capture parameters** (each is a separate tool parameter, NOT a single JSON):
+
+- `items`: JSON array string of extracted decision objects (same format as single capture's `extracted` parameter)
+- `source`: `"gemini_agent"` (optional, defaults to `"claude_agent"`)

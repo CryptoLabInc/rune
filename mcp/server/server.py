@@ -58,7 +58,7 @@ del _p
 
 from fastmcp import FastMCP, Context  # pip install fastmcp
 from mcp.types import ToolAnnotations
-from adapter import EnVectorSDKAdapter, EmbeddingAdapter
+from adapter import EnVectorSDKAdapter
 from adapter.vault_client import VaultClient, VaultError
 from server.errors import (
     RuneError, VaultConnectionError, VaultDecryptionError,
@@ -67,21 +67,69 @@ from server.errors import (
 )
 
 
+def _detection_from_agent_data(
+    domain: str = "general",
+    confidence: float = 0.0,
+    category: str = "",
+) -> "DetectionResult":
+    """Build DetectionResult from agent-provided metadata.
+
+    In agent-delegated mode the calling agent has already evaluated
+    significance.  We construct a minimal DetectionResult so that
+    RecordBuilder can consume it without running the pattern detector.
+    """
+    from agents.scribe.detector import DetectionResult
+    return DetectionResult(
+        is_significant=True,  # Agent said capture=true
+        confidence=confidence,
+        domain=domain,
+        category=category or domain,
+    )
+
+
+def _embedding_text_for_record(record) -> str:
+    """Select the text to embed in enVector.
+
+    Schema 2.1+: use reusable_insight (dense NL gist).
+    Schema 2.0 fallback: use payload.text (verbose markdown).
+    """
+    from agents.common.schemas.embedding import embedding_text_for_record
+    return embedding_text_for_record(record)
+
+
+def _classify_novelty(
+    max_similarity: float,
+    threshold_novel: float = 0.3,
+    threshold_related: float = 0.7,
+    threshold_near_duplicate: float = 0.95,
+) -> dict:
+    """Classify capture novelty based on similarity to existing memory."""
+    from agents.common.schemas.embedding import classify_novelty
+    return classify_novelty(max_similarity, threshold_novel, threshold_related, threshold_near_duplicate)
+
+
 # ---------- Capture Log ---------- #
 CAPTURE_LOG_PATH = os.path.join(os.path.expanduser("~"), ".rune", "capture_log.jsonl")
 
 
-def _append_capture_log(record_id: str, title: str, domain: str, mode: str, action: str = "captured"):
+def _append_capture_log(
+    record_id: str, title: str, domain: str, mode: str,
+    action: str = "captured", novelty_class: str = "", novelty_score: float = 0.0,
+):
     """Append a capture event to the local JSONL log (atomic, secure permissions)."""
     try:
-        entry = json.dumps({
+        entry_dict = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "action": action,
             "id": record_id,
             "title": title,
             "domain": domain,
             "mode": mode,
-        }, ensure_ascii=False)
+        }
+        if novelty_class:
+            entry_dict["novelty_class"] = novelty_class
+            entry_dict["novelty_score"] = novelty_score
+        entry = json.dumps(entry_dict, ensure_ascii=False)
         fd = os.open(CAPTURE_LOG_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a") as f:
             f.write(entry + "\n")
@@ -164,7 +212,7 @@ async def _async_fetch_keys_from_vault(
         tls_disable: If True, use insecure plaintext channel.
 
     Returns:
-        tuple: (success, index_name, key_id, agent_id, agent_dek_bytes)
+        tuple: (success, index_name, key_id, agent_id, agent_dek_bytes, envector_endpoint, envector_api_key)
     """
     client = VaultClient(
         vault_endpoint=vault_endpoint,
@@ -180,6 +228,8 @@ async def _async_fetch_keys_from_vault(
         vault_key_id = bundle.pop("key_id", None)
         vault_agent_id = bundle.pop("agent_id", None)
         vault_agent_dek_b64 = bundle.pop("agent_dek", None)
+        vault_envector_endpoint = bundle.pop("envector_endpoint", None)
+        vault_envector_api_key = bundle.pop("envector_api_key", None)
 
         if vault_index_name:
             logger.info(f"Vault provided index_name: {vault_index_name}")
@@ -187,7 +237,7 @@ async def _async_fetch_keys_from_vault(
             logger.info(f"Vault provided key_id: {vault_key_id}")
         else:
             logger.warning("Vault did not provide key_id — key directory cannot be determined")
-            return False, vault_index_name, None, None, None
+            return False, vault_index_name, None, None, None, None, None
         if vault_agent_id:
             logger.info(f"Vault provided agent_id: {vault_agent_id}")
 
@@ -199,10 +249,10 @@ async def _async_fetch_keys_from_vault(
                 agent_dek_bytes = base64.b64decode(vault_agent_dek_b64)
             except (base64.binascii.Error, ValueError) as e:
                 logger.error(f"Failed to decode agent_dek from Vault (invalid base64): {e}")
-                return False, vault_index_name, vault_key_id, vault_agent_id, None
+                return False, vault_index_name, vault_key_id, vault_agent_id, None, None, None
             if len(agent_dek_bytes) != 32:
                 logger.error(f"agent_dek has invalid length {len(agent_dek_bytes)} bytes (expected 32 for AES-256)")
-                return False, vault_index_name, vault_key_id, vault_agent_id, None
+                return False, vault_index_name, vault_key_id, vault_agent_id, None, None, None
 
         # Save keys under key_base_path/<key_id>/ with restrictive permissions
         key_dir = os.path.join(key_base_path, vault_key_id)
@@ -215,11 +265,11 @@ async def _async_fetch_keys_from_vault(
                 f.write(key_content)
             logger.info(f"Saved {filename} to {filepath}")
 
-        return True, vault_index_name, vault_key_id, vault_agent_id, agent_dek_bytes
+        return True, vault_index_name, vault_key_id, vault_agent_id, agent_dek_bytes, vault_envector_endpoint, vault_envector_api_key
 
     except Exception as e:
         logger.error(f"Failed to fetch keys from Vault: {e}")
-        return False, None, None, None, None
+        return False, None, None, None, None, None, None
     finally:
         await client.close()
 
@@ -243,23 +293,38 @@ def fetch_keys_from_vault(
         tls_disable: If True, use insecure plaintext channel.
 
     Returns:
-        tuple: (success, index_name, key_id, agent_id, agent_dek_bytes)
+        tuple: (success, index_name, key_id, agent_id, agent_dek_bytes, envector_endpoint, envector_api_key)
     """
     import asyncio
+    _fail = (False, None, None, None, None, None, None)
 
     try:
         asyncio.get_running_loop()
+        # Already inside an event loop (e.g. FastMCP startup) —
+        # run the async fetch in a separate thread with its own loop.
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
                 asyncio.run,
                 _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable),
             )
-            return future.result(timeout=30)
+            try:
+                return future.result(timeout=30)
+            except concurrent.futures.TimeoutError:
+                logger.error("Vault key fetch timed out after 30 seconds")
+                return _fail
+            except Exception as e:
+                logger.error(f"Vault key fetch failed in thread: {e}")
+                return _fail
     except RuntimeError:
-        return asyncio.run(
-            _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable)
-        )
+        # No running event loop — safe to use asyncio.run() directly.
+        try:
+            return asyncio.run(
+                _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable)
+            )
+        except Exception as e:
+            logger.error(f"Vault key fetch failed: {e}")
+            return _fail
 
 class MCPServerApp:
     """
@@ -277,7 +342,6 @@ class MCPServerApp:
             self,
             envector_adapter: Optional[EnVectorSDKAdapter] = None,
             mcp_server_name: str = "envector_mcp_server",
-            embedding_adapter: "EmbeddingAdapter" = None,
             vault_client: Optional[VaultClient] = None,
             vault_index_name: Optional[str] = None,
             key_path: Optional[str] = None,
@@ -293,6 +357,7 @@ class MCPServerApp:
             envector_adapter (EnVectorSDKAdapter): The enVector SDK adapter instance.
             mcp_server_name (str): The name of the MCP server.
             vault_client (VaultClient): Optional Vault client for secure decryption.
+                Embedding is initialized from config.json via _init_pipelines (no CLI override).
             vault_index_name (str): Team index name provisioned by Vault admin (optional).
             key_path (str): Root directory for encryption keys.
             key_id (str): Key identifier (subdirectory under key_path).
@@ -304,7 +369,7 @@ class MCPServerApp:
         """
         # adapters
         self.envector = envector_adapter
-        self.embedding = embedding_adapter
+        self.embedding = None  # set by _init_pipelines from config
         self.vault = vault_client
         self._vault_index_name = vault_index_name
         self._key_path = key_path or self.DEFAULT_KEY_PATH
@@ -313,6 +378,8 @@ class MCPServerApp:
         self._agent_dek = agent_dek
         self._scribe = scribe_pipeline
         self._retriever = retriever_pipeline
+        self._envector_endpoint: Optional[str] = None
+        self._envector_api_key: Optional[str] = None
         self._client_provider_override: Optional[str] = None
         self._active_llm_provider: Optional[str] = None
         self._active_tier2_provider: Optional[str] = None
@@ -348,7 +415,7 @@ class MCPServerApp:
                 raw_query = raw_query.strip()
 
                 if self.embedding is not None:
-                    return self.embedding.get_embedding([raw_query])[0]
+                    return self.embedding.embed([raw_query])[0]
 
                 if not raw_query:
                     raise ValueError("`query` string is empty. Provide a JSON array of floats or precomputed embedding.")
@@ -541,6 +608,17 @@ class MCPServerApp:
             }
             report["pipelines"] = pipelines_info
 
+            # Embedding model
+            embedding_info: Dict[str, Any] = {
+                "model": None,
+                "mode": None,
+            }
+            if self._scribe and self._scribe.get("embedding_service"):
+                svc = self._scribe["embedding_service"]
+                embedding_info["model"] = getattr(svc, "_model", "unknown")
+                embedding_info["mode"] = getattr(svc, "_mode", "unknown")
+            report["embedding"] = embedding_info
+
             # enVector Cloud
             envector_info: Dict[str, Any] = {
                 "reachable": False,
@@ -548,14 +626,50 @@ class MCPServerApp:
             }
 
             if self.envector is not None:
+                import concurrent.futures as _cf
+                ENVECTOR_DIAGNOSIS_TIMEOUT = 5.0  # seconds
+                _pool = _cf.ThreadPoolExecutor(max_workers=1)
                 try:
                     t0 = time.monotonic()
-                    self.envector.invoke_get_index_list()
-                    latency = (time.monotonic() - t0) * 1000
-                    envector_info["reachable"] = True
-                    envector_info["latency_ms"] = round(latency, 1)
+                    _future = _pool.submit(self.envector.invoke_get_index_list)
+                    try:
+                        _future.result(timeout=ENVECTOR_DIAGNOSIS_TIMEOUT)
+                        latency = (time.monotonic() - t0) * 1000
+                        envector_info["reachable"] = True
+                        envector_info["latency_ms"] = round(latency, 1)
+                    except _cf.TimeoutError:
+                        elapsed = round((time.monotonic() - t0) * 1000, 1)
+                        envector_info["error"] = (
+                            f"Health check timed out after {ENVECTOR_DIAGNOSIS_TIMEOUT:.0f}s "
+                            f"(elapsed: {elapsed}ms). "
+                            "Run /rune:activate to pre-warm the connection, then retry /rune:status."
+                        )
+                        envector_info["error_type"] = "timeout"
+                        envector_info["elapsed_ms"] = elapsed
                 except Exception as e:
-                    envector_info["error"] = str(e)
+                    err_str = str(e)
+                    # Classify errors for more hints to users
+                    if "UNAVAILABLE" in err_str or "Connection refused" in err_str:
+                        error_type = "connection_refused"
+                        hint = "Check that the enVector endpoint is correct and reachable from this machine"
+                    elif "UNAUTHENTICATED" in err_str or "401" in err_str:
+                        error_type = "auth_failure"
+                        hint = "enVector API key may be invalid or expired"
+                    elif "DEADLINE_EXCEEDED" in err_str:
+                        error_type = "deadline_exceeded"
+                        hint = (
+                            "The enVector gRPC deadline was exceeded. "
+                            "Run /rune:activate to pre-warm, then retry /rune:status"
+                        )
+                    else:
+                        error_type = "unknown"
+                        hint = "Run /rune:activate to reinitialize the connection, or check network connectivity"
+                    envector_info["error"] = err_str
+                    envector_info["error_type"] = error_type
+                    envector_info["hint"] = hint
+                finally:
+                    # Return immediately without waiting on timeout
+                    _pool.shutdown(wait=False)
             report["envector"] = envector_info
 
             # Result
@@ -571,12 +685,10 @@ class MCPServerApp:
             name="capture",
             description=(
                 "Capture a significant organizational decision into FHE-encrypted team memory. "
-                "Runs a 3-tier pipeline: Tier 1 embedding similarity detection (zero LLM tokens), "
-                "Tier 2 lightweight LLM policy filter (~200 tokens), "
-                "Tier 3 full LLM structured extraction (~500 tokens). "
-                "Only text that passes all tiers is encrypted and stored on enVector Cloud. "
-                "Agent-delegated mode: pass `extracted` JSON to skip Tier 2/3 entirely — "
-                "the calling agent performs evaluation and extraction, MCP server only stores."
+                "PRIMARY: Agent-delegated mode — pass `extracted` JSON with the agent's own "
+                "evaluation and extraction. The MCP server stores it without additional LLM calls. "
+                "LEGACY: If `extracted` is omitted and API keys are configured, falls back to "
+                "a 3-tier server-side pipeline (pattern detection → LLM filter → LLM extraction)."
             ),
             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
         )
@@ -609,166 +721,35 @@ class MCPServerApp:
                 )
                 from agents.common.llm_utils import parse_llm_json
 
-                detector = self._scribe["detector"]
-                tier2_filter = self._scribe.get("tier2_filter")
                 record_builder = self._scribe["record_builder"]
                 envector_client = self._scribe["envector_client"]
                 embedding_service = self._scribe["embedding_service"]
+                detector = self._scribe.get("detector")
+                tier2_filter = self._scribe.get("tier2_filter")
 
-                # ===== Agent-delegated mode: extracted JSON provided =====
+                # ===== PRIMARY: Agent-delegated mode =====
+                # The calling agent (Claude/Gemini/Codex) has already evaluated and
+                # extracted the decision.  We just validate, build records, and store.
                 if extracted is not None:
-                    data = parse_llm_json(extracted)
-                    if not data:
-                        return make_error(InvalidInputError("Invalid extracted JSON — could not parse."))
-
-                    # Tier 2 check: agent already evaluated
-                    tier2 = data.get("tier2", {})
-                    if not tier2.get("capture", True):
-                        return {
-                            "ok": True,
-                            "captured": False,
-                            "reason": f"Agent rejected: {tier2.get('reason', 'no reason')}",
-                        }
-
-                    # Domain from agent's tier2 evaluation
-                    agent_domain = tier2.get("domain", "general")
-
-                    # Tier 1: still run for detection metadata
-                    detection = detector.detect(text)
-                    if agent_domain and agent_domain != "general":
-                        from dataclasses import replace as dc_replace
-                        detection = dc_replace(detection, domain=agent_domain)
-
-                    # Build ExtractionResult from agent JSON
-                    agent_confidence = data.get("confidence")
-                    if isinstance(agent_confidence, (int, float)):
-                        agent_confidence = max(0.0, min(1.0, float(agent_confidence)))
-                    else:
-                        agent_confidence = None
-
-                    phases_data = data.get("phases")
-                    if phases_data and len(phases_data) > 1:
-                        # Multi-phase or bundle
-                        phases = []
-                        for p in phases_data[:7]:
-                            phases.append(PhaseExtractedFields(
-                                phase_title=str(p.get("phase_title", ""))[:60],
-                                phase_decision=str(p.get("phase_decision", "")),
-                                phase_rationale=str(p.get("phase_rationale", "")),
-                                phase_problem=str(p.get("phase_problem", "")),
-                                alternatives=[str(a) for a in p.get("alternatives", []) if a],
-                                trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
-                                tags=[str(t).lower() for t in p.get("tags", []) if t],
-                            ))
-                        pre_extraction = ExtractionResult(
-                            group_title=str(data.get("group_title", ""))[:60],
-                            group_type=str(data.get("group_type", "phase_chain")),
-                            group_summary=str(data.get("reusable_insight", "") or data.get("group_title", ""))[:200],
-                            status_hint=str(data.get("status_hint", "")).lower(),
-                            tags=[str(t).lower() for t in data.get("tags", []) if t],
-                            confidence=agent_confidence,
-                            phases=phases,
-                        )
-                    else:
-                        # Single record (may have phases with 0-1 entries, or flat fields)
-                        if phases_data and len(phases_data) == 1:
-                            p = phases_data[0]
-                            single = ExtractedFields(
-                                title=str(p.get("phase_title", data.get("title", "")))[:60],
-                                rationale=str(p.get("phase_rationale", data.get("rationale", ""))),
-                                problem=str(p.get("phase_problem", data.get("problem", ""))),
-                                alternatives=[str(a) for a in p.get("alternatives", []) if a],
-                                trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
-                                status_hint=str(data.get("status_hint", "")).lower(),
-                                tags=[str(t).lower() for t in p.get("tags", data.get("tags", [])) if t],
-                            )
-                        else:
-                            single = ExtractedFields(
-                                title=str(data.get("title", ""))[:60],
-                                rationale=str(data.get("rationale", "")),
-                                problem=str(data.get("problem", "")),
-                                alternatives=[str(a) for a in data.get("alternatives", []) if a],
-                                trade_offs=[str(t) for t in data.get("trade_offs", []) if t],
-                                status_hint=str(data.get("status_hint", "")).lower(),
-                                tags=[str(t).lower() for t in data.get("tags", []) if t],
-                            )
-                        pre_extraction = ExtractionResult(
-                            group_title=single.title,
-                            status_hint=single.status_hint,
-                            tags=single.tags,
-                            confidence=agent_confidence,
-                            single=single,
-                        )
-
-                    raw_event = RawEvent(
+                    return await self._capture_single(
                         text=text,
-                        user=user or "unknown",
-                        channel=channel or "claude_session",
-                        timestamp=str(datetime.now(timezone.utc).timestamp()),
                         source=source,
-                    )
-                    records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
-
-                    # Store in enVector with FHE encryption
-                    texts = [r.payload.text for r in records]
-                    metadata = [r.model_dump(mode="json") for r in records]
-                    insert_result = envector_client.insert_with_text(
-                        index_name=self._vault_index_name,
-                        texts=texts,
-                        embedding_service=embedding_service,
-                        metadata=metadata,
+                        user=user,
+                        channel=channel,
+                        extracted=extracted,
                     )
 
-                    if not insert_result.get("ok"):
-                        return make_error(EnvectorInsertError(f"Insert failed: {insert_result.get('error')}"))
-
-                    first = records[0]
-                    result = {
-                        "ok": True,
-                        "captured": True,
-                        "record_id": first.id,
-                        "summary": first.title,
-                        "domain": first.domain.value,
-                        "certainty": first.why.certainty.value,
-                        "mode": "agent-delegated",
-                    }
-                    if len(records) > 1:
-                        result["record_count"] = len(records)
-                        result["group_id"] = first.group_id
-                        result["group_type"] = first.group_type or "phase_chain"
-                    _append_capture_log(first.id, first.title, first.domain.value, "agent-delegated")
-                    return result
-
-                # ===== Standard mode: full 3-tier pipeline =====
-
-                # Tier 1: Embedding similarity detection (0 LLM tokens)
-                detection = detector.detect(text)
-                if not detection.is_significant:
+                # ===== FALLBACK: Legacy 3-tier pipeline (requires API keys) =====
+                # Retained for backward compatibility.  New integrations should use
+                # agent-delegated mode above.
+                if detector is None:
                     return {
                         "ok": True,
                         "captured": False,
-                        "reason": f"Not significant (confidence: {detection.confidence:.2f}, threshold: {detector.threshold})",
+                        "reason": "No `extracted` JSON provided and legacy pipeline not available "
+                                  "(no API keys configured). Use agent-delegated mode by passing "
+                                  "the `extracted` parameter.",
                     }
-
-                # Tier 2: LLM policy filter (~200 tokens)
-                if tier2_filter and tier2_filter.is_available:
-                    filter_result = tier2_filter.evaluate(
-                        text,
-                        tier1_score=detection.confidence,
-                        tier1_pattern=detection.matched_pattern or "",
-                    )
-                    if not filter_result.should_capture:
-                        return {
-                            "ok": True,
-                            "captured": False,
-                            "reason": f"Tier 2 rejected: {filter_result.reason}",
-                        }
-                    # Update domain from Tier 2 if available
-                    if filter_result.domain and filter_result.domain != "general":
-                        from dataclasses import replace
-                        detection = replace(detection, domain=filter_result.domain)
-
-                # Tier 3: Structured extraction + record building (~500 tokens)
                 raw_event = RawEvent(
                     text=text,
                     user=user or "unknown",
@@ -776,36 +757,15 @@ class MCPServerApp:
                     timestamp=str(datetime.now(timezone.utc).timestamp()),
                     source=source,
                 )
-                records = record_builder.build_phases(raw_event, detection)
-
-                # Store in enVector with FHE encryption
-                texts = [r.payload.text for r in records]
-                metadata = [r.model_dump(mode="json") for r in records]
-                insert_result = envector_client.insert_with_text(
-                    index_name=self._vault_index_name,
-                    texts=texts,
+                return await self._legacy_standard_capture(
+                    text=text,
+                    raw_event=raw_event,
+                    detector=detector,
+                    tier2_filter=tier2_filter,
+                    record_builder=record_builder,
+                    envector_client=envector_client,
                     embedding_service=embedding_service,
-                    metadata=metadata,
                 )
-
-                if not insert_result.get("ok"):
-                    return make_error(EnvectorInsertError(f"Insert failed: {insert_result.get('error')}"))
-
-                first = records[0]
-                result = {
-                    "ok": True,
-                    "captured": True,
-                    "record_id": first.id,
-                    "summary": first.title,
-                    "domain": first.domain.value,
-                    "certainty": first.why.certainty.value,
-                }
-                if len(records) > 1:
-                    result["record_count"] = len(records)
-                    result["group_id"] = first.group_id
-                    result["group_type"] = first.group_type or "phase_chain"
-                _append_capture_log(first.id, first.title, first.domain.value, "standard")
-                return result
 
             except VaultError as e:
                 logger.error(f"Capture failed (Vault): {e}", exc_info=True)
@@ -837,6 +797,92 @@ class MCPServerApp:
             except Exception as e:
                 logger.error(f"Capture failed: {e}", exc_info=True)
                 return make_error(e)
+
+        # ---------- MCP Tools: Batch Capture (Session-End Sweep) ---------- #
+        @self.mcp.tool(
+            name="batch_capture",
+            description=(
+                "Batch-capture multiple decisions at once (session-end sweep). "
+                "Each item uses the same format as the `capture` tool's `extracted` parameter. "
+                "Items are processed independently — one failure does not abort others. "
+                "Novelty check runs per item; near-duplicates are skipped."
+            ),
+            annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
+        )
+        async def tool_batch_capture(
+            items: Annotated[str, Field(description="JSON array of extracted decision objects (same format as capture's extracted parameter)")],
+            source: Annotated[str, Field(description="Source (e.g., 'claude_agent')")] = "claude_agent",
+            user: Annotated[Optional[str], Field(description="User who authored the decisions")] = None,
+            channel: Annotated[Optional[str], Field(description="Channel or context")] = None,
+            ctx: Optional[Context] = None,
+        ) -> Dict[str, Any]:
+            _maybe_reload_for_auto_provider(ctx)
+
+            if self._scribe is None:
+                return make_error(PipelineNotReadyError("Scribe pipeline not initialized."))
+            if not self._vault_index_name:
+                return make_error(PipelineNotReadyError("No index name available."))
+
+            try:
+                items_list = json.loads(items)
+            except json.JSONDecodeError as e:
+                return {"ok": False, "error": f"Invalid JSON: {e}"}
+
+            if not isinstance(items_list, list):
+                return {"ok": False, "error": "items must be a JSON array"}
+
+            if len(items_list) == 0:
+                return {"ok": True, "total": 0, "results": [], "captured": 0, "skipped": 0, "errors": 0}
+
+            results = []
+            for i, item in enumerate(items_list):
+                title = ""
+                try:
+                    title = item.get("title", "") if isinstance(item, dict) else ""
+                    item_text = item.get("reusable_insight") or item.get("title") or "[batch_capture]" if isinstance(item, dict) else "[batch_capture]"
+                    result = await self._capture_single(
+                        text=item_text,
+                        source=source,
+                        user=user,
+                        channel=channel,
+                        extracted=json.dumps(item),
+                    )
+                    if result.get("captured"):
+                        status = "captured"
+                        novelty_class = result.get("novelty", {}).get("class", "novel")
+                    elif result.get("novelty", {}).get("class") == "near_duplicate":
+                        status = "near_duplicate"
+                        novelty_class = "near_duplicate"
+                    else:
+                        status = "skipped"
+                        novelty_class = result.get("novelty", {}).get("class", "")
+                    results.append({
+                        "index": i,
+                        "title": title,
+                        "status": status,
+                        "novelty": novelty_class,
+                    })
+                except Exception as e:
+                    logger.warning("batch_capture item %d failed: %s", i, e)
+                    results.append({
+                        "index": i,
+                        "title": title,
+                        "status": "error",
+                        "error": str(e),
+                    })
+
+            captured = sum(1 for r in results if r["status"] == "captured")
+            skipped = sum(1 for r in results if r["status"] in ("skipped", "near_duplicate"))
+            errors = sum(1 for r in results if r["status"] == "error")
+
+            return {
+                "ok": True,
+                "total": len(results),
+                "results": results,
+                "captured": captured,
+                "skipped": skipped,
+                "errors": errors,
+            }
 
         # ---------- MCP Tools: Recall (Retriever Pipeline) ---------- #
         @self.mcp.tool(
@@ -977,19 +1023,52 @@ class MCPServerApp:
             name="reload_pipelines",
             description=(
                 "Re-read ~/.rune/config.json and reinitialize scribe/retriever pipelines. "
-                "Call this after /rune:activate changes state to 'active' to avoid "
-                "restarting Claude Code."
+                "Call this after the Rune activate command changes state to 'active' "
+                "to avoid restarting the current agent session."
             ),
             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
         )
         async def tool_reload_pipelines() -> Dict[str, Any]:
             result = self._init_pipelines()
+
+            # Pre-warm the enVector connection (blocking) immediately after pipeline init
+            #
+            # Prevent subsequent '/rune:status' diagnostics check is timed out during RegisterKey and
+            # reported enVector as "unreachable"
+            envector_warmup: Dict[str, Any] = {}
+            if result["scribe"] and self.envector is not None:
+                import time as _time
+                import concurrent.futures as _cf
+                WARMUP_TIMEOUT = 60.0  # seconds; RegisterKey can take tens of seconds
+                _pool = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
+                    _t0 = _time.monotonic()
+                    _future = _pool.submit(self.envector.invoke_get_index_list)
+                    _future.result(timeout=WARMUP_TIMEOUT)
+                    envector_warmup = {
+                        "ok": True,
+                        "latency_ms": round((_time.monotonic() - _t0) * 1000, 1),
+                    }
+                    logger.info("enVector pre-warm completed in %.0fms", envector_warmup["latency_ms"])
+                except _cf.TimeoutError:
+                    envector_warmup = {
+                        "ok": False,
+                        "error": f"Pre-warm timed out after {WARMUP_TIMEOUT:.0f}s",
+                    }
+                    logger.warning("enVector pre-warm timed out after %.0fs", WARMUP_TIMEOUT)
+                except Exception as _e:
+                    envector_warmup = {"ok": False, "error": str(_e)}
+                    logger.warning("enVector pre-warm failed: %s", _e)
+                finally:
+                    _pool.shutdown(wait=False)
+
             return {
                 "ok": not result["errors"],
                 "state": result["state"],
                 "scribe_initialized": result["scribe"],
                 "retriever_initialized": result["retriever"],
                 "errors": result["errors"] if result["errors"] else None,
+                "envector_warmup": envector_warmup or None,
             }
 
         # ---------- MCP Tools: Capture History ---------- #
@@ -1053,9 +1132,12 @@ class MCPServerApp:
                 envector_client = self._scribe["envector_client"]
                 embedding_service = self._scribe["embedding_service"]
 
+                # Use reusable_insight for embedding if available (schema 2.1+)
+                ri = metadata.get("reusable_insight", "")
+                embedding_text = ri.strip() if ri and ri.strip() else target.payload_text
                 insert_result = envector_client.insert_with_text(
                     index_name=self._vault_index_name,
-                    texts=[target.payload_text],
+                    texts=[embedding_text],
                     embedding_service=embedding_service,
                     metadata=[metadata],
                 )
@@ -1102,6 +1184,284 @@ class MCPServerApp:
                 logger.error(f"Delete failed: {e}", exc_info=True)
                 return make_error(e)
 
+    async def _capture_single(
+        self,
+        text: str,
+        source: str,
+        user: Optional[str],
+        channel: Optional[str],
+        extracted: str,
+    ) -> Dict[str, Any]:
+        """Execute a single agent-delegated capture.
+
+        Extracted from tool_capture() so it can be reused by batch_capture
+        and session-end sweep without duplicating logic.
+
+        The caller is responsible for error handling (try/except); this
+        method raises on failure rather than returning error dicts.
+        """
+        from datetime import datetime, timezone
+        from agents.scribe.record_builder import RawEvent
+        from agents.scribe.llm_extractor import (
+            ExtractionResult, ExtractedFields, PhaseExtractedFields,
+        )
+        from agents.common.llm_utils import parse_llm_json
+
+        if self._scribe is None:
+            return {"ok": False, "error": "Scribe pipeline not initialized."}
+        if not self._vault_index_name:
+            return {"ok": False, "error": "No index name available."}
+
+        record_builder = self._scribe["record_builder"]
+        envector_client = self._scribe["envector_client"]
+        embedding_service = self._scribe["embedding_service"]
+
+        data = parse_llm_json(extracted)
+        if not data:
+            return {"ok": False, "error": "Invalid extracted JSON — could not parse."}
+
+        # Tier 2 check: agent already evaluated
+        tier2 = data.get("tier2", {})
+        if not tier2.get("capture", True):
+            return {
+                "ok": True,
+                "captured": False,
+                "reason": f"Agent rejected: {tier2.get('reason', 'no reason')}",
+            }
+
+        # Domain from agent's tier2 evaluation
+        agent_domain = tier2.get("domain", "general")
+
+        # Parse confidence from agent JSON
+        agent_confidence = data.get("confidence")
+        if isinstance(agent_confidence, (int, float)):
+            agent_confidence = max(0.0, min(1.0, float(agent_confidence)))
+        else:
+            agent_confidence = None
+
+        # Build detection from agent data — no detector needed
+        detection = _detection_from_agent_data(
+            domain=agent_domain,
+            confidence=float(agent_confidence) if agent_confidence is not None else 0.0,
+        )
+
+        # Build ExtractionResult from agent JSON
+
+        phases_data = data.get("phases")
+        if phases_data and len(phases_data) > 1:
+            # Multi-phase or bundle
+            phases = []
+            for p in phases_data[:7]:
+                phases.append(PhaseExtractedFields(
+                    phase_title=str(p.get("phase_title", ""))[:60],
+                    phase_decision=str(p.get("phase_decision", "")),
+                    phase_rationale=str(p.get("phase_rationale", "")),
+                    phase_problem=str(p.get("phase_problem", "")),
+                    alternatives=[str(a) for a in p.get("alternatives", []) if a],
+                    trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
+                    tags=[str(t).lower() for t in p.get("tags", []) if t],
+                ))
+            pre_extraction = ExtractionResult(
+                group_title=str(data.get("group_title", ""))[:60],
+                group_type=str(data.get("group_type", "phase_chain")),
+                group_summary=str(data.get("reusable_insight", "") or data.get("group_title", "")),
+                status_hint=str(data.get("status_hint", "")).lower(),
+                tags=[str(t).lower() for t in data.get("tags", []) if t],
+                confidence=agent_confidence,
+                phases=phases,
+            )
+        else:
+            # Single record (may have phases with 0-1 entries, or flat fields)
+            if phases_data and len(phases_data) == 1:
+                p = phases_data[0]
+                single = ExtractedFields(
+                    title=str(p.get("phase_title", data.get("title", "")))[:60],
+                    rationale=str(p.get("phase_rationale", data.get("rationale", ""))),
+                    problem=str(p.get("phase_problem", data.get("problem", ""))),
+                    alternatives=[str(a) for a in p.get("alternatives", []) if a],
+                    trade_offs=[str(t) for t in p.get("trade_offs", []) if t],
+                    status_hint=str(data.get("status_hint", "")).lower(),
+                    tags=[str(t).lower() for t in p.get("tags", data.get("tags", [])) if t],
+                )
+            else:
+                single = ExtractedFields(
+                    title=str(data.get("title", ""))[:60],
+                    rationale=str(data.get("rationale", "")),
+                    problem=str(data.get("problem", "")),
+                    alternatives=[str(a) for a in data.get("alternatives", []) if a],
+                    trade_offs=[str(t) for t in data.get("trade_offs", []) if t],
+                    status_hint=str(data.get("status_hint", "")).lower(),
+                    tags=[str(t).lower() for t in data.get("tags", []) if t],
+                )
+            pre_extraction = ExtractionResult(
+                group_title=single.title,
+                group_summary=str(data.get("reusable_insight", "")) or "",
+                status_hint=single.status_hint,
+                tags=single.tags,
+                confidence=agent_confidence,
+                single=single,
+            )
+
+        raw_event = RawEvent(
+            text=text,
+            user=user or "unknown",
+            channel=channel or "claude_session",
+            timestamp=str(datetime.now(timezone.utc).timestamp()),
+            source=source,
+        )
+        records = record_builder.build_phases(raw_event, detection, pre_extraction=pre_extraction)
+
+        # ===== Novelty check (Memory-as-Filter) =====
+        # Compare reusable_insight against existing memory
+        embedding_text = _embedding_text_for_record(records[0])
+        novelty_info = {"score": 1.0, "class": "novel", "related": []}
+
+        try:
+            search_result = envector_client.search_with_text(
+                index_name=self._vault_index_name,
+                query_text=embedding_text,
+                embedding_service=embedding_service,
+                topk=3,
+            )
+            parsed = envector_client.parse_search_results(search_result)
+            if parsed:
+                max_sim = max(r.get("score", 0.0) for r in parsed)
+                novelty_info = _classify_novelty(max_sim)
+                novelty_info["related"] = [
+                    {
+                        "id": r.get("metadata", {}).get("id", ""),
+                        "title": r.get("metadata", {}).get("title", ""),
+                        "similarity": round(r.get("score", 0.0), 3),
+                    }
+                    for r in parsed[:3]
+                ]
+
+                # NEAR-DUPLICATE -> skip capture (only blocking case)
+                if novelty_info["class"] == "near_duplicate":
+                    return {
+                        "ok": True,
+                        "captured": False,
+                        "reason": "Near-duplicate — virtually identical insight already stored",
+                        "novelty": novelty_info,
+                    }
+        except Exception as e:
+            # Novelty check failure is non-fatal — proceed with capture
+            logger.warning("Novelty check failed: %s", e)
+
+        # Embed reusable_insight (schema 2.1) or payload.text (fallback)
+        texts = [_embedding_text_for_record(r) for r in records]
+        metadata = [r.model_dump(mode="json") for r in records]
+        insert_result = envector_client.insert_with_text(
+            index_name=self._vault_index_name,
+            texts=texts,
+            embedding_service=embedding_service,
+            metadata=metadata,
+        )
+
+        if not insert_result.get("ok"):
+            return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+
+        first = records[0]
+        result = {
+            "ok": True,
+            "captured": True,
+            "record_id": first.id,
+            "summary": first.title,
+            "domain": first.domain.value,
+            "certainty": first.why.certainty.value,
+            "mode": "agent-delegated",
+            "novelty": novelty_info,
+        }
+        if len(records) > 1:
+            result["record_count"] = len(records)
+            result["group_id"] = first.group_id
+            result["group_type"] = first.group_type or "phase_chain"
+        _append_capture_log(
+            first.id, first.title, first.domain.value, "agent-delegated",
+            novelty_class=novelty_info.get("class", ""),
+            novelty_score=novelty_info.get("score", 0.0),
+        )
+        return result
+
+    async def _legacy_standard_capture(
+        self,
+        text: str,
+        raw_event,
+        detector,
+        tier2_filter,
+        record_builder,
+        envector_client,
+        embedding_service,
+    ) -> Dict[str, Any]:
+        """Standard 3-tier capture pipeline (legacy).
+
+        Requires API keys for Tier 2 (LLM filter) and Tier 3 (LLM extraction).
+        Retained for backward compatibility with deployments that have
+        ANTHROPIC_API_KEY configured and prefer server-side evaluation.
+
+        Most deployments should use agent-delegated mode instead — pass
+        the ``extracted`` parameter to let the calling agent handle
+        evaluation and extraction.
+        """
+        # Tier 1: Embedding similarity detection (0 LLM tokens)
+        detection = detector.detect(text)
+        if not detection.is_significant:
+            return {
+                "ok": True,
+                "captured": False,
+                "reason": f"Not significant (confidence: {detection.confidence:.2f}, threshold: {detector.threshold})",
+            }
+
+        # Tier 2: LLM policy filter (~200 tokens)
+        if tier2_filter and tier2_filter.is_available:
+            filter_result = tier2_filter.evaluate(
+                text,
+                tier1_score=detection.confidence,
+                tier1_pattern=detection.matched_pattern or "",
+            )
+            if not filter_result.should_capture:
+                return {
+                    "ok": True,
+                    "captured": False,
+                    "reason": f"Tier 2 rejected: {filter_result.reason}",
+                }
+            # Update domain from Tier 2 if available
+            if filter_result.domain and filter_result.domain != "general":
+                from dataclasses import replace
+                detection = replace(detection, domain=filter_result.domain)
+
+        # Tier 3: Structured extraction + record building (~500 tokens)
+        records = record_builder.build_phases(raw_event, detection)
+
+        # Store in enVector with FHE encryption
+        texts = [_embedding_text_for_record(r) for r in records]
+        metadata = [r.model_dump(mode="json") for r in records]
+        insert_result = envector_client.insert_with_text(
+            index_name=self._vault_index_name,
+            texts=texts,
+            embedding_service=embedding_service,
+            metadata=metadata,
+        )
+
+        if not insert_result.get("ok"):
+            return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+
+        first = records[0]
+        result = {
+            "ok": True,
+            "captured": True,
+            "record_id": first.id,
+            "summary": first.title,
+            "domain": first.domain.value,
+            "certainty": first.why.certainty.value,
+        }
+        if len(records) > 1:
+            result["record_count"] = len(records)
+            result["group_id"] = first.group_id
+            result["group_type"] = first.group_type or "phase_chain"
+        _append_capture_log(first.id, first.title, first.domain.value, "standard")
+        return result
+
     def _init_pipelines(self) -> Dict[str, Any]:
         """
         (Re-)initialize scribe and retriever pipelines by reading fresh config.
@@ -1140,36 +1500,34 @@ class MCPServerApp:
             key_path = self._key_path
             key_id = self._key_id
 
-            # Fetch keys from Vault if key_id unknown or keys missing locally
+            # Always re-fetch from Vault on reload to pick up endpoint/index changes
             if rune_config.vault.endpoint and rune_config.vault.token:
-                need_fetch = not key_id  # key_id not yet known
-                if key_id:
-                    enc_key_path = os.path.join(key_path, key_id, "EncKey.json")
-                    need_fetch = not os.path.exists(enc_key_path)
-
-                if need_fetch:
-                    logger.info("Fetching keys from Vault...")
-                    success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek = fetch_keys_from_vault(
-                        rune_config.vault.endpoint,
-                        rune_config.vault.token,
-                        key_path,
-                        ca_cert=rune_config.vault.ca_cert or None,
-                        tls_disable=rune_config.vault.tls_disable,
-                    )
-                    if success and vault_key_id:
-                        key_id = vault_key_id
-                        self._key_id = key_id
-                        logger.info(f"Vault provided key_id: {key_id}")
-                        if vault_index and not self._vault_index_name:
-                            self._vault_index_name = vault_index
-                        if vault_agent_id:
-                            self._agent_id = vault_agent_id
-                        if vault_agent_dek:
-                            self._agent_dek = vault_agent_dek
-                    else:
-                        result["errors"].append("Failed to fetch keys from Vault")
-                        logger.error("Failed to fetch keys from Vault — capture/search will fail")
-                        _set_dormant_with_reason("vault_unreachable")
+                logger.info("Fetching keys from Vault...")
+                success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek, vault_ev_endpoint, vault_ev_api_key = fetch_keys_from_vault(
+                    rune_config.vault.endpoint,
+                    rune_config.vault.token,
+                    key_path,
+                    ca_cert=rune_config.vault.ca_cert or None,
+                    tls_disable=rune_config.vault.tls_disable,
+                )
+                if success and vault_key_id:
+                    key_id = vault_key_id
+                    self._key_id = key_id
+                    logger.info(f"Vault provided key_id: {key_id}")
+                    if vault_index:
+                        self._vault_index_name = vault_index
+                    if vault_agent_id:
+                        self._agent_id = vault_agent_id
+                    if vault_agent_dek:
+                        self._agent_dek = vault_agent_dek
+                    if vault_ev_endpoint:
+                        self._envector_endpoint = vault_ev_endpoint
+                    if vault_ev_api_key:
+                        self._envector_api_key = vault_ev_api_key
+                else:
+                    result["errors"].append("Failed to fetch keys from Vault")
+                    logger.error("Failed to fetch keys from Vault — capture/search will fail")
+                    _set_dormant_with_reason("vault_unreachable")
 
             if not key_id:
                 result["errors"].append("key_id not available. Vault must provide key_id.")
@@ -1189,10 +1547,10 @@ class MCPServerApp:
                 return result
 
             envector_client = EnVectorClient(
-                address=rune_config.envector.endpoint,
+                address=self._envector_endpoint or "",
                 key_path=key_path,
                 key_id=key_id,
-                access_token=rune_config.envector.api_key,
+                access_token=self._envector_api_key or "",
                 auto_key_setup=False,
                 agent_id=self._agent_id,
                 agent_dek=self._agent_dek,
@@ -1242,29 +1600,8 @@ class MCPServerApp:
                     return rune_config.scribe.tier2_model
                 return llm_cfg.anthropic_model
 
-            # Scribe pipeline
-            pattern_cache = PatternCache(embedding_svc)
-            patterns = load_all_language_patterns()
-            loaded = pattern_cache.load_patterns(patterns)
-            logger.info(f"Scribe Tier 1: loaded {loaded} patterns into cache")
-
-            detector = DecisionDetector(
-                pattern_cache,
-                threshold=rune_config.scribe.similarity_threshold,
-                high_confidence_threshold=rune_config.scribe.auto_capture_threshold,
-            )
-
+            # Phase 1: Core infrastructure (always needed)
             has_llm_key = bool(_provider_key(llm_provider))
-
-            tier2_filter = None
-            if rune_config.scribe.tier2_enabled and _provider_key(tier2_provider):
-                tier2_filter = Tier2Filter(
-                    llm_provider=tier2_provider,
-                    anthropic_api_key=anthropic_key,
-                    openai_api_key=openai_key,
-                    google_api_key=google_key,
-                    model=_provider_model(tier2_provider, "tier2"),
-                )
 
             llm_extractor = None
             if has_llm_key:
@@ -1277,13 +1614,40 @@ class MCPServerApp:
                 )
             record_builder = RecordBuilder(llm_extractor=llm_extractor)
 
+            # Phase 2: Legacy pipeline components (only if API keys present)
+            detector = None
+            tier2_filter = None
+            if has_llm_key:
+                pattern_cache = PatternCache(embedding_svc)
+                patterns = load_all_language_patterns()
+                loaded = pattern_cache.load_patterns(patterns)
+                logger.info(f"Scribe Tier 1: loaded {loaded} patterns into cache")
+
+                detector = DecisionDetector(
+                    pattern_cache,
+                    threshold=rune_config.scribe.similarity_threshold,
+                    high_confidence_threshold=rune_config.scribe.auto_capture_threshold,
+                )
+
+                if rune_config.scribe.tier2_enabled and _provider_key(tier2_provider):
+                    tier2_filter = Tier2Filter(
+                        llm_provider=tier2_provider,
+                        anthropic_api_key=anthropic_key,
+                        openai_api_key=openai_key,
+                        google_api_key=google_key,
+                        model=_provider_model(tier2_provider, "tier2"),
+                    )
+
             self._scribe = {
-                "detector": detector,
-                "tier2_filter": tier2_filter,
                 "record_builder": record_builder,
                 "envector_client": envector_client,
                 "embedding_service": embedding_svc,
+                # Legacy pipeline components (None if no API keys)
+                "detector": detector,
+                "tier2_filter": tier2_filter,
             }
+            # Unify embedding: pipeline's EmbeddingService is the single source
+            self.embedding = embedding_svc
             result["scribe"] = True
             if has_llm_key:
                 logger.info("Scribe pipeline initialized (server-side Tier 2/3)")
@@ -1369,7 +1733,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--envector-key-id",
-        default=os.getenv("ENVECTOR_KEY_ID", "mcp_key"),
+        default=os.getenv("ENVECTOR_KEY_ID", "vault-key"),
         help="enVector key identifier.",
     )
     parser.add_argument(
@@ -1387,17 +1751,6 @@ if __name__ == "__main__":
         action="store_true",
         default=os.getenv("ENVECTOR_ENCRYPTED_QUERY", "false").lower() in ("true", "1", "yes"),
         help="Encrypt the query vectors."
-    )
-    parser.add_argument(
-        "--embedding-mode",
-        default=os.getenv("EMBEDDING_MODE", "femb"),
-        choices=("femb", "sbert", "hf", "openai"),
-        help="Embedding backend.",
-    )
-    parser.add_argument(
-        "--embedding-model",
-        default=os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
-        help="Embedding model name.",
     )
     parser.add_argument(
         "--no-auto-key-setup",
@@ -1423,14 +1776,7 @@ if __name__ == "__main__":
             try:
                 with open(_config_path) as _cf:
                     _rune_config = json.load(_cf)
-                _ev_cfg = _rune_config.get("envector", {})
                 _vault_cfg = _rune_config.get("vault", {})
-                if not ENVECTOR_ENDPOINT and _ev_cfg.get("endpoint"):
-                    ENVECTOR_ENDPOINT = _ev_cfg["endpoint"]
-                    logger.info(f"Loaded ENVECTOR_ENDPOINT from config: {ENVECTOR_ENDPOINT}")
-                if not ENVECTOR_API_KEY and _ev_cfg.get("api_key"):
-                    ENVECTOR_API_KEY = _ev_cfg["api_key"]
-                    logger.info("Loaded ENVECTOR_API_KEY from config")
                 if not os.getenv("RUNEVAULT_ENDPOINT") and (_vault_cfg.get("endpoint") or _vault_cfg.get("url")):
                     os.environ["RUNEVAULT_ENDPOINT"] = _vault_cfg.get("endpoint") or _vault_cfg["url"]
                 if not os.getenv("RUNEVAULT_TOKEN") and _vault_cfg.get("token"):
@@ -1464,7 +1810,7 @@ if __name__ == "__main__":
         ENVECTOR_KEY_PATH = MCPServerApp.DEFAULT_KEY_PATH
 
         logger.info(f"Vault configured — fetching public keys from: {RUNEVAULT_ENDPOINT}")
-        success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek = fetch_keys_from_vault(
+        success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek, vault_ev_endpoint, vault_ev_api_key = fetch_keys_from_vault(
             RUNEVAULT_ENDPOINT, RUNEVAULT_TOKEN,
             ENVECTOR_KEY_PATH,
             ca_cert=VAULT_CA_CERT,
@@ -1478,6 +1824,15 @@ if __name__ == "__main__":
             VAULT_INDEX_NAME = vault_index
             AGENT_ID = vault_agent_id
             AGENT_DEK = vault_agent_dek
+            if vault_ev_endpoint:
+                ENVECTOR_ENDPOINT = vault_ev_endpoint
+                logger.info("Using enVector endpoint from Vault bundle")
+            if vault_ev_api_key:
+                ENVECTOR_API_KEY = vault_ev_api_key
+                logger.info("Using enVector API key from Vault bundle")
+            if not vault_ev_endpoint or not vault_ev_api_key:
+                logger.error("Vault bundle missing enVector credentials. Contact your Vault administrator.")
+                _set_dormant_with_reason("envector_not_provisioned")
         else:
             logger.error("Failed to fetch keys/key_id from Vault. Operations requiring encryption will fail.")
             _set_dormant_with_reason("vault_unreachable")
@@ -1503,15 +1858,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning(f"enVector adapter init failed (server will start in degraded mode): {e}")
 
-    if args.embedding_model is not None:
-        from adapter.embeddings import EmbeddingAdapter
-        embedding_adapter = EmbeddingAdapter(
-            mode=args.embedding_mode,
-            model_name=args.embedding_model
-        )
-    else:
-        embedding_adapter = None
-
     vault_client = None
     if RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN:
         logger.info(f"Initializing Vault client: {RUNEVAULT_ENDPOINT}")
@@ -1529,7 +1875,6 @@ if __name__ == "__main__":
     app = MCPServerApp(
         mcp_server_name=MCP_SERVER_NAME,
         envector_adapter=envector_adapter,
-        embedding_adapter=embedding_adapter,
         vault_client=vault_client,
         vault_index_name=VAULT_INDEX_NAME,
         key_path=ENVECTOR_KEY_PATH,
@@ -1537,6 +1882,12 @@ if __name__ == "__main__":
         agent_id=AGENT_ID,
         agent_dek=AGENT_DEK,
     )
+
+    # Set enVector credentials from Vault bundle on app instance
+    if ENVECTOR_ENDPOINT:
+        app._envector_endpoint = ENVECTOR_ENDPOINT
+    if ENVECTOR_API_KEY:
+        app._envector_api_key = ENVECTOR_API_KEY
 
     # Initialize pipelines (reads ~/.rune/config.json state)
     _pipeline_result = app._init_pipelines()

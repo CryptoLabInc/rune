@@ -50,7 +50,7 @@ class TestRecordBuilder:
         record = builder.build(sample_raw_event, sample_detection)
 
         assert record is not None
-        assert record.schema_version == "2.0"
+        assert record.schema_version == "2.1"
         assert record.type == "decision_record"
         assert "PostgreSQL" in record.title or "architecture" in record.title.lower()
 

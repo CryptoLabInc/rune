@@ -33,17 +33,10 @@ class VaultConfig:
 
 
 @dataclass
-class EnVectorConfig:
-    """enVector Cloud configuration"""
-    endpoint: str = "localhost:50050"
-    api_key: str = ""
-
-
-@dataclass
 class EmbeddingConfig:
     """Embedding model configuration"""
-    mode: str = "femb"  # fastembed (on-device)
-    model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    mode: str = "sbert"  # sentence-transformers (on-device)
+    model: str = "Qwen/Qwen3-Embedding-0.6B"
 
 
 @dataclass
@@ -67,7 +60,7 @@ class ScribeConfig:
     slack_webhook_port: int = 8080
     similarity_threshold: float = 0.35  # Tier 1: wider net (Tier 2 LLM handles precision)
     auto_capture_threshold: float = 0.7
-    tier2_enabled: bool = True  # Tier 2: Haiku-based policy filter
+    tier2_enabled: bool = False  # Legacy: only enable if API keys configured
     tier2_model: str = "claude-haiku-4-5-20251001"
     patterns_path: str = str(PATTERNS_DIR / "capture-triggers.md")
     slack_signing_secret: str = ""
@@ -85,7 +78,6 @@ class RetrieverConfig:
 class RuneConfig:
     """Main Rune configuration"""
     vault: VaultConfig = field(default_factory=VaultConfig)
-    envector: EnVectorConfig = field(default_factory=EnVectorConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     scribe: ScribeConfig = field(default_factory=ScribeConfig)
@@ -107,21 +99,12 @@ def _parse_vault_config(data: dict) -> VaultConfig:
     )
 
 
-def _parse_envector_config(data: dict) -> EnVectorConfig:
-    """Parse envector section from config dict"""
-    envector_data = data.get("envector", {})
-    return EnVectorConfig(
-        endpoint=envector_data.get("endpoint", "localhost:50050"),
-        api_key=envector_data.get("api_key", ""),
-    )
-
-
 def _parse_embedding_config(data: dict) -> EmbeddingConfig:
     """Parse embedding section from config dict"""
     embedding_data = data.get("embedding", {})
     return EmbeddingConfig(
-        mode=embedding_data.get("mode", "femb"),
-        model=embedding_data.get("model", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
+        mode=embedding_data.get("mode", "sbert"),
+        model=embedding_data.get("model", "Qwen/Qwen3-Embedding-0.6B"),
     )
 
 
@@ -132,7 +115,7 @@ def _parse_scribe_config(data: dict) -> ScribeConfig:
         slack_webhook_port=scribe_data.get("slack_webhook_port", 8080),
         similarity_threshold=scribe_data.get("similarity_threshold", 0.35),
         auto_capture_threshold=scribe_data.get("auto_capture_threshold", 0.7),
-        tier2_enabled=scribe_data.get("tier2_enabled", True),
+        tier2_enabled=scribe_data.get("tier2_enabled", False),
         tier2_model=scribe_data.get("tier2_model", "claude-haiku-4-5-20251001"),
         patterns_path=scribe_data.get("patterns_path", str(PATTERNS_DIR / "capture-triggers.md")),
         slack_signing_secret=scribe_data.get("slack_signing_secret", ""),
@@ -196,9 +179,10 @@ def load_config() -> RuneConfig:
     """
     Load configuration from file and environment variables.
 
-    Credentials managed by /rune:configure (vault, envector) are loaded
-    exclusively from ~/.rune/config.json. Other settings (embedding, scribe,
-    LLM keys) can be overridden via environment variables.
+    Vault credentials are loaded from ~/.rune/config.json.
+    enVector credentials are delivered via Vault bundle (not stored locally).
+    Other settings (embedding, scribe, LLM keys) can be overridden via
+    environment variables.
 
     Priority (highest to lowest):
     1. Environment variables
@@ -214,7 +198,6 @@ def load_config() -> RuneConfig:
                 data = json.load(f)
 
             config.vault = _parse_vault_config(data)
-            config.envector = _parse_envector_config(data)
             config.embedding = _parse_embedding_config(data)
             config.llm = _parse_llm_config(data)
             config.scribe = _parse_scribe_config(data)
@@ -312,10 +295,6 @@ def save_config(config: RuneConfig) -> None:
             "token": config.vault.token,
             "ca_cert": config.vault.ca_cert,
             "tls_disable": config.vault.tls_disable,
-        },
-        "envector": {
-            "endpoint": config.envector.endpoint,
-            "api_key": config.envector.api_key,
         },
         "embedding": {
             "mode": config.embedding.mode,

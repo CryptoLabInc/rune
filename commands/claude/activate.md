@@ -12,8 +12,9 @@ Validate infrastructure end-to-end and switch to active state.
 1. Check if `~/.rune/config.json` exists.
    - NO: Respond "Not configured. Run `/rune:configure` first." and stop.
 
-2. Read config and verify required fields exist (`vault.endpoint`, `vault.token`, `envector.endpoint`, `envector.api_key`).
+2. Read config and verify required fields exist (`vault.endpoint`, `vault.token`).
    - Missing fields: Show what's missing, suggest `/rune:configure`.
+   - Note: enVector credentials are delivered via the Vault bundle at runtime and are not stored in config.
 
 3. Detect plugin root:
    ```bash
@@ -61,29 +62,7 @@ Validate infrastructure end-to-end and switch to active state.
      ```
    - If key fetch fails, report **specifically**: "Vault reachable but token rejected - check your token or run `/rune:configure`."
 
-   **5b. enVector: connectivity + API key validity**
-   - Test enVector by listing indexes:
-     ```bash
-     $PLUGIN_ROOT/.venv/bin/python3 -c "
-     import sys
-     sys.path.insert(0, '$PLUGIN_ROOT/mcp')
-     from adapter import EnVectorSDKAdapter
-     a = EnVectorSDKAdapter(
-         address='<envector_endpoint>',
-         key_id='test',
-         key_path='/tmp',
-         eval_mode='rmp',
-         query_encryption=False,
-         access_token='<envector_api_key>',
-         auto_key_setup=False,
-     )
-     result = a.invoke_get_index_list()
-     print('OK')
-     "
-     ```
-   - If fails, report **specifically**: "enVector unreachable or API key invalid - check endpoint and key in config."
-
-   **5c. Python environment**
+   **5b. Python environment**
    - Check MCP server can import: `$PLUGIN_ROOT/.venv/bin/python3 -c "import mcp"`
 
 6. Display a per-subsystem validation report:
@@ -92,8 +71,6 @@ Validate infrastructure end-to-end and switch to active state.
    =========================
    - Vault reachable        (tcp://vault.example.com:50051)
    - Vault token valid      (key_id: abc123)
-   - enVector reachable     (cluster-xxx.envector.io)
-   - enVector API key valid
    - Python environment     (.venv OK)
    ```
    Use "x" mark for failures with the specific error message on the same line.
@@ -112,8 +89,6 @@ Validate infrastructure end-to-end and switch to active state.
    - For each failure, include the specific recovery action:
      - Vault unreachable: "Check if Vault server is running and endpoint is correct"
      - Vault token invalid: "Token may be expired or incorrect - run `/rune:configure` to update"
-     - enVector unreachable: "Check network connectivity and enVector endpoint"
-     - enVector API key invalid: "API key may be incorrect - run `/rune:configure` to update"
    - Suggest: `/rune:status` for more detailed diagnostics
 
 **Note**: This is the ONLY command that makes network requests to validate infrastructure.

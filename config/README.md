@@ -17,13 +17,11 @@ The Rune plugin stores configuration in:
     "endpoint": "your-vault-host:50051",
     "token": "your-vault-token"
   },
-  "envector": {
-    "endpoint": "runestone-xxx.clusters.envector.io",
-    "api_key": "your-api-key"
-  },
   "state": "active"
 }
 ```
+
+> **Note**: enVector Cloud credentials (endpoint, API key) are delivered automatically via the Vault bundle at startup. You do not need to configure them manually.
 
 ## Fields
 
@@ -39,17 +37,7 @@ Authentication token for Vault access. Provided by your team administrator.
 
 **Security**: Keep this secure. Anyone with this token can access your team's organizational memory.
 
-### `envector.endpoint` (required)
-Your enVector Cloud gRPC endpoint address.
-
-**Example**: `runestone-xxx.clusters.envector.io`
-
-### `envector.api_key` (required)
-API key for enVector Cloud authentication.
-
-**Example**: `your-envector-api-key`
-
-> **Note**: The index name for team shared memory is managed by the Vault admin and distributed automatically at startup. All tools (`capture`, `recall`) use the Vault-provided index name.
+> **Note**: enVector credentials and the index name for team shared memory are managed by the Vault admin and distributed automatically via the Vault bundle at startup. All tools (`capture`, `recall`) use the Vault-provided configuration.
 
 ### `state` (required)
 Plugin activation state. Values:
@@ -103,8 +91,6 @@ If you prefer to configure manually instead of using `/rune:configure`:
 4. **Replace placeholders**:
    - `vault.endpoint`: Your team's Vault gRPC endpoint
    - `vault.token`: Your Vault authentication token
-   - `envector.endpoint`: Your enVector cluster endpoint
-   - `envector.api_key`: Your enVector API key
    - `state`: Set to `"active"`
 
 5. **Set permissions** (recommended):
@@ -126,17 +112,13 @@ You can also use environment variables instead of a config file:
 export RUNEVAULT_ENDPOINT="your-vault-host:50051"
 export RUNEVAULT_TOKEN="your-vault-token"
 
-# enVector Cloud
-export ENVECTOR_ENDPOINT="runestone-xxx.clusters.envector.io"
-export ENVECTOR_API_KEY="your-api-key"
-
 # LLM for capture pipeline (optional — auto-detected from host agent environment)
 # export RUNE_LLM_PROVIDER="anthropic"  # or "openai" or "google"
 ```
 
 The plugin will check environment variables if `~/.rune/config.json` doesn't exist.
 
-> **Note**: Both `ENVECTOR_ENDPOINT` (preferred) and `ENVECTOR_ADDRESS` (legacy) are accepted by the MCP server and agents.
+> **Note**: enVector credentials are delivered automatically via the Vault bundle. No enVector environment variables are needed.
 
 ## Team Configuration
 
@@ -148,11 +130,9 @@ When onboarding team members, provide them with:
    - Vault gRPC endpoint
    - Vault Token
 
-2. **enVector credentials** (can be shared or individual):
-   - Cluster endpoint (e.g., `runestone-xxx.clusters.envector.io`)
-   - API key
+   enVector credentials are delivered automatically via the Vault bundle — no separate distribution needed.
 
-3. **Optional: Pre-configured file**:
+2. **Optional: Pre-configured file**:
    ```bash
    # Generate pre-configured file for team member
    cat > alice-config.json << EOF
@@ -160,10 +140,6 @@ When onboarding team members, provide them with:
      "vault": {
        "endpoint": "vault-host:50051",
        "token": "your-vault-token"
-     },
-     "envector": {
-       "endpoint": "cluster.envector.io:443",
-       "api_key": "your-api-key"
      },
      "state": "active"
    }
@@ -220,9 +196,9 @@ cp ~/.rune/config.json ~/.rune/config.backup.json
 4. Verify token is valid
 
 ### "enVector authentication failed"
-1. Check API key is correct
-2. Verify enVector account is active
-3. Check cluster endpoint
+1. Check that your Vault is running and accessible (enVector credentials are delivered via Vault bundle)
+2. Re-run `/rune:configure` to refresh credentials
+3. Contact your team administrator if the issue persists
 
 ### "Permission denied"
 ```bash

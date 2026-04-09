@@ -26,7 +26,7 @@ Follow these steps:
 4. Call the `reload_pipelines` MCP tool to ensure pipelines stop processing immediately.
    - If `reload_pipelines` is not available (MCP server not running), note that MCP pipelines will remain live until session restart.
 
-5. Respond: "Rune deactivated. Organizational memory is paused. Config preserved — `/rune:activate` to resume."
+5. Respond: "Rune deactivated. Organizational memory is paused. Config preserved — `/rune:activate` (or `$rune activate` for Codex CLI) to resume."
 
 User input: {{input}}
 """
