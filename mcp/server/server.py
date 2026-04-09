@@ -1517,10 +1517,26 @@ class MCPServerApp:
                         self._envector_endpoint = vault_ev_endpoint
                     if vault_ev_api_key:
                         self._envector_api_key = vault_ev_api_key
+
+                    # Cache enVector credentials to config.json
+                    if vault_ev_endpoint or vault_ev_api_key:
+                        from agents.common.config import save_config as save_rune_config
+                        if vault_ev_endpoint:
+                            rune_config.envector.endpoint = vault_ev_endpoint
+                        if vault_ev_api_key:
+                            rune_config.envector.api_key = vault_ev_api_key
+                        save_rune_config(rune_config)
+                        logger.info("Cached enVector credentials to config.json")
                 else:
                     result["errors"].append("Failed to fetch keys from Vault")
                     logger.error("Failed to fetch keys from Vault — capture/search will fail")
                     _set_dormant_with_reason("vault_unreachable")
+
+            # Use cached enVector credentials from config if not set by Vault
+            if not self._envector_endpoint and rune_config.envector.endpoint:
+                self._envector_endpoint = rune_config.envector.endpoint
+            if not self._envector_api_key and rune_config.envector.api_key:
+                self._envector_api_key = rune_config.envector.api_key
 
             if not key_id:
                 result["errors"].append("key_id not available. Vault must provide key_id.")

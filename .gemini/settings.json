@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "name": "rune-session-end-sweep",
+            "type": "command",
+            "command": "STATE=$(cat ~/.rune/config.json 2>/dev/null | grep -o '\"state\": *\"[^\"]*\"' | grep -o 'active\\|dormant') && [ \"$STATE\" = \"active\" ] && echo '{\"hookSpecificOutput\": {\"additionalContext\": \"SESSION ENDING — Rune is active. Before stopping, review this conversation for uncaptured significant decisions (choices made, trade-offs committed, strategies confirmed, lessons learned). If any exist, use the mcp_envector_batch_capture tool to capture them now as a batch.\"}}' || echo '{}'",
+            "timeout": 5,
+            "once": true,
+            "statusMessage": "Rune session-end sweep"
+          }
+        ]
+      }
+    ]
+  }
+}
