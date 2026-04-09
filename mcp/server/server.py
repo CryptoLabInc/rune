@@ -626,14 +626,50 @@ class MCPServerApp:
             }
 
             if self.envector is not None:
+                import concurrent.futures as _cf
+                ENVECTOR_DIAGNOSIS_TIMEOUT = 5.0  # seconds
+                _pool = _cf.ThreadPoolExecutor(max_workers=1)
                 try:
                     t0 = time.monotonic()
-                    self.envector.invoke_get_index_list()
-                    latency = (time.monotonic() - t0) * 1000
-                    envector_info["reachable"] = True
-                    envector_info["latency_ms"] = round(latency, 1)
+                    _future = _pool.submit(self.envector.invoke_get_index_list)
+                    try:
+                        _future.result(timeout=ENVECTOR_DIAGNOSIS_TIMEOUT)
+                        latency = (time.monotonic() - t0) * 1000
+                        envector_info["reachable"] = True
+                        envector_info["latency_ms"] = round(latency, 1)
+                    except _cf.TimeoutError:
+                        elapsed = round((time.monotonic() - t0) * 1000, 1)
+                        envector_info["error"] = (
+                            f"Health check timed out after {ENVECTOR_DIAGNOSIS_TIMEOUT:.0f}s "
+                            f"(elapsed: {elapsed}ms). "
+                            "Run /rune:activate to pre-warm the connection, then retry /rune:status."
+                        )
+                        envector_info["error_type"] = "timeout"
+                        envector_info["elapsed_ms"] = elapsed
                 except Exception as e:
-                    envector_info["error"] = str(e)
+                    err_str = str(e)
+                    # Classify errors for more hints to users
+                    if "UNAVAILABLE" in err_str or "Connection refused" in err_str:
+                        error_type = "connection_refused"
+                        hint = "Check that the enVector endpoint is correct and reachable from this machine"
+                    elif "UNAUTHENTICATED" in err_str or "401" in err_str:
+                        error_type = "auth_failure"
+                        hint = "enVector API key may be invalid or expired"
+                    elif "DEADLINE_EXCEEDED" in err_str:
+                        error_type = "deadline_exceeded"
+                        hint = (
+                            "The enVector gRPC deadline was exceeded. "
+                            "Run /rune:activate to pre-warm, then retry /rune:status"
+                        )
+                    else:
+                        error_type = "unknown"
+                        hint = "Run /rune:activate to reinitialize the connection, or check network connectivity"
+                    envector_info["error"] = err_str
+                    envector_info["error_type"] = error_type
+                    envector_info["hint"] = hint
+                finally:
+                    # Return immediately without waiting on timeout
+                    _pool.shutdown(wait=False)
             report["envector"] = envector_info
 
             # Result
@@ -994,12 +1030,45 @@ class MCPServerApp:
         )
         async def tool_reload_pipelines() -> Dict[str, Any]:
             result = self._init_pipelines()
+
+            # Pre-warm the enVector connection (blocking) immediately after pipeline init
+            #
+            # Prevent subsequent '/rune:status' diagnostics check is timed out during RegisterKey and
+            # reported enVector as "unreachable"
+            envector_warmup: Dict[str, Any] = {}
+            if result["scribe"] and self.envector is not None:
+                import time as _time
+                import concurrent.futures as _cf
+                WARMUP_TIMEOUT = 60.0  # seconds; RegisterKey can take tens of seconds
+                _pool = _cf.ThreadPoolExecutor(max_workers=1)
+                try:
+                    _t0 = _time.monotonic()
+                    _future = _pool.submit(self.envector.invoke_get_index_list)
+                    _future.result(timeout=WARMUP_TIMEOUT)
+                    envector_warmup = {
+                        "ok": True,
+                        "latency_ms": round((_time.monotonic() - _t0) * 1000, 1),
+                    }
+                    logger.info("enVector pre-warm completed in %.0fms", envector_warmup["latency_ms"])
+                except _cf.TimeoutError:
+                    envector_warmup = {
+                        "ok": False,
+                        "error": f"Pre-warm timed out after {WARMUP_TIMEOUT:.0f}s",
+                    }
+                    logger.warning("enVector pre-warm timed out after %.0fs", WARMUP_TIMEOUT)
+                except Exception as _e:
+                    envector_warmup = {"ok": False, "error": str(_e)}
+                    logger.warning("enVector pre-warm failed: %s", _e)
+                finally:
+                    _pool.shutdown(wait=False)
+
             return {
                 "ok": not result["errors"],
                 "state": result["state"],
                 "scribe_initialized": result["scribe"],
                 "retriever_initialized": result["retriever"],
                 "errors": result["errors"] if result["errors"] else None,
+                "envector_warmup": envector_warmup or None,
             }
 
         # ---------- MCP Tools: Capture History ---------- #
