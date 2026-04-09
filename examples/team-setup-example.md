@@ -85,7 +85,8 @@ enVector Cloud credentials are delivered automatically via the Vault
 bundle — no action needed on your end.
 
 Setup:
-  1. Install: /plugin marketplace add https://github.com/CryptoLabInc/rune
+  1. Add the remote marketplace: /plugin marketplace add https://github.com/CryptoLabInc/rune
+  2. Install: /plugin install rune
   2. Configure: /rune:configure
   3. Enter the Vault endpoint and token above
 
