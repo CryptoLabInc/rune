@@ -1,0 +1,60 @@
+name: Post PR Comment
+
+on:
+  workflow_run:
+    workflows: ["PR Tests"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  post-comment:
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    runs-on: [self-hosted, rune-ci]
+
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Validate PR metadata
+        run: |
+          python3 - <<'EOF'
+          import json, re
+          with open("pr_info.json", "r", encoding="utf-8") as f:
+            info = json.load(f)
+
+          assert re.fullmatch(r"[1-9][0-9]*", str(info.get("PR_NUMBER", "")))
+          assert re.fullmatch(r"[0-9a-fA-F]{40}", str(info.get("HEAD_SHA", "")))
+          EOF
+
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        env:
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          github-token: ${{ secrets.CI_BOT_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const info = JSON.parse(fs.readFileSync('pr_info.json', 'utf8'));
+            process.env.EXIT_CODE = String(info.EXIT_CODE ?? '');
+            process.env.HAS_CHANGED = String(info.HAS_CHANGED ?? 'false');
+            process.env.TEST_IDS = String(info.TEST_IDS ?? '');
+            process.env.HEAD_SHA = String(info.HEAD_SHA ?? '');
+            process.env.PR_NUMBER = String(info.PR_NUMBER ?? '');
+
+            const fn = require('./.github/scripts/post_pr_comment.js');
+            await fn({ github, context });
