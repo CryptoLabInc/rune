@@ -16,7 +16,7 @@ import logging
 from typing import Union, List, Dict, Any, Optional, Annotated
 from datetime import datetime, timezone
 import numpy as np
-import os, sys, signal
+import os, sys, signal, threading
 import json
 
 logger = logging.getLogger("rune.mcp")
@@ -385,6 +385,9 @@ class MCPServerApp:
         self._active_tier2_provider: Optional[str] = None
         # mcp
         self.mcp = FastMCP(name=mcp_server_name)
+        # Background pipeline initialization
+        self._pipelines_ready = threading.Event()
+        self._pipelines_error: Optional[str] = None
 
         # ---------- Confidence Calculation (inlined from Synthesizer) ---------- #
         def _calculate_confidence(results) -> float:
@@ -702,6 +705,10 @@ class MCPServerApp:
         ) -> Dict[str, Any]:
             _maybe_reload_for_auto_provider(ctx)
 
+            wait_err = self._ensure_pipelines()
+            if wait_err:
+                return wait_err
+
             if self._scribe is None:
                 return make_error(PipelineNotReadyError(
                     "Scribe pipeline not initialized.",
@@ -818,6 +825,10 @@ class MCPServerApp:
         ) -> Dict[str, Any]:
             _maybe_reload_for_auto_provider(ctx)
 
+            wait_err = self._ensure_pipelines()
+            if wait_err:
+                return wait_err
+
             if self._scribe is None:
                 return make_error(PipelineNotReadyError("Scribe pipeline not initialized."))
             if not self._vault_index_name:
@@ -905,6 +916,10 @@ class MCPServerApp:
             ctx: Optional[Context] = None,
         ) -> Dict[str, Any]:
             _maybe_reload_for_auto_provider(ctx)
+
+            wait_err = self._ensure_pipelines()
+            if wait_err:
+                return wait_err
 
             if self._retriever is None:
                 return make_error(PipelineNotReadyError(
@@ -1106,6 +1121,10 @@ class MCPServerApp:
         async def tool_delete_capture(
             record_id: Annotated[str, Field(description="The record ID to soft-delete (e.g. dec_20260316_arch_abc)")],
         ) -> Dict[str, Any]:
+            wait_err = self._ensure_pipelines()
+            if wait_err:
+                return wait_err
+
             if self._retriever is None or self._scribe is None:
                 return make_error(PipelineNotReadyError(
                     "Pipelines not initialized.",
@@ -1463,6 +1482,34 @@ class MCPServerApp:
             result["group_type"] = first.group_type or "phase_chain"
         _append_capture_log(first.id, first.title, first.domain.value, "standard")
         return result
+
+    def _init_pipelines_background(self) -> None:
+        """Run _init_pipelines in background, then signal readiness."""
+        try:
+            result = self._init_pipelines()
+            if result["errors"]:
+                self._pipelines_error = "; ".join(
+                    e if isinstance(e, str) else e.get("message", str(e))
+                    for e in result["errors"]
+                )
+        except Exception as e:
+            self._pipelines_error = str(e)
+            logger.error("Background pipeline init failed: %s", e, exc_info=True)
+        finally:
+            self._pipelines_ready.set()
+
+    def _ensure_pipelines(self, timeout: float = 120.0) -> Optional[Dict[str, Any]]:
+        """Wait for background pipeline init. Returns error dict if not ready, None if ok."""
+        if self._pipelines_ready.is_set():
+            return None
+        logger.info("Waiting for pipeline initialization to complete...")
+        ready = self._pipelines_ready.wait(timeout=timeout)
+        if not ready:
+            return make_error(PipelineNotReadyError(
+                "Pipeline initialization still in progress. Please retry shortly.",
+                recovery_hint="The embedding model may still be downloading. Try again in a few seconds.",
+            ))
+        return None
 
     def _init_pipelines(self) -> Dict[str, Any]:
         """
@@ -1907,14 +1954,14 @@ if __name__ == "__main__":
     if ENVECTOR_API_KEY:
         app._envector_api_key = ENVECTOR_API_KEY
 
-    # Initialize pipelines (reads ~/.rune/config.json state)
-    _pipeline_result = app._init_pipelines()
-    if _pipeline_result["scribe"]:
-        logger.info("Scribe pipeline ready (capture tool available)")
-    if _pipeline_result["retriever"]:
-        logger.info("Retriever pipeline ready (recall tool available)")
-    if _pipeline_result["errors"]:
-        logger.warning(f"Pipeline init issues: {_pipeline_result['errors']}")
+    # Initialize pipelines in background — tools are registered immediately,
+    # pipeline-dependent tools wait via _ensure_pipelines().
+    threading.Thread(
+        target=app._init_pipelines_background,
+        name="rune-pipeline-init",
+        daemon=True,
+    ).start()
+    logger.info("Pipeline initialization started in background")
 
     def _handle_shutdown(signum, frame):
         raise SystemExit(0)
