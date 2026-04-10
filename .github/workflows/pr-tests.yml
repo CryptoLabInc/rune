@@ -20,6 +20,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Detect changed test node IDs
         id: detect
         run: |
@@ -33,10 +37,6 @@ jobs:
           else
             python .github/scripts/ci_changed_tests.py "$BASE" "$HEAD" $CHANGED
           fi
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
 
       - name: Cache pip
         uses: actions/cache@v4
