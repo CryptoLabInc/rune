@@ -41,12 +41,20 @@ def find_test_node_ids(filepath: str, changed_lines: set[int]) -> list[str]:
         return [filepath]
 
     source_lines = source.splitlines()
+    docstring_lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            docstring_lines.update(range(node.lineno, node.end_lineno + 1))
+
     changed_lines = {
         ln for ln in changed_lines
         if ln <= len(source_lines)
         and source_lines[ln - 1].strip()
         and not source_lines[ln - 1].strip().startswith("#")
-    }
+    } - docstring_lines
+
+    if not changed_lines:
+        return []
 
     node_ids: list[str] = []
 

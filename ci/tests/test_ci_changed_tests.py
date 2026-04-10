@@ -43,8 +43,14 @@ class TestFindTestNodeIds:
 
     def test_returns_filepath_when_no_tests_match(self, tmp_path):
         f = tmp_path / "test_sample.py"
-        f.write_text("class TestFoo:\n    def test_bar(self):\n        assert True\n")
-        ids = find_test_node_ids(str(f), changed_lines={99})
+        f.write_text(
+            "class TestFoo:\n"
+            "    def test_bar(self):\n"
+            "        assert True\n"
+            "\n"
+            "SOME_CONSTANT = 42\n"  # line 5 — real code, but not inside a test
+        )
+        ids = find_test_node_ids(str(f), changed_lines={5})
         assert ids == [str(f)]
 
     def test_ignores_class_not_starting_with_Test(self, tmp_path):
@@ -72,7 +78,7 @@ class TestFindTestNodeIds:
         )
         # lines 2-4 are # comments — no test should be detected
         ids = find_test_node_ids(str(f), changed_lines={2, 3, 4})
-        assert ids == [str(f)]
+        assert ids == []
 
     def test_skips_multiline_docstring_change(self, tmp_path):
         f = tmp_path / "test_sample.py"
@@ -86,7 +92,7 @@ class TestFindTestNodeIds:
         )
         # lines 2-4 are a docstring — no test should be detected
         ids = find_test_node_ids(str(f), changed_lines={2, 3, 4})
-        assert ids == [str(f)]
+        assert ids == []
 
     def test_skips_comment_inside_method(self, tmp_path):
         f = tmp_path / "test_sample.py"
@@ -98,7 +104,7 @@ class TestFindTestNodeIds:
         )
         # line 3 is a # comment inside test_bar — should not trigger the test
         ids = find_test_node_ids(str(f), changed_lines={3})
-        assert ids == [str(f)]
+        assert ids == []
 
     def test_class_variable_change_returns_all_test_methods(self, tmp_path):
         f = tmp_path / "test_sample.py"
