@@ -105,9 +105,13 @@ Run: `bash $PLUGIN_ROOT/scripts/configure-claude-mcp.sh`
 
 This registers the envector MCP server via `claude mcp add --scope user` (Claude Code) and JSON merge (Claude Desktop).
 
-### 6. Auto-Activate (if Vault configured)
+### 6. Infrastructure Validation (no auto-activate)
 
-Vault endpoint and token are always provided (required). Proceed to auto-activate:
+**Important:** Do NOT change `state` to `"active"` here. Activation must happen via
+`/rune:activate`, which calls `reload_pipelines` on the already-connected MCP server
+to download the embedding model (~1.2GB) and initialize pipelines. If `state` is set
+to `"active"` without `reload_pipelines`, the next Claude Code restart will attempt
+model download during MCP server startup, exceeding the 30-second connection timeout.
 
 1. Run infrastructure validation:
    - Check Vault connectivity by parsing the scheme from `vault.endpoint`:
@@ -119,16 +123,13 @@ Vault endpoint and token are always provided (required). Proceed to auto-activat
    - Check MCP server can import: `$PLUGIN_ROOT/.venv/bin/python3 -c "import mcp"`
 
 2. If all checks pass:
-   - Update `state` to `"active"` in `~/.rune/config.json`
-   - Call `reload_pipelines` MCP tool if available
-   - Show: "Infrastructure validated. Rune is now active."
+   - Keep `state` as `"dormant"` (do NOT set to "active")
+   - Show: "Infrastructure validated. Run `/rune:activate` to enable organizational memory."
 
 3. If checks fail:
    - Keep `state` as `"dormant"`
    - Show what failed
-   - Suggest: "Run `/rune:activate` after fixing the issues above."
-
-Skip this step if Vault endpoint or token was not provided.
+   - Suggest: "Fix the issues above, then run `/rune:activate`."
 
 ### 7. Completion
 
@@ -145,7 +146,5 @@ Rune Configuration Complete
 
 Next steps:
   1. Restart Claude Code to load the MCP server
-  2. After restart, run /rune:activate to validate and enable
+  2. After restart, run /rune:activate to download the embedding model and enable
 ```
-
-If auto-activation succeeded, show: "Rune is active. Organizational memory is now online."
