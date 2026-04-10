@@ -4,11 +4,17 @@ import re
 import subprocess
 import sys
 import os
+import pytest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '.github', 'scripts'))
 
-from ci_changed_tests import find_test_node_ids, get_changed_line_numbers
+from ci_changed_tests import (
+    find_test_node_ids,
+    get_changed_line_numbers,
+    main,
+    write_github_output,
+)
 
 # Grep pattern used in pr-tests.yml to filter changed test files
 _FILE_PATTERN = re.compile(r'(^|/)tests/test_[^/]+\.py$')
@@ -252,6 +258,58 @@ class TestFindTestNodeIds:
         ids = find_test_node_ids(str(f), changed_lines={2})
         assert ids == [str(f)]
 
+    def test_returns_empty_list_when_changed_lines_is_empty(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    def test_bar(self):\n"
+            "        assert True\n"
+        )
+        ids = find_test_node_ids(str(f), changed_lines=set())
+        assert ids == []
+
+    def test_ignores_out_of_range_changed_line(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "def test_foo():\n"
+            "    assert True\n"
+        )
+        ids = find_test_node_ids(str(f), changed_lines={999})
+        assert ids == []
+
+    def test_skips_blank_line_change(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "def test_foo():\n"
+            "\n"  # line 2
+            "    assert True\n"
+        )
+        ids = find_test_node_ids(str(f), changed_lines={2})
+        assert ids == []
+
+    def test_skips_module_level_docstring_change(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            '"""module docstring"""\n'  # line 1
+            "def test_foo():\n"
+            "    assert True\n"
+        )
+        ids = find_test_node_ids(str(f), changed_lines={1})
+        assert ids == []
+
+    def test_detects_method_when_second_decorator_line_changed(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "import pytest\n"
+            "class TestFoo:\n"
+            "    @pytest.mark.slow\n"                  # line 3
+            "    @pytest.mark.parametrize('x', [1])\n"  # line 4
+            "    def test_bar(self, x):\n"
+            "        assert x\n"
+        )
+        ids = find_test_node_ids(str(f), changed_lines={4})
+        assert ids == [f"{f}::TestFoo::test_bar"]
+
 
 class TestGetChangedLineNumbers:
     def _run_with_diff(self, diff_output: str) -> set:
@@ -292,3 +350,149 @@ class TestGetChangedLineNumbers:
         with patch("ci_changed_tests.subprocess.run", side_effect=err):
             changed = get_changed_line_numbers("base_sha", "head_sha", "test_sample.py")
         assert changed == set()
+
+    def _run_with_diff(self, diff_output: str) -> set[int]:
+        mock_result = MagicMock()
+        mock_result.stdout = diff_output
+        with patch("ci_changed_tests.subprocess.run", return_value=mock_result):
+            return get_changed_line_numbers("base_sha", "head_sha", "test_sample.py")
+
+    def test_multiple_hunks_are_merged(self):
+        diff = (
+            "@@ -1,0 +1,2 @@\n"
+            "+line1\n"
+            "+line2\n"
+            "@@ -10,0 +12,2 @@\n"
+            "+line12\n"
+            "+line13\n"
+        )
+        changed = self._run_with_diff(diff)
+        assert changed == {1, 2, 12, 13}
+
+    def test_modification_hunk_adds_new_file_range(self):
+        diff = (
+            "@@ -5,2 +5,2 @@\n"
+            "-old1\n"
+            "-old2\n"
+            "+new1\n"
+            "+new2\n"
+        )
+        changed = self._run_with_diff(diff)
+        assert changed == {5, 6}
+
+    def test_non_hunk_lines_are_ignored(self):
+        diff = (
+            "diff --git a/test_sample.py b/test_sample.py\n"
+            "index 123..456 100644\n"
+            "--- a/test_sample.py\n"
+            "+++ b/test_sample.py\n"
+            "@@ -1,0 +1,1 @@\n"
+            "+line1\n"
+        )
+        changed = self._run_with_diff(diff)
+        assert changed == {1}
+
+
+class TestWriteGithubOutput:
+    def test_does_nothing_when_github_output_not_set(self, monkeypatch):
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+        write_github_output(True, ["a::test_one"])
+
+    def test_writes_multiline_output(self, tmp_path, monkeypatch):
+        output_file = tmp_path / "github_output.txt"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+
+        write_github_output(True, ["a::test_one", "b::TestFoo::test_bar"])
+
+        content = output_file.read_text(encoding="utf-8")
+        assert "has_changed=true\n" in content
+        assert "test_ids<<EOF\n" in content
+        assert "a::test_one\n" in content
+        assert "b::TestFoo::test_bar\n" in content
+        assert content.endswith("EOF\n")
+
+    def test_writes_false_with_empty_test_ids(self, tmp_path, monkeypatch):
+        output_file = tmp_path / "github_output.txt"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+
+        write_github_output(False, [])
+
+        content = output_file.read_text(encoding="utf-8")
+        assert content == "has_changed=false\ntest_ids<<EOF\nEOF\n"
+
+
+class TestMain:
+    def test_exits_with_usage_when_not_enough_args(self, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", ["ci_changed_tests.py"])
+
+        with pytest.raises(SystemExit) as exc:
+            main()
+
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "Usage: ci_changed_tests.py" in captured.err
+
+    def test_main_writes_false_when_no_changed_tests(self, monkeypatch, tmp_path, capsys):
+        output_file = tmp_path / "github_output.txt"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["ci_changed_tests.py", "base_sha", "head_sha", "tests/test_sample.py"],
+        )
+
+        with patch("ci_changed_tests.get_changed_line_numbers", return_value=set()):
+            main()
+
+        captured = capsys.readouterr()
+        assert "No changed tests found." in captured.out
+
+        content = output_file.read_text(encoding="utf-8")
+        assert content == "has_changed=false\ntest_ids<<EOF\nEOF\n"
+
+    def test_main_prints_and_writes_changed_ids(self, monkeypatch, tmp_path, capsys):
+        output_file = tmp_path / "github_output.txt"
+        monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "ci_changed_tests.py",
+                "base_sha",
+                "head_sha",
+                "tests/test_one.py",
+                "tests/test_two.py",
+            ],
+        )
+
+        def fake_get_changed_line_numbers(base_sha, head_sha, filepath):
+            if filepath == "tests/test_one.py":
+                return {1}
+            if filepath == "tests/test_two.py":
+                return {2}
+            return set()
+
+        def fake_find_test_node_ids(filepath, changed_lines):
+            if filepath == "tests/test_one.py":
+                return ["tests/test_one.py::test_alpha"]
+            if filepath == "tests/test_two.py":
+                return [
+                    "tests/test_two.py::TestFoo::test_beta",
+                    "tests/test_two.py::TestFoo::test_beta",  # duplicate on purpose
+                ]
+            return []
+
+        with patch("ci_changed_tests.get_changed_line_numbers", side_effect=fake_get_changed_line_numbers):
+            with patch("ci_changed_tests.find_test_node_ids", side_effect=fake_find_test_node_ids):
+                main()
+
+        captured = capsys.readouterr()
+        assert "Changed test node IDs:" in captured.out
+        assert "tests/test_one.py::test_alpha" in captured.out
+        assert "tests/test_two.py::TestFoo::test_beta" in captured.out
+
+        content = output_file.read_text(encoding="utf-8")
+        assert "has_changed=true\n" in content
+        assert "tests/test_one.py::test_alpha\n" in content
+        assert content.count("tests/test_two.py::TestFoo::test_beta\n") == 1
+        assert content.endswith("EOF\n")
