@@ -1044,6 +1044,8 @@ class MCPServerApp:
             annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False)
         )
         async def tool_reload_pipelines() -> Dict[str, Any]:
+            self._pipelines_ready.wait()  # wait for background init to finish first
+            self._pipelines_error = None  # clear stale error before reload
             result = self._init_pipelines()
 
             # Pre-warm the enVector connection (blocking) immediately after pipeline init
@@ -1500,14 +1502,18 @@ class MCPServerApp:
 
     def _ensure_pipelines(self, timeout: float = 120.0) -> Optional[Dict[str, Any]]:
         """Wait for background pipeline init. Returns error dict if not ready, None if ok."""
-        if self._pipelines_ready.is_set():
-            return None
-        logger.info("Waiting for pipeline initialization to complete...")
-        ready = self._pipelines_ready.wait(timeout=timeout)
-        if not ready:
+        if not self._pipelines_ready.is_set():
+            logger.info("Waiting for pipeline initialization to complete...")
+            ready = self._pipelines_ready.wait(timeout=timeout)
+            if not ready:
+                return make_error(PipelineNotReadyError(
+                    "Pipeline initialization still in progress. Please retry shortly.",
+                    recovery_hint="The embedding model may still be downloading. Try again in a few seconds.",
+                ))
+        if self._pipelines_error:
             return make_error(PipelineNotReadyError(
-                "Pipeline initialization still in progress. Please retry shortly.",
-                recovery_hint="The embedding model may still be downloading. Try again in a few seconds.",
+                f"Pipeline initialization failed: {self._pipelines_error}",
+                recovery_hint="Run /rune:activate or restart Claude Code.",
             ))
         return None
 
