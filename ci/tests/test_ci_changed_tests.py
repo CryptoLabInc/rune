@@ -88,6 +88,18 @@ class TestFindTestNodeIds:
         ids = find_test_node_ids(str(f), changed_lines={2, 3, 4})
         assert ids == [str(f)]
 
+    def test_skips_comment_inside_method(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    def test_bar(self):\n"
+            "        # internal comment\n"  # line 3
+            "        assert True\n"
+        )
+        # line 3 is a # comment inside test_bar — should not trigger the test
+        ids = find_test_node_ids(str(f), changed_lines={3})
+        assert ids == [str(f)]
+
     def test_class_variable_change_returns_all_test_methods(self, tmp_path):
         f = tmp_path / "test_sample.py"
         f.write_text(
@@ -141,6 +153,18 @@ class TestFindTestNodeIds:
         # line 3 is the decorator — changing it alone should still detect test_bar
         ids = find_test_node_ids(str(f), changed_lines={3})
         assert ids == [f"{f}::TestFoo::test_bar"]
+
+    def test_detects_top_level_function_when_decorator_line_changed(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "import pytest\n"
+            "@pytest.mark.slow\n"   # line 2
+            "def test_foo():\n"
+            "    assert True\n"
+        )
+        # line 2 is the decorator — changing it alone should still detect test_foo
+        ids = find_test_node_ids(str(f), changed_lines={2})
+        assert ids == [f"{f}::test_foo"]
 
     def test_detects_method_when_multiple_decorators_and_first_decorator_line_changed(self, tmp_path):
         f = tmp_path / "test_sample.py"
