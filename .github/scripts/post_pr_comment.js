@@ -67,7 +67,7 @@ module.exports = async ({ github, context }) => {
 
   // Tests Added/Modified in This PR — per-test PASS/FAIL and summary
   const hasChanged = process.env.HAS_CHANGED === 'true';
-  const changedIds = (process.env.TEST_IDS || '').trim().split(' ').filter(Boolean);
+  const changedIds = (process.env.TEST_IDS || '').trim().split(/\s+/).filter(Boolean);
 
   // For parameterized tests, ci_changed_tests.py outputs the base function name
   // (e.g. "test_foo") but pytest IDs include params (e.g. "test_foo[param1-param2]").
