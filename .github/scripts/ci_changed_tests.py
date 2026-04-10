@@ -40,6 +40,14 @@ def find_test_node_ids(filepath: str, changed_lines: set[int]) -> list[str]:
     except Exception:
         return [filepath]
 
+    source_lines = source.splitlines()
+    changed_lines = {
+        ln for ln in changed_lines
+        if ln <= len(source_lines)
+        and source_lines[ln - 1].strip()
+        and not source_lines[ln - 1].strip().startswith("#")
+    }
+
     node_ids: list[str] = []
 
     for node in tree.body:
