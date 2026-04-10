@@ -1917,7 +1917,15 @@ if __name__ == "__main__":
         logger.warning(f"Pipeline init issues: {_pipeline_result['errors']}")
 
     def _handle_shutdown(signum, frame):
-        raise SystemExit(0)
+        # Close stdin fd to unblock the anyio worker thread that is stuck on
+        # readline().  Without this, Py_FinalizeEx tries to GC the same
+        # TextIOWrapper whose buffer lock the worker thread still holds,
+        # triggering "could not acquire lock for <BufferedReader>" → abort().
+        try:
+            os.close(0)
+        except OSError:
+            pass
+        os._exit(0)
     for sig in (signal.SIGINT, getattr(signal, "SIGTERM", None)):
         if sig is not None:
             signal.signal(sig, _handle_shutdown)
