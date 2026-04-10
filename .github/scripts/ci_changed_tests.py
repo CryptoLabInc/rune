@@ -82,8 +82,6 @@ def find_test_node_ids(filepath: str, changed_lines: set[int]) -> list[str]:
                 # otherwise return all test methods in the class.
                 real_code_lines: set[int] = set()
                 for child in node.body:
-                    if isinstance(child, ast.Expr) and isinstance(child.value, ast.Constant) and isinstance(child.value.value, str):
-                        continue
                     real_code_lines.update(range(child.lineno, child.end_lineno + 1))
                 if real_code_lines & (class_lines & changed_lines):
                     all_methods = [
