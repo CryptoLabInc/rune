@@ -81,7 +81,8 @@ def find_test_node_ids(filepath: str, changed_lines: set[int]) -> list[str]:
 
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.name.startswith("test_"):
-                if set(range(node.lineno, node.end_lineno + 1)) & changed_lines:
+                start = node.decorator_list[0].lineno if node.decorator_list else node.lineno
+                if set(range(start, node.end_lineno + 1)) & changed_lines:
                     node_ids.append(f"{filepath}::{node.name}")
 
     return node_ids or [filepath]
