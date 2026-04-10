@@ -4,7 +4,7 @@ set -e
 # Rune Plugin Installation Script
 # This script sets up the Python environment and dependencies for the plugin
 
-VERSION="0.3.0"
+VERSION="0.3.1"
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Colors
