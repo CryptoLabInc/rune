@@ -1,6 +1,7 @@
 """Tests for .github/scripts/ci_changed_tests.py"""
 
 import re
+import subprocess
 import sys
 import os
 from unittest.mock import MagicMock, patch
@@ -186,6 +187,71 @@ class TestFindTestNodeIds:
         ids = find_test_node_ids(str(f), changed_lines={3})
         assert ids == [f"{f}::TestFoo::test_bar"]
 
+    def test_private_helper_method_change_returns_all_test_methods(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    def _helper(self):\n"    # line 2
+            "        return 42\n"         # line 3
+            "    def test_bar(self):\n"
+            "        assert self._helper() == 42\n"
+            "    def test_baz(self):\n"
+            "        assert self._helper() == 42\n"
+        )
+        # _helper changed but no test_ method changed → all test methods returned
+        ids = find_test_node_ids(str(f), changed_lines={2, 3})
+        assert ids == [f"{f}::TestFoo::test_bar", f"{f}::TestFoo::test_baz"]
+
+    def test_only_changed_class_is_returned_when_multiple_classes_exist(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    def test_a(self):\n"
+            "        assert True\n"
+            "class TestBar:\n"
+            "    def test_b(self):\n"    # line 5
+            "        assert True\n"
+        )
+        # only TestBar::test_b changed
+        ids = find_test_node_ids(str(f), changed_lines={5})
+        assert ids == [f"{f}::TestBar::test_b"]
+
+    def test_parse_failure_returns_filepath(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text("def test_foo(\n    broken syntax\n")
+        ids = find_test_node_ids(str(f), changed_lines={1})
+        assert ids == [str(f)]
+
+    def test_detects_async_test_function(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "import asyncio\n"
+            "async def test_foo():\n"   # line 2
+            "    assert True\n"
+        )
+        ids = find_test_node_ids(str(f), changed_lines={2})
+        assert ids == [f"{f}::test_foo"]
+
+    def test_detects_async_method_in_class(self, tmp_path):
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    async def test_bar(self):\n"   # line 2
+            "        assert True\n"
+        )
+        ids = find_test_node_ids(str(f), changed_lines={2})
+        assert ids == [f"{f}::TestFoo::test_bar"]
+
+    def test_class_with_no_test_methods_falls_back_to_filepath(self, tmp_path):
+        # TestFoo has only a helper — changing it produces no test_ methods → filepath fallback
+        f = tmp_path / "test_sample.py"
+        f.write_text(
+            "class TestFoo:\n"
+            "    shared = 'value'\n"   # line 2
+        )
+        ids = find_test_node_ids(str(f), changed_lines={2})
+        assert ids == [str(f)]
+
 
 class TestGetChangedLineNumbers:
     def _run_with_diff(self, diff_output: str) -> set:
@@ -211,3 +277,18 @@ class TestGetChangedLineNumbers:
         diff = "@@ -1,0 +1,3 @@\n+line1\n+line2\n+line3\n"
         changed = self._run_with_diff(diff)
         assert changed == {1, 2, 3}
+
+    def test_subprocess_failure_returns_empty_set(self):
+        with patch(
+            "ci_changed_tests.subprocess.run",
+            side_effect=subprocess.CalledProcessError(128, "git"),
+        ):
+            changed = get_changed_line_numbers("base_sha", "head_sha", "test_sample.py")
+        assert changed == set()
+
+    def test_subprocess_failure_with_stderr_does_not_raise(self):
+        err = subprocess.CalledProcessError(128, "git")
+        err.stderr = "fatal: bad object base_sha"
+        with patch("ci_changed_tests.subprocess.run", side_effect=err):
+            changed = get_changed_line_numbers("base_sha", "head_sha", "test_sample.py")
+        assert changed == set()
