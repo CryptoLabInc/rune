@@ -1382,7 +1382,11 @@ class MCPServerApp:
         )
 
         if not insert_result.get("ok"):
-            return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+            error_msg = insert_result.get("error", "Unknown error")
+            if any(term in error_msg for term in ["RpcError", "Connection", "UNAVAILABLE", "OSError"]):
+                logger.error(f"Insert failed (network): {error_msg}")
+                _set_dormant_with_reason("envector_unreachable")
+            return {"ok": False, "error": f"Insert failed: {error_msg}"}
 
         first = records[0]
         result = {
@@ -1467,7 +1471,11 @@ class MCPServerApp:
         )
 
         if not insert_result.get("ok"):
-            return {"ok": False, "error": f"Insert failed: {insert_result.get('error')}"}
+            error_msg = insert_result.get("error", "Unknown error")
+            if any(term in error_msg for term in ["RpcError", "Connection", "UNAVAILABLE", "OSError"]):
+                logger.error(f"Insert failed (network): {error_msg}")
+                _set_dormant_with_reason("envector_unreachable")
+            return {"ok": False, "error": f"Insert failed: {error_msg}"}
 
         first = records[0]
         result = {
