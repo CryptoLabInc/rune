@@ -15,57 +15,55 @@ This guide shows how a team administrator sets up Rune infrastructure and onboar
 
 ---
 
-## Step 1: Alice Deploys Rune Infrastructure
+## Step 1: Alice Deploys Rune-Vault
 
-Alice is the team administrator and needs to deploy Rune-Vault (team-shared key management + enVector Cloud bundled configuration).
-
-### 1.1 Deploy Rune-Vault
+Alice runs the interactive installer, which handles cloud provisioning, TLS setup, and enVector Cloud configuration:
 
 ```bash
-# Alice clones the admin repository
-git clone https://github.com/CryptoLabInc/rune-admin.git
-cd rune-admin
-
-# Deploy to Oracle Cloud Infrastructure
-cd deployment/oci
-
-# Edit terraform.tfvars
-cat > terraform.tfvars << EOF
-team_name = "acme"
-region = "us-ashburn-1"
-vault_instance_shape = "VM.Standard.E4.Flex"
-EOF
-
-# Deploy
-terraform init
-terraform apply
-
-# Note the outputs:
-# vault_endpoint = "vault-acme.oci.envector.io:50051"
-# vault_token = "evt_acme_abc123def456"
+curl -fsSL https://raw.githubusercontent.com/CryptoLabInc/rune-admin/main/install.sh \
+  -o install.sh && sudo bash install.sh
 ```
 
-> **Note**: enVector Cloud credentials are configured as part of the Vault deployment and delivered to clients automatically via the Vault bundle at startup. No separate enVector signup is needed by team members.
+The installer guides her through:
+- **Cloud provider** selection (OCI / AWS / GCP)
+- **enVector Cloud** credentials (endpoint + API key)
+- **TLS certificate** generation
+- **Terraform-based** VM provisioning
+
+Output:
+```
+vault_endpoint = "vault-acme.oci.envector.io:50051"
+ca.pem downloaded for TLS verification
+```
+
+### Verify Deployment
+
+```bash
+# gRPC health check (requires grpcurl: brew install grpcurl)
+grpcurl -cacert ca.pem vault-acme.oci.envector.io:50051 grpc.health.v1.Health/Check
+
+# Expected: { "status": "SERVING" }
+```
 
 ---
 
-## Step 2: Alice Configures Her Own Plugin
+## Step 2: Alice Issues Per-User Tokens
+
+Alice creates individual tokens for each team member using the Vault admin CLI:
 
 ```bash
-# Alice installs the lightweight plugin
-cd ~/workspace
-/plugin install github.com/CryptoLabInc/rune
-
-# Configure with her credentials
-/rune:configure
-
-# Enter:
-# Vault Endpoint: vault-acme.oci.envector.io:50051
-# Vault Token: evt_acme_abc123def456
-# (enVector credentials are delivered automatically via Vault bundle)
-
-# Plugin is now active ✅
+# Issue tokens per user
+runevault token issue --user alice --role admin
+runevault token issue --user bob   --role member
+runevault token issue --user carol --role member
 ```
+
+Roles control access scope and rate limits:
+
+| Role | Scope | Rate Limit |
+|------|-------|------------|
+| `admin` | Full access + token management | 150 req/60s |
+| `member` | Capture + recall only | 30 req/60s |
 
 ---
 
@@ -73,43 +71,57 @@ cd ~/workspace
 
 ### 3.1 Share Credentials
 
-Alice sends Bob an email:
+Alice sends Bob his credentials via a secure channel (1Password, Signal, etc.):
 
 ```
-Subject: Rune Plugin Setup - Acme Team
-
 Hi Bob,
 
 I've set up our team's organizational memory system. Here are your credentials:
 
-**Rune-Vault**:
-- Endpoint: vault-acme.oci.envector.io:50051
-- Token: evt_acme_abc123def456
+  Vault Endpoint: vault-acme.oci.envector.io:50051
+  Vault Token: evt_acme_bob_xyz789
 
-(enVector Cloud credentials are delivered automatically — no action needed on your end.)
+enVector Cloud credentials are delivered automatically via the Vault
+bundle — no action needed on your end.
 
-**Setup Instructions**:
-1. Run: /plugin install github.com/CryptoLabInc/rune
-2. Run: /rune:configure
-3. Enter the Vault endpoint and token above
-
-Let me know if you have any issues!
+Setup:
+  1. Add the remote marketplace: /plugin marketplace add https://github.com/CryptoLabInc/rune
+  2. Install: /plugin install rune
+  2. Configure: /rune:configure
+  3. Enter the Vault endpoint and token above
 
 Alice
 ```
 
 ### 3.2 Bob Installs and Configures
 
+**Claude Code:**
 ```bash
-# Bob receives email and installs
-/plugin install github.com/CryptoLabInc/rune
-
-# Configure
-/rune:configure
-# Enters credentials from Alice's email
-
-# Plugin is now active ✅
+# Inside a Claude Code session
+> /plugin marketplace add https://github.com/CryptoLabInc/rune
+> /plugin install rune
+> /rune:configure
+# Enters Vault endpoint and token from Alice
 ```
+
+**Codex CLI:**
+```bash
+# Inside a Codex session
+> $skill-installer install https://github.com/CryptoLabInc/rune.git
+> $rune configure
+# Enters Vault endpoint and token
+```
+
+**Gemini CLI:**
+```bash
+# From terminal
+$ gemini extensions install https://github.com/CryptoLabInc/rune.git
+# Inside a Gemini session
+> /rune:configure
+# Enters Vault endpoint and token
+```
+
+Bob is now connected to the team memory.
 
 ---
 
@@ -118,19 +130,19 @@ Alice
 ### Alice captures a decision
 
 ```
-Alice to Claude: "We decided to use PostgreSQL for this project because
+Alice to her agent: "We decided to use PostgreSQL for this project because
 it has better JSON support than MySQL, and our data model is heavily
 document-oriented."
 
-Claude: [Automatically captures to organizational memory]
+Agent: [Automatically captures to organizational memory]
 ```
 
 ### Bob retrieves the context (later that day)
 
 ```
-Bob to Claude: "What database are we using for this project and why?"
+Bob to his agent: "What database are we using for this project and why?"
 
-Claude: "According to organizational memory from earlier today:
+Agent: "According to organizational memory from earlier today:
 The team decided to use PostgreSQL because it has better JSON support
 than MySQL, and the data model is heavily document-oriented.
 
@@ -139,52 +151,46 @@ Source: Captured from Alice's session at 10:23 AM"
 
 ### Carol joins the team (next week)
 
-Alice sends Carol the same credentials email. Carol installs and configures:
-
-```bash
-/plugin install github.com/CryptoLabInc/rune
-/rune:configure
-# Enters same credentials
-```
-
-Now Carol has access to all historical context from Alice and Bob.
+Alice issues Carol's token and sends credentials. Carol installs and configures — and immediately has access to all historical context from Alice and Bob.
 
 ---
 
 ## Step 5: Security Management
 
-### 5.1 Token Rotation (Monthly)
+### Token Rotation
 
-Alice rotates the Vault token:
-
-```bash
-# Alice generates new token in Vault admin panel
-# New token: evt_acme_xyz789new
-
-# Alice emails team:
-"Team, please update your Vault token to: evt_acme_xyz789new
-Run: /rune:configure (just update the token field)"
-
-# Team members update:
-/rune:configure
-# Only need to update vault token, other fields unchanged
-
-# Alice revokes old token in Vault admin panel
-```
-
-### 5.2 Remove Team Member
-
-If someone leaves the team:
+Alice rotates tokens periodically using the Vault admin CLI:
 
 ```bash
-# Alice rotates Vault token
-# Sends new token only to current team members
-# Old token is revoked -> departed member loses access
+# Rotate a single user's token
+runevault token rotate --user bob
+
+# Rotate all tokens at once
+runevault token rotate --all
+
+# Distribute new tokens to team members via secure channel
 ```
+
+Team members update their token:
+```
+> /rune:configure
+# Update only the Vault token — other fields unchanged
+```
+
+### Remove a Team Member
+
+```bash
+# Revoke the departing member's token
+runevault token revoke --user bob
+
+# No token rotation needed — other members' tokens remain valid
+```
+
+Bob's token is immediately invalidated. Alice and Carol continue uninterrupted.
 
 ---
 
-## Benefits Realized
+## Benefits
 
 ### Context Continuity
 - Bob doesn't need to ask Alice "Why PostgreSQL?"
@@ -193,13 +199,14 @@ If someone leaves the team:
 
 ### Zero-Knowledge Privacy
 - enVector Cloud sees only encrypted vectors
-- Only team members with Vault access can decrypt
-- Cloud provider cannot read any conversations
+- Only team members with valid Vault tokens can decrypt
+- Cloud provider cannot read any content
 
-### Team Collaboration
-- All 3 developers share the same organizational memory
-- Decisions captured once, available to everyone
-- Consistent knowledge across the team
+### Per-User Security
+- Individual tokens — revoke one without disrupting others
+- Role-based access control (admin vs. member)
+- Rate limiting prevents abuse
+- Audit logging tracks all operations
 
 ---
 
@@ -209,59 +216,58 @@ If someone leaves the team:
 
 ```
 Bob: /rune:status
-Claude: Error: Cannot connect to Vault
+Agent: Error: Cannot connect to Vault
 
 Alice checks:
-1. Vault is running: curl https://vault-acme.oci.envector.io/health
-2. Bob's token is correct
-3. Firewall allows Bob's IP
+  1. Vault is running: grpcurl -cacert ca.pem vault-acme.oci.envector.io:50051 grpc.health.v1.Health/Check
+  2. Bob's token is correct: runevault token list
+  3. Firewall allows Bob's IP (port 50051)
 
-Issue: Bob had typo in Vault Endpoint
-Fix: Bob runs /rune:configure with correct URL
+Issue: Bob had a typo in the Vault endpoint
+Fix: Bob runs /rune:configure with the correct endpoint
 ```
 
-### Carol sees encrypted results
+### Carol sees no results
 
 ```
 Carol: "Why PostgreSQL?"
-Claude: Returns encrypted gibberish
+Agent: No relevant context found.
 
-Issue: Carol's Vault token is incorrect
-Fix: Alice verifies token, Carol runs /rune:configure
+Issue: Carol's Vault token is expired or incorrect
+Fix: Alice checks with `runevault token list`, re-issues if needed
+     Carol runs /rune:configure with the new token
 ```
 
 ---
 
 ## Advanced: Multiple Projects
 
-### Separate Indexes
-
-To separate organizational memory by project, the admin sets the team index name on the Vault server:
+To isolate organizational memory by project, deploy separate Vault instances:
 
 ```bash
-# Project Alpha — admin sets on Vault server:
-VAULT_INDEX_NAME="project-alpha-context"
-# All team members connecting to this Vault automatically use this index
+# Project Alpha — its own Vault with its own index
+# install.sh → index_name: "project-alpha"
+# vault_endpoint: vault-alpha.oci.envector.io:50051
 
-# Project Beta — admin deploys a separate Vault instance:
-VAULT_INDEX_NAME="project-beta-context"
-# Team members connect to this Vault for Beta context
+# Project Beta — separate Vault instance
+# install.sh → index_name: "project-beta"
+# vault_endpoint: vault-beta.oci.envector.io:50051
 ```
 
-The index name is always managed by the Vault admin and distributed automatically at startup, ensuring consistency across the team.
+Team members configure the Vault endpoint matching their current project. The index name is managed by the Vault admin and distributed automatically at startup.
 
 ---
 
 ## Summary
 
 **Admin Tasks** (Alice):
-1. Deploy Rune-Vault with enVector bundle (one-time, 1 hour)
-2. Onboard team members (per member, 5 minutes)
-3. Rotate tokens (monthly, 10 minutes)
+1. Deploy Rune-Vault via interactive installer (one-time, ~30 minutes)
+2. Issue per-user tokens (per member, 1 minute)
+3. Rotate tokens periodically (10 minutes)
 
 **Team Member Tasks** (Bob, Carol):
 1. Install plugin (one-time, 2 minutes)
-2. Configure credentials (one-time, 3 minutes)
+2. Configure with Vault endpoint + token (one-time, 1 minute)
 3. Use naturally (ongoing, zero overhead)
 
-**Result**: Fully encrypted, shared organizational memory with zero knowledge privacy.
+**Result**: Fully encrypted, shared organizational memory with per-user access control and zero-knowledge privacy.
