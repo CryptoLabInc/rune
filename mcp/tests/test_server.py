@@ -52,6 +52,7 @@ def mcp_server():
 
     app = MCPServerApp(envector_adapter=FakeAdapter(), mcp_server_name="test-mcp")
     app.embedding = FakeEmbeddingService()
+    app._pipelines_ready.set()
     return app.mcp  # FastMCP Instance
 
 
@@ -136,6 +137,7 @@ def mcp_server_with_vault():
         vault_index_name="team-decisions",
     )
     app.embedding = FakeEmbeddingService()
+    app._pipelines_ready.set()
     return app.mcp
 
 
@@ -196,6 +198,7 @@ async def test_vault_status_includes_team_index_name(mcp_server_with_vault):
 def mcp_server_degraded():
     """MCP server with envector_adapter=None, simulating startup when infra is down."""
     app = MCPServerApp(mcp_server_name="test-mcp-degraded")
+    app._pipelines_ready.set()
     return app.mcp
 
 
@@ -260,6 +263,7 @@ async def test_reload_pipelines_warmup_failure():
 
     app = MCPServerApp(envector_adapter=FailingAdapter(), mcp_server_name="test-mcp-warmup-fail")
     app.embedding = FakeEmbeddingService()
+    app._pipelines_ready.set()
     # Force _scribe to be truthy so warmup path is triggered
     app._scribe = {"record_builder": None, "envector_client": None, "embedding_service": None}
 
@@ -379,6 +383,7 @@ def mcp_server_envector_timeout():
 
     app = MCPServerApp(envector_adapter=SlowAdapter(), mcp_server_name="test-mcp-slow")
     app.embedding = FakeEmbeddingService()
+    app._pipelines_ready.set()
     return app.mcp
 
 
@@ -393,6 +398,7 @@ def mcp_server_envector_connection_error():
 
     app = MCPServerApp(envector_adapter=ErrorAdapter(), mcp_server_name="test-mcp-err")
     app.embedding = FakeEmbeddingService()
+    app._pipelines_ready.set()
     return app.mcp
 
 
@@ -407,6 +413,7 @@ def mcp_server_envector_auth_error():
 
     app = MCPServerApp(envector_adapter=AuthErrorAdapter(), mcp_server_name="test-mcp-auth")
     app.embedding = FakeEmbeddingService()
+    app._pipelines_ready.set()
     return app.mcp
 
 
@@ -501,3 +508,31 @@ async def test_recall_returns_structured_error_for_invalid_topk(mcp_server_with_
         assert isinstance(error, dict), f"Expected structured error dict, got: {type(error)}"
         assert error.get("code") in ("PIPELINE_NOT_READY", "INVALID_INPUT")
         assert isinstance(error.get("retryable"), bool)
+
+
+# ----------- Background Pipeline Init Tests ----------- #
+
+@pytest.mark.asyncio
+async def test_ensure_pipelines_returns_none_when_ready():
+    """_ensure_pipelines returns None when pipelines are already initialized."""
+    class FakeAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+    app = MCPServerApp(envector_adapter=FakeAdapter(), mcp_server_name="test-mcp")
+    app._pipelines_ready.set()
+    result = app._ensure_pipelines(timeout=0.1)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_pipelines_returns_error_on_timeout():
+    """_ensure_pipelines returns error dict when init times out."""
+    class FakeAdapter(EnVectorSDKAdapter):
+        def __init__(self):
+            pass
+    app = MCPServerApp(envector_adapter=FakeAdapter(), mcp_server_name="test-mcp")
+    # Don't set _pipelines_ready — simulate still initializing
+    result = app._ensure_pipelines(timeout=0.01)
+    assert result is not None
+    assert result["ok"] is False
+    assert "in progress" in result["error"]["message"].lower()
