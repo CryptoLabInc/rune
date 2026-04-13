@@ -555,6 +555,7 @@ class MCPServerApp:
                     "os": sys.platform,
                     "python_version": sys.version.split(" ")[0],
                     "cwd": os.getcwd(),
+                    "executable": sys.executable,
                 }
             except Exception as e:
                 report["environment"] = {"error": str(e)}

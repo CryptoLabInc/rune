@@ -319,6 +319,24 @@ async def test_diagnostics_with_vault(mcp_server_with_vault):
 
 
 @pytest.mark.asyncio
+async def test_diagnostics_environment_includes_executable(mcp_server_with_vault):
+    """diagnostics.environment must expose sys.executable so clients can
+    derive the active plugin checkout path from it. This is the basis for
+    multi-checkout drift detection in /rune:status — stripping /.venv/bin/
+    python3 from the value yields the plugin root of the responding server."""
+    async with Client(mcp_server_with_vault) as client:
+        result = await client.call_tool("diagnostics", {})
+        data = getattr(result, "data", None) or getattr(result, "structured", None) \
+               or getattr(result, "structured_content", None)
+
+        assert data is not None
+        env = data.get("environment", {})
+        assert "executable" in env, "environment must include 'executable' field"
+        assert isinstance(env["executable"], str)
+        assert env["executable"] == sys.executable
+
+
+@pytest.mark.asyncio
 async def test_diagnostics_without_vault(mcp_server):
     async with Client(mcp_server) as client:
         result = await client.call_tool("diagnostics", {})
