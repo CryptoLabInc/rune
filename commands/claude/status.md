@@ -38,10 +38,6 @@ System Health:
   [check] LLM Provider  : <provider or "none">
   [check] enVector Cloud: reachable (<latency>ms) / unreachable
 
-Infrastructure:
-  [check] Python venv: <installedFrom>/.venv
-  [check] MCP server logs: <recent or "stale/missing">
-
 Recommendations:
   - <actionable suggestions based on what's missing>
 ```
