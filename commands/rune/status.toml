@@ -30,6 +30,7 @@ State: Active / Dormant
 
 Configuration:
   Config file   : ~/.rune/config.json
+  MCP server    : <diagnostics.environment.executable>
   Vault Endpoint: <url or "not set">
   Vault Token   : <masked or "not set">
   enVector      : <endpoint or "not set">
@@ -59,6 +60,8 @@ MCP Tools:
    - enVector not provisioned: "No enVector Cloud endpoint is configured on Rune-Vault. Contact your Vault administrator."
 
 Use checkmarks for healthy items, X marks for issues.
+
+MCP server: Render `environment.executable` from the `diagnostics` MCP tool response as-is (it is a Python interpreter path like `<plugin_root>/.venv/bin/python3`). This shows which Rune checkout is actually serving requests — useful when multiple checkouts coexist on the machine (Claude Code marketplace cache, Codex skill install, local dev checkout, etc.).
 
 User input: {{input}}
 """

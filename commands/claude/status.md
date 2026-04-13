@@ -26,6 +26,7 @@ Dormant Since:  <timestamp>  (only when dormant with a timestamp)
 
 Configuration:
   [check] Config file: ~/.rune/config.json
+  [check] MCP server: <diagnostics.environment.executable>
   [check] Vault Endpoint: <url or "not set">
   [check] enVector: <endpoint or "not set">
 
@@ -43,6 +44,12 @@ Recommendations:
 ```
 
 Use checkmarks for healthy items, X marks for issues.
+
+**MCP server**: Render `environment.executable` from the `diagnostics` MCP
+tool response as-is (it is a Python interpreter path like
+`<plugin_root>/.venv/bin/python3`). This shows which Rune checkout is actually
+serving requests — useful when multiple checkouts coexist on the machine
+(Claude Code marketplace cache, Codex skill install, local dev checkout, etc.).
 
 **Dormant Reason Display**: When `dormant_reason` is present in config or diagnostics, translate reason code into a user-friendly message:
 - `vault_unreachable`: "Vault server could not be reached. Check if it's running and the endpoint is correct."
