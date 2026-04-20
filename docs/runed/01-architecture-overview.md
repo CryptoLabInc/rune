@@ -1,5 +1,10 @@
 # 아키텍처 전환 개요: Python MCP → Go runed
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조 완료. 본 문서의
+> 다이어그램과 수치는 현재 `mcp/server/server.py` 및 관련 모듈과 일치.
+> Python 측 주의점: dormant 상태에서도 8개 tool 모두 등록되고 tool 본문이
+> runtime state 체크로 거절 (docs에서 "최소 3 tool 등록"으로 오해되지 않도록).
+
 이 문서는 현재 Python MCP 서버 아키텍처에서 Go `runed` 데몬 아키텍처로의
 전환을 다룬다. 구현자가 전체 그림을 잡기 위한 레퍼런스.
 

@@ -1,5 +1,11 @@
 # Capture 데이터 플로우
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조 완료. 주요 교정:
+> §1 Step 1 임베딩 차원 **1024 확정** (embedding.py:14-18 benchmark 주석),
+> §7 Novelty 임계값 **이중 상수 이슈** 명시 (embedding.py 0.4/0.7/0.93 vs
+> server.py 0.3/0.7/0.95, 런타임은 server.py 기본값 승),
+> §6 AES-256-CTR pyenvector 소스 실측 확정.
+
 이 문서는 capture 요청이 들어와서 enVector에 저장되고 응답이 돌아가기까지의
 전체 데이터 흐름을, 각 단계의 입출력 타입과 에러 경로 포함해서 기술한다.
 
@@ -43,9 +49,11 @@ POST /capture  (runed HTTP API, unix socket)
 │ vec, err := embed.Embed(ctx, req.TextToEmbed)                   │
 │                                                                 │
 │ 입력: "PostgreSQL was chosen over MongoDB for ACID..."          │
-│ 출력: []float32{0.12, -0.34, 0.56, ...}  (L2 정규화, N차원)   │
+│ 출력: []float32{0.12, -0.34, 0.56, ...}  (L2 정규화, 1024차원) │
 │                                                                 │
-│ ※ N = 모델 출력 차원 (Qwen3-0.6B: 실측 필요, 추정 1024)       │
+│ ※ 1024 dim 확정 (Qwen/Qwen3-Embedding-0.6B).                  │
+│   embedding.py:14-18 주석: "Calibrated for Qwen3-Embedding-0.6B │
+│   (1024dim) via benchmark 2026-04-08"                          │
 │ ※ 소요: ~10-50ms (모델이 메모리에 상주하므로 cold start 없음)   │
 │                                                                 │
 │ 에러 시: PIPELINE_NOT_READY (모델 아직 로딩중) 또는             │
@@ -326,12 +334,31 @@ Step 1.5 (선택적): Novelty Check
   │
   ├── 1. enVectorSDK.Score(indexName, vec) → FHE ciphertext
   ├── 2. vault.DecryptScores(blob, topK=1) → [{score}]
-  ├── 3. if score ≥ 0.93 → near_duplicate → 저장 거부
-  │      if score 0.7-0.93 → related → 저장하되 태그
-  │      if score 0.4-0.7 → evolution → 정상 저장
-  │      if score < 0.4 → novel → 정상 저장
+  ├── 3. if score ≥ T_DUP → near_duplicate → 저장 거부
+  │      if score ≥ T_REL → related → 저장하되 태그
+  │      if score ≥ T_NOV → evolution → 정상 저장
+  │      if score < T_NOV → novel → 정상 저장
   └── 4. 거부 시 응답: {"ok":true,"captured":false,"reason":"near_duplicate"}
 ```
+
+**⚠ 임계값 이중성 (2026-04-17 실측)**:
+
+현재 Python 코드에 두 세트의 임계값이 공존:
+
+| 소스 | 상수 | 값 (novel/related/near_dup) | 런타임 사용? |
+|---|---|---|---|
+| `embedding.py:16-18` | `NOVELTY_THRESHOLD_*` module 상수 | **0.4 / 0.7 / 0.93** | `classify_novelty()`의 default 인자로만 사용 |
+| `server.py:100-108` | `_classify_novelty(...)` 함수의 default 인자 | **0.3 / 0.7 / 0.95** | **실제 런타임**. `_capture_single` L1352가 이 함수를 default로 호출 |
+
+embedding.py 상수는 `"Calibrated for Qwen3-Embedding-0.6B (1024dim) via benchmark
+2026-04-08"` 주석이 붙은 튜닝 값이지만, server.py가 호출 시 인자를 override하지
+않으면서 자신의 default(0.3/0.7/0.95)가 승한다. 사실상 embedding.py 상수는 **호출되지
+않는 dead default**이며, 운영상 활성 값은 0.3/0.7/0.95.
+
+**Go 포팅 시 선택**:
+- (a) embedding.py의 0.4/0.7/0.93 채택 (benchmark 튜닝 값) — 이론적으로 더 정확
+- (b) server.py의 0.3/0.7/0.95 채택 — 현재 실제 동작하는 값과 bit-identical
+- 결정 #7 (novelty check 유지 vs 드롭)과 연동. Phase 2 착수 전 확정 필요.
 
 이 경우 capture 경로에 Vault + enVector 왕복이 하나 추가되어 ~100-300ms 지연.
 MVP에서 넣을지 빼는지는 팀 결정 필요.

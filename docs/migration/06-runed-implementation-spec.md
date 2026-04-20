@@ -1,5 +1,10 @@
 # runed 구현 명세 (Implementation Specification)
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조. 주요 교정:
+> §2.3 AES 모드 **AES-256-CTR 확정** (pyenvector/utils/aes.py:52-58). §11.3
+> record_id suffix 생성 시점 명확화 (`generate_record_id`가 아닌 `record_builder`
+> 의 멀티 레코드 빌더가 붙임).
+
 이 문서는 Go `runed` 데몬의 각 서브시스템을 **바로 구현할 수 있는 수준**으로
 기술한다. 05-architecture-comparison.md의 §5를 풀어쓴 것이며, 현재 Python
 소스 코드(vault_client.py, envector_sdk.py, server.py, 등)에서 추출한 프로토콜
@@ -279,8 +284,13 @@ envelope = json.dumps({"a": self._agent_id, "c": ct})
 - `"a"`: agent_id (어떤 에이전트가 암호화했는지 식별)
 - `"c"`: base64 인코딩된 AES-256 ciphertext
 
-**Go 구현**: `crypto/aes` + `crypto/cipher` (GCM 또는 CBC — `pyenvector.utils.aes`의
-구현을 확인하여 모드 일치시켜야 함. Open question.)
+**Go 구현 (2026-04-17 확정)**: `crypto/aes` + `crypto/cipher.NewCTR` 사용.
+pyenvector 소스(`pyenvector/utils/aes.py:52-58`) 확인 결과 **AES-256-CTR**로 확정.
+docstring의 "AES-GCM" 언급은 오래된 주석이며 실제 구현은 CTR.
+
+- IV: 16바이트 random, 와이어 포맷은 `IV || CT → base64`
+- Padding 불필요 (CTR 스트림 모드)
+- 키 크기: 32바이트 (AES-256, config.py L244-252에서 DEK 길이 검증)
 
 **위치**: RFC 기준으로 `scribe/capture.go`에 직접 구현 (envector-go가 아님).
 이유: AES metadata 암호화는 애플리케이션 레벨 기능이고 enVector 프로토콜
@@ -889,6 +899,9 @@ title의 앞 3 단어를 소문자로 변환 후 `_`로 연결. 각 단어는 `i
 | `bundle` | `_b{seq}` | `dec_2026-04-16_engineering_아키텍처_리뷰_결과_b0`, `..._b1` |
 
 suffix는 `generate_record_id()` 결과에 **후위 연결**된다 (record_builder.py:338-339).
+즉 `generate_record_id()` 자체는 base만 생성하고, 멀티 레코드(phase_chain/bundle)인
+경우에만 `record_builder._build_multi_record_from_extraction`가 suffix를 붙임
+(`suffix = f"_b{seq}" if group_type == "bundle" else f"_p{seq}"`). 2026-04-17 실측 확정.
 
 ---
 

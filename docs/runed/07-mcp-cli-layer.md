@@ -1,5 +1,10 @@
 # MCP / CLI 레이어 설계
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조 완료. 주요 교정:
+> §2.1 서브커맨드 표에 `activate`/`deactivate`/`reset`의 정확한 단계 기술 추가,
+> dormant 상태에서도 8개 tool 모두 무조건 등록되는 모델 명시. §3.3 toolRoutes
+> 매핑의 Python 도구명과 일치 (`reload_pipelines`, `capture_history`, `delete_capture`).
+
 이 문서는 runed 데몬 위에 얹는 얇은 클라이언트 레이어 — MCP shim과 CLI —
 의 설계를 기술한다. runed의 HTTP API가 실제 계약이고, 이 레이어는 그 위의
 편의 어댑터다.
@@ -53,9 +58,14 @@
 | `rune reload` | POST | /reload |
 | `rune daemon start\|stop\|restart\|health\|logs` | — | 데몬 프로세스 관리 |
 | `rune configure` | — | config.json 파일 I/O (데몬 불필요) |
-| `rune activate` | POST | /reload (후 상태 확인) |
-| `rune deactivate` | — | config.json state 변경 + /reload |
-| `rune reset` | — | config.json 삭제 + 데몬 정지 |
+| `rune activate` | — + POST | **1단계**: config.json 읽기 + 필수 필드 검증 + state를 "active"로 업데이트. **2단계**: POST /reload로 데몬이 Vault fetch + 모델 로드 트리거. **3단계**: GET /diagnostics로 활성화 성공 확인 (Python `commands/claude/activate.md` 패턴) |
+| `rune deactivate` | — + POST | config.json state를 "dormant"로 + `dormant_reason="user_deactivated"` 설정 + POST /reload로 데몬이 dormant 모드로 전이 |
+| `rune reset` | — | config.json 삭제 + 데몬 정지 (launchctl/systemctl). 프로세스 cleanup은 선택적 (unit 유지 여부 결정) |
+
+**중요**: Python 모델 실측 재확인:
+- 8개 HTTP 엔드포인트는 데몬 상태와 무관하게 **모두 등록**됨 (`mcp/server/server.py` L487-1137 `@self.mcp.tool` 데코레이터)
+- dormant 상태에서는 각 endpoint body가 runtime에 state 체크로 거절 (`_ensure_pipelines()` or `DORMANT` 에러)
+- Go 포팅 시 동일 패턴 권장: "모든 엔드포인트 상시 노출, state 게이트는 handler 내부"
 
 ### 2.2 동작 흐름
 
@@ -202,6 +212,16 @@ rune-mcp 프로세스 (세션 동안 상주)
 
 ### 3.2 Tool 등록 (tools/list 응답)
 
+**중요 (Python 모델 실측 2026-04-17)**: 8개 tool은 dormant/active 상태와 무관하게
+**tools/list 응답에 항상 포함**된다. 등록은 생성자 시점에 무조건, 거절은 tool body
+내부 runtime state 체크로 처리. rune-mcp shim도 이 모델을 그대로 계승하여, 상태에
+따라 schema를 조건부로 바꾸지 않는다. 이렇게 하면:
+
+- 에이전트가 tool discovery를 한 번만 하고 재호출 필요 없음
+- state 전이(dormant → active)가 tool list 재협상 없이 즉시 반영
+- capture/recall 시도 시점에 최신 state 체크로 자연스럽게 거절
+
+
 ```json
 {
   "tools": [
@@ -234,7 +254,7 @@ rune-mcp 프로세스 (세션 동안 상주)
       }
     },
     {"name": "vault_status", "description": "Vault 연결 상태", "inputSchema": {"type": "object"}},
-    {"name": "diagnostics", "description": "전체 시스템 진단", "inputSchema": {"type": "object"}},
+    {"name": "diagnostics", "description": "전체 시스템 진단 (vault 연결, 키 로딩, 파이프라인 상태, enVector 도달성)", "inputSchema": {"type": "object"}},
     {"name": "reload", "description": "config 재로딩", "inputSchema": {"type": "object"}},
     {"name": "history", "description": "캡처 히스토리 조회",
       "inputSchema": {"type":"object","properties":{"limit":{"type":"integer"},"domain":{"type":"string"},"since":{"type":"string"}}}},
@@ -256,11 +276,11 @@ var toolRoutes = map[string]struct {
     "capture":       {"POST", "/capture"},
     "batch_capture": {"POST", "/batch-capture"},
     "recall":        {"POST", "/recall"},
-    "vault_status":  {"GET",  "/health"},
+    "vault_status":  {"GET",  "/vault-status"},  // 또는 /diagnostics 서브셋 재사용
     "diagnostics":   {"GET",  "/diagnostics"},
-    "reload":        {"POST", "/reload"},
-    "history":       {"GET",  "/history"},
-    "delete":        {"DELETE", "/captures/{record_id}"},
+    "reload_pipelines": {"POST", "/reload"},     // Python 도구명은 reload_pipelines
+    "capture_history": {"GET",  "/history"},     // Python 도구명은 capture_history
+    "delete_capture":  {"DELETE", "/captures/{record_id}"},  // Python 도구명은 delete_capture
 }
 ```
 

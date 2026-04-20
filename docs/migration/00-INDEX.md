@@ -16,11 +16,16 @@ MVP에서 무엇을 유지/드롭/연기할지 결정하고, 목표 Go 아키텍
 4. **[04-go-migration-plan.md](04-go-migration-plan.md)** — 제안된 Go 타겟
    아키텍처 (임베딩 서버 + CLI), 와이어 프로토콜, 패키지 레이아웃, 단계별
    마이그레이션 계획, 미결 이슈, 리스크.
-5. **[07-implementation-details.md](07-implementation-details.md)** — Go 포팅에 필요한
+5. **[05-architecture-comparison.md](05-architecture-comparison.md)** — MCP+CLI+runed
+   (안 A) vs CLI+runed (안 B) 아키텍처 비교. runed 내부 구조는 양안 공통.
+6. **[06-runed-implementation-spec.md](06-runed-implementation-spec.md)** — Go 데몬
+   서브시스템별 구현 명세: Vault/enVector gRPC, AES-256-CTR, 임베딩, Capture/Recall,
+   config, lifecycle, 에러 응답, 환경변수, 보안.
+7. **[07-implementation-details.md](07-implementation-details.md)** — Go 포팅에 필요한
    상세 데이터 테이블: intent regex 패턴, stop words, entity 추출 알고리즘,
    ExtractionResult 스키마, Domain/Certainty/Status 판정 로직, enVector SDK
-   안전 패치, AES 암호화 미결 사항 등.
-6. **[08-agent-contract.md](08-agent-contract.md)** — 에이전트-서버 간 인터페이스
+   안전 패치, AES 암호화 모드 확정(CTR).
+8. **[08-agent-contract.md](08-agent-contract.md)** — 에이전트-서버 간 인터페이스
    계약: agent JSON 입력 스키마 (Format A/B/C), capture/recall 응답 포맷,
    scribe 트리거 패턴, retriever 합성 규칙, 에이전트별 차이, phase chain 현황.
    원래 서베이에서 서버 구현 중심으로 분석하면서 에이전트 측 계약이 누락되어
@@ -50,13 +55,22 @@ MVP에서 무엇을 유지/드롭/연기할지 결정하고, 목표 Go 아키텍
   `delete_capture` — 다만 더 얇은 시맨틱으로.
 - 에이전트-서버 인터페이스 계약은 [08-agent-contract.md](08-agent-contract.md)에
   정리되어 있다. agent JSON 입력 스키마(Format A/B/C), capture/recall 응답 포맷,
-  scribe 캡처 트리거 18종, retriever certainty별 합성 규칙이 포함된다.
+  scribe 캡처 트리거 21종(15 주요 + 6 코딩 하위), retriever certainty별 합성 규칙이 포함된다.
 
 ## 이 문서 세트의 상태
 
 이 문서들은 마이그레이션 시작 시점의 AS-IS 분석이다. Python 코드베이스의
 이후 변경과 **동기화되지 않는다** — Go 구현이 시작되면 canonical 레퍼런스는
 Go 코드 자체다.
+
+**2026-04-17 전체 재검증 통과**: 전체 Python 코드베이스(`agents/`, `mcp/`, `commands/`,
+`scripts/`, `config/`)를 직접 대조하여 `file:line` 참조와 사실 주장을 교정했다.
+주요 수정: Intent regex 31개(33 아님), 테스트 15개(17 아님), bootstrap self-heal
+4단계(3 아님, fastembed 단계는 stale 방어 코드), `_init_pipelines` dormant 조기 리턴
+(L1544-1547), `_maybe_reload_for_auto_provider`는 DROP 표기에도 코드상 live, legacy
+HTTP endpoint 파싱도 live, AES-256-CTR 확정(pyenvector/utils/aes.py:52-58).
+자세한 교정 내역: **[python-go-comparison.html](python-go-comparison.html)**의
+"문서 검증 상태" callout + Part 4 §4.5 결정 #34/#35.
 
 ## 서베이 과정에서 해소된 충돌
 

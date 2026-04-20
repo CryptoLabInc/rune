@@ -1,5 +1,11 @@
 # 02. 설치와 라이프사이클
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조 완료. 주요 교정:
+> §3 startup에 `_init_pipelines` dormant 조기 리턴 명시, §9 파일 구조에
+> `keys/<key_id>/EncKey.json` 하위 디렉토리 구조 반영 (`server.py:258` 실측),
+> §9 config.json에 T1/T2 lifecycle 설명 추가 (configure 직후 3섹션 vs activate
+> 이후 7섹션).
+
 runed 데몬의 배포, 설치, 시작, 종료, 복구, 업그레이드 전체 과정.
 구현할 때 이 문서의 순서와 경로를 그대로 따른다.
 
@@ -307,9 +313,15 @@ config가 없거나 `state != "active"`이면 데몬은 dormant 모드로 기동
 
 - 4-6단계를 건너뛴다 (Vault 연결, SDK 초기화, 모델 로드 안 함)
 - 7-10단계는 정상 실행 (소켓 생성, HTTP 서버 기동)
-- `/health`와 `/diagnostics`만 응답한다
+- **8개 HTTP 엔드포인트 전부를 등록**하되, capture/recall/history/delete/reload는 runtime state 체크로 거절
+  (Python 모델과 동일: `@self.mcp.tool` 데코레이터가 항상 모두 등록되고 tool 본문이 dormant 에러 반환)
+- `/health`와 `/diagnostics`는 dormant 상태에서도 정상 응답
 - capture/recall 요청에는 503을 응답하며 `"runed is dormant"` 메시지를 포함한다
 - fsnotify로 config 변경을 감시하다가 `state`가 `"active"`로 바뀌면 4단계부터 실행하여 active 모드로 전이한다
+
+**Python 참고**: `mcp/server/server.py:1544-1547` `_init_pipelines()`는
+`state != "active"`면 즉시 return하고 `self._scribe/_retriever = None`으로 설정.
+Vault fetch도, 모델 로드도 안 함. Go runed도 동일 패턴 권장.
 
 **타이밍 참고:**
 
@@ -661,17 +673,27 @@ GET /health → JSON 그대로 출력
 │   └── runed                   # 데몬 바이너리 (~30-50 MB)
 │
 ├── config.json                 # 메인 설정 파일
-│                               #   state, vault 정보, envector 정보,
-│                               #   embedding 설정, retriever 설정 포함
+│                               #   Python lifecycle 참고 (Go 포팅 시 결정 필요):
+│                               #   - T1 (/rune:configure 직후): 3섹션만
+│                               #     {vault, state="dormant", metadata}
+│                               #   - T2 (/rune:activate → Vault fetch 후):
+│                               #     save_config()이 dataclass 전체 직렬화 →
+│                               #     7섹션(+envector/embedding/llm/scribe/retriever)
+│                               #     metadata 섹션 증발
+│                               #   Go 결정 #5 (envector persist 여부)에 따라
+│                               #   T2 확장 유지 vs T1 상태 고정 선택 필요
 │
 ├── sock                        # Unix domain socket
 │                               #   데몬이 생성, 퍼미션 0600
 │                               #   데몬 종료 시 삭제
 │
 ├── keys/
-│   ├── EncKey.json              # FHE 공개키 (Vault에서 다운로드, 캐시)
-│   └── EvalKey.json             # FHE 평가키 (Vault에서 다운로드, 캐시)
-│                                #   크기: 수십 MB
+│   └── <key_id>/                # ⚠ 2026-04-17 실측: key_id별 하위 디렉토리
+│       ├── EncKey.json          # FHE 공개키 (Vault에서 다운로드, 캐시)
+│       └── EvalKey.json         # FHE 평가키 (Vault 다운로드 캐시, 수십 MB)
+│                                # server.py:258 `key_dir = os.path.join(key_base_path, vault_key_id)`
+│                                # key_id는 Vault bundle의 `key_id` 필드
+│                                # → Go 포팅 시 동일 구조 유지 (파일 경로 호환)
 │
 ├── models/
 │   └── Qwen3-Embedding-0.6B/   # 임베딩 모델 파일

@@ -1,5 +1,9 @@
 # enVector Go SDK 계약서
 
+> **검증 상태 (2026-04-17)**: RFC #85 업데이트 반영. §12.5 envector-go SDK
+> 개발 상태 (별도 repo에서 팀원이 개발 중, rune은 소비자) 명시. §11 Python→Go
+> 전환 차이 항목들은 실제 `envector_sdk.py` 및 `config.py` 소스 대조로 검증.
+
 이 문서는 팀원이 개발할 Go enVector SDK와 우리가 개발할 runed 데몬 사이의
 **인터페이스 계약**을 정의한다. 양쪽이 이 계약을 기준으로 독립 개발하고,
 통합 시 맞물리도록 하는 것이 목적.
@@ -719,16 +723,28 @@ Score 반환값이 `[]string` (base64)인데, 이 base64 인코딩을 누가 하
 
 ### 12.5 envector C++ 코어 접근
 
-SDK 개발의 **사전 조건**:
-- envector C++ 코어의 헤더 파일과 빌드된 라이브러리가 필요
-- 오픈소스인지, 벤더(CryptoLab)와 협의가 필요한지 확인
-- **이것이 확인되지 않으면 SDK 개발 자체를 시작할 수 없다**
+**2026-04-17 업데이트**: RFC #85에 따르면 별도 `envector-go` SDK가 팀원(jh-lee)에
+의해 개발 중이며, rune은 이 SDK를 **외부 의존성으로 소비만** 하기로 결정됨.
+CGO 바인딩, FHE 프리미티브, CipherBlock proto, 버전 핀 등 SDK 내부 상세는
+해당 repo(CryptoLabInc/envector-go 가칭)의 별도 RFC에서 관리.
 
-확인 필요:
-1. C++ 코어 소스/헤더 접근 가능 여부
-2. 라이선스 조건 (SDK에 정적 링크 가능한지)
-3. 타겟 OS/arch별 pre-built 라이브러리 제공 여부
-4. ABI 안정성 보장 (버전 간 호환)
+rune 관점에서는:
+- go.mod에 `github.com/CryptoLabInc/envector-go`를 import
+- SDK 내부 구현(CGO 매트릭스, C++ 코어 링크)은 rune의 범위 밖
+- rune의 검증 범위는 "SDK API를 올바르게 호출하는가 + SDK로 저장한 레코드가
+  retrieve에서 정상 복원되는가" 수준의 end-to-end 검증에 한정
+
+**rune 쪽에서 확인할 것** (migration 블로킹 #3):
+1. SDK가 `Score`/`GetMetadata`/`Insert`/`GetIndexList`/`Init`/`Close`/`Reinit`을 제공하는가
+2. 이 문서 §2 인터페이스와 일치하는가 (또는 어디가 다른가)
+3. `go.mod`에 import 가능한 상태인가 (public repo or replace directive)
+4. 최소 smoke test 가능한가 (initialize + 간단한 scoring 호출)
+
+**SDK repo 쪽 책임 (rune 범위 밖)**:
+- C++ 코어 소스/헤더 접근
+- 라이선스 및 정적 링크 가능성
+- 타겟 OS/arch별 pre-built 라이브러리
+- ABI 안정성 및 버전 정책
 
 ### 12.6 Score 반환에서 멀티 blob 처리
 

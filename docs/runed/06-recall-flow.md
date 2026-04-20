@@ -1,5 +1,12 @@
 # Recall 데이터 플로우: 쿼리 → 검색 → 복호화 → 재랭킹
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조 완료.
+> §2.2.2 Intent patterns **31개 확정** (문서의 "regex 8종"은 intent 종류 수,
+> 총 패턴은 6+5+5+4+4+4+3=31). §3.1 FHE 1024-dim 확정. §4.3 재랭킹 공식
+> `(0.7×rawScore + 0.3×decay) × statusMul` (`searcher.py:297` 실측 일치).
+> §4.4 status 승수 `accepted 1.0 / proposed 0.9 / superseded 0.5 / reverted 0.3`
+> 일치.
+
 이 문서는 `runed`의 Recall(검색/조회) 파이프라인 전체를 다룬다.
 HTTP 요청 수신부터 응답 반환까지, 각 단계의 입력/출력 타입과 데이터 변환을
 구현 수준에서 기술한다.

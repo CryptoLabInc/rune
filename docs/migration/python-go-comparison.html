@@ -1,0 +1,3942 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rune v0.4.0 — Python → Go 마이그레이션 상세 비교</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --py-primary: #4B8BBE;
+    --py-secondary: #FFD43B;
+    --py-bg: #eef5fb;
+    --go-primary: #00ADD8;
+    --go-secondary: #5DC9E2;
+    --go-bg: #e5f8fb;
+    --accent: #6c5ce7;
+    --text: #1a202c;
+    --text-muted: #4a5568;
+    --text-light: #718096;
+    --border: #e2e8f0;
+    --bg: #ffffff;
+    --bg-alt: #f7fafc;
+    --bg-code: #f6f8fa;
+    --success: #38a169;
+    --warning: #d69e2e;
+    --danger: #e53e3e;
+    --info: #3182ce;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 12px rgba(0,0,0,.04);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    color: var(--text);
+    background: var(--bg-alt);
+    line-height: 1.65;
+    font-size: 15px;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 0;
+    max-width: 2000px;
+    margin: 0 auto;
+  }
+  nav.toc {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 28px 20px;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+    font-size: 13.5px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--text-light);
+    margin: 0 0 12px;
+    font-weight: 700;
+  }
+  nav.toc ul { list-style: none; padding: 0; margin: 0 0 20px; }
+  nav.toc li { margin: 2px 0; }
+  nav.toc a {
+    color: var(--text-muted);
+    text-decoration: none;
+    display: block;
+    padding: 5px 10px;
+    border-radius: 6px;
+    transition: all .15s;
+  }
+  nav.toc a:hover { background: var(--bg-alt); color: var(--text); }
+  nav.toc a.sub { padding-left: 22px; font-size: 12.5px; color: var(--text-light); }
+  main {
+    padding: 40px 72px 80px;
+    max-width: 1500px;
+    background: var(--bg);
+    min-height: 100vh;
+  }
+  header.hero {
+    padding: 48px 0 32px;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 48px;
+  }
+  .hero-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    margin-bottom: 12px;
+  }
+  h1 { font-size: 32px; margin: 0 0 8px; letter-spacing: -.02em; font-weight: 800; }
+  h2 {
+    font-size: 24px;
+    margin: 56px 0 16px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    letter-spacing: -.01em;
+    font-weight: 700;
+  }
+  h2:first-of-type, header + h2 { border-top: none; padding-top: 0; }
+  h3 { font-size: 18px; margin: 32px 0 12px; font-weight: 700; }
+  h4 { font-size: 15px; margin: 20px 0 8px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+  p { margin: 0 0 14px; color: var(--text-muted); }
+  .lead { font-size: 17px; color: var(--text); line-height: 1.6; margin-bottom: 8px; }
+  .meta { color: var(--text-light); font-size: 13px; margin-top: 0; }
+
+  /* Callouts */
+  .callout {
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    background: var(--bg-alt);
+  }
+  .callout.info    { border-color: var(--info);    background: #ebf8ff; }
+  .callout.warn    { border-color: var(--warning); background: #fffbeb; }
+  .callout.danger  { border-color: var(--danger);  background: #fff5f5; }
+  .callout.success { border-color: var(--success); background: #f0fff4; }
+  .callout strong { color: var(--text); }
+
+  /* Tables */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 14px 0;
+    font-size: 14px;
+    background: var(--bg);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--bg-alt); font-weight: 700; color: var(--text); font-size: 13px; text-transform: uppercase; letter-spacing: .03em; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover { background: var(--bg-alt); }
+  td code { background: var(--bg-code); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+
+  /* Side-by-side comparison */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin: 20px 0;
+  }
+  .compare-card {
+    padding: 20px 22px;
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    background: var(--bg);
+    border-top: 4px solid;
+  }
+  .compare-card.py { border-color: var(--py-primary); }
+  .compare-card.go { border-color: var(--go-primary); }
+  .compare-card h4 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 0;
+    font-size: 14px;
+  }
+  .compare-card h4::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+  }
+  .compare-card.py h4::before { background: var(--py-primary); }
+  .compare-card.go h4::before { background: var(--go-primary); }
+  .compare-card ul { padding-left: 20px; color: var(--text-muted); }
+  .compare-card li { margin: 4px 0; }
+
+  /* Metric cards */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin: 20px 0;
+  }
+  .metric {
+    padding: 18px;
+    background: var(--bg);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    border-top: 3px solid var(--accent);
+  }
+  .metric .label { font-size: 12px; color: var(--text-light); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+  .metric .value { font-size: 22px; font-weight: 800; color: var(--text); }
+  .metric .delta { font-size: 12px; color: var(--success); margin-top: 4px; }
+  .metric .delta.bad { color: var(--danger); }
+
+  /* Code blocks */
+  pre {
+    background: var(--bg-code);
+    padding: 16px 18px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+    border: 1px solid var(--border);
+  }
+  code { font-family: "SF Mono", "Cascadia Code", Consolas, monospace; }
+  p code, li code { background: var(--bg-code); padding: 1px 6px; border-radius: 4px; font-size: 13.5px; }
+
+  /* Mermaid container */
+  .diagram {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin: 18px 0;
+    overflow-x: auto;
+    text-align: center;
+  }
+  .diagram-title {
+    font-size: 12px;
+    color: var(--text-light);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: 10px;
+  }
+  /* Center mermaid SVG inside compare-card */
+  .compare-card .mermaid {
+    text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    margin-top: 12px;
+    overflow-x: auto;
+  }
+  .compare-card .mermaid svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* Decision cards */
+  .decisions {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .decision {
+    background: var(--bg);
+    border-radius: 10px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+    border-left: 4px solid;
+    display: flex;
+    flex-direction: column;
+  }
+  .decision.blocking { border-color: var(--danger); }
+  .decision.high     { border-color: var(--warning); }
+  .decision.medium   { border-color: var(--info); }
+  .decision.low      { border-color: var(--text-light); }
+  .decision-head {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+  }
+  .tag.blocking { background: #fed7d7; color: #742a2a; }
+  .tag.high     { background: #fef3c7; color: #744210; }
+  .tag.medium   { background: #bee3f8; color: #2a4365; }
+  .tag.low      { background: #e2e8f0; color: #2d3748; }
+  .tag.phase    { background: #e9d8fd; color: #553c9a; }
+  .tag.cat      { background: #c6f6d5; color: #22543d; }
+  .tag.id       { background: #1a202c; color: #fff; }
+  .decision h4 { margin: 2px 0 6px; font-size: 15px; color: var(--text); text-transform: none; letter-spacing: normal; }
+  .decision p  { font-size: 13.5px; line-height: 1.55; margin: 4px 0; }
+  .decision .opts { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 13px; }
+  .decision .opts strong { color: var(--text); }
+  .decision .status { margin-top: 10px; font-size: 12.5px; color: var(--text-light); font-style: italic; }
+
+  /* Timeline */
+  .timeline {
+    position: relative;
+    margin: 30px 0;
+    padding-left: 30px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    background: var(--border);
+  }
+  .tl-item {
+    position: relative;
+    margin-bottom: 18px;
+    padding-left: 14px;
+  }
+  .tl-item::before {
+    content: '';
+    position: absolute;
+    left: -26px;
+    top: 4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 3px solid var(--accent);
+  }
+  .tl-item .tl-time { font-weight: 700; color: var(--accent); font-size: 13px; }
+  .tl-item h5 { margin: 2px 0 4px; font-size: 14.5px; }
+  .tl-item p { font-size: 13.5px; margin: 0; }
+
+  /* Decision log (expandable inside decision cards) */
+  details.decision-log {
+    margin-top: 14px;
+    border-top: 1px dashed var(--border);
+    padding-top: 10px;
+  }
+  details.decision-log > summary {
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    padding: 6px 0;
+    list-style: none;
+    user-select: none;
+  }
+  details.decision-log > summary::-webkit-details-marker { display: none; }
+  details.decision-log > summary::before {
+    content: "▶";
+    font-size: 9px;
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform .15s ease;
+    color: var(--text-light);
+  }
+  details.decision-log[open] > summary::before { transform: rotate(90deg); }
+  details.decision-log > summary:hover { color: var(--accent); }
+  .log-body {
+    padding: 12px 16px;
+    background: var(--bg-alt);
+    border-radius: 8px;
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.7;
+    border-left: 3px solid var(--accent);
+  }
+  .log-body h5 {
+    margin: 14px 0 4px;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--text-light);
+    font-weight: 700;
+  }
+  .log-body h5:first-child { margin-top: 0; }
+  .log-body ul { margin: 2px 0 8px; padding-left: 20px; }
+  .log-body li { margin: 3px 0; }
+  .log-body p { margin: 0 0 8px; }
+  .log-body code { font-size: 12px; background: #edf2f7; padding: 1px 5px; border-radius: 3px; }
+  .log-body .log-meta { color: var(--text-light); font-size: 11.5px; font-style: italic; margin-top: 14px; }
+
+  /* Resource comparison bar */
+  .bars { margin: 20px 0; }
+  .bar-row { display: grid; grid-template-columns: 140px 1fr 90px; gap: 12px; align-items: center; margin: 8px 0; font-size: 13.5px; }
+  .bar-label { color: var(--text-muted); }
+  .bar-track { height: 22px; background: var(--bg-alt); border-radius: 4px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; display: flex; align-items: center; padding-left: 10px; color: #fff; font-size: 12px; font-weight: 700; border-radius: 4px; transition: width .3s; }
+  .bar-fill.py { background: linear-gradient(90deg, var(--py-primary) 0%, #3a6f9d 100%); }
+  .bar-fill.go { background: linear-gradient(90deg, var(--go-primary) 0%, #008299 100%); }
+  .bar-value { font-weight: 700; text-align: right; }
+
+  /* Two-column flex */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin: 20px 0; }
+
+  /* Key/Value */
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 10px 0; font-size: 14px; }
+  dl.kv dt { font-weight: 700; color: var(--text-muted); }
+  dl.kv dd { margin: 0; color: var(--text); }
+
+  /* Footer */
+  footer {
+    margin-top: 80px;
+    padding: 30px 0;
+    border-top: 1px solid var(--border);
+    color: var(--text-light);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  @media (max-width: 1000px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+    main { padding: 24px; }
+    .compare-grid, .two-col { grid-template-columns: 1fr; }
+  }
+  @media print {
+    nav.toc { display: none; }
+    .layout { display: block; }
+    main { padding: 20px; }
+    .decisions { grid-template-columns: 1fr; }
+    .diagram { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <h2>목차</h2>
+  <ul>
+    <li><a href="#summary">요약</a></li>
+    <li><a href="#invariants">변경되는 것 / 안 되는 것</a></li>
+    <li><a href="#architecture">아키텍처 비교</a></li>
+    <li><a href="#install">① 설치 & Configure</a></li>
+    <li><a href="#activate">② Activate & 라이프사이클</a></li>
+    <li><a href="#capture">③ Capture Flow</a></li>
+    <li><a href="#recall">④ Recall Flow</a></li>
+    <li><a href="#multisession">⑤ 멀티세션 & 리소스</a></li>
+    <li><a href="#config">⑥ Config.json Lifecycle</a></li>
+    <li><a href="#system">⑦ 시스템 설계 고려사항</a></li>
+    <li><a href="#structure">⑧ 구조 & 테스트 전략</a></li>
+    <li><a href="#decisions">⑨ 결정 보드</a></li>
+    <li><a href="#benchmark-plan">⑩ Benchmark & Verification Plan</a></li>
+    <li><a href="#priorities">우선순위 요약</a></li>
+  </ul>
+  <h2 style="margin-top: 28px;">범례</h2>
+  <ul>
+    <li><span class="tag blocking">블로킹</span></li>
+    <li><span class="tag high">높음</span></li>
+    <li><span class="tag medium">중간</span></li>
+    <li><span class="tag low">낮음</span></li>
+  </ul>
+</nav>
+
+<main>
+
+<header class="hero">
+  <span class="hero-badge">RFC #85 · v0.4.0 · 2026-04 · <strong>Go 1.25</strong></span>
+  <h1>Rune: Python MCP → Go runed 데몬 마이그레이션</h1>
+  <p class="lead">현재 Python FastMCP 플러그인(mcp/server/server.py 2000 LoC + agents/* 6000 LoC)을 <strong>Go 1.25</strong> 기반 상주 runed 데몬 + 얇은 rune CLI 구조로 단일 cutover 전환합니다.</p>
+  <p class="meta">작성일 2026-04-17 · 팀 리뷰용 · 코드베이스 기준 검증 완료</p>
+</header>
+
+<div class="callout info" style="margin:12px 0 24px;">
+  <strong>Go 1.25 baseline — 채택한 신규 기능</strong>
+  <ul style="margin:6px 0 0;">
+    <li><strong>Go 1.22+</strong>: loop var per-iteration binding (더 이상 <code>i, q := i, q</code> 불필요) · <code>http.ServeMux</code> method+path routing (<code>mux.HandleFunc("POST /capture", h)</code>)</li>
+    <li><strong>Go 1.23+</strong>: timer/ticker GC 즉시 회수 (정기 리셋 패턴 더 안전) · <code>iter.Seq</code>(capture_log 스트리밍)</li>
+    <li><strong>Go 1.24+</strong>: <code>os.Root</code>(<code>~/.rune/</code> 경계 안에서만 파일 열기 — symlink traversal 차단) · <code>crypto/hkdf</code>·<code>crypto/sha3</code> stdlib · generic type aliases · <code>weak.Pointer</code></li>
+    <li><strong>Go 1.25</strong>: <strong><code>testing/synctest</code></strong>(가짜 시계로 fsnotify debounce·circuit breaker·retry backoff 결정적 테스트) · <strong><code>sync.WaitGroup.Go()</code></strong>(Add/Done 보일러플레이트 제거) · <strong><code>runtime/trace.FlightRecorder</code></strong>(크래시/panic 시 직전 N초 trace 덤프) · <strong>container-aware GOMAXPROCS</strong> (cgroup v2 CPU quota 자동 인식 — systemd <code>CPUQuota</code>와 자연 정렬) · optional <strong><code>GOEXPERIMENT=greenteagc</code></strong> (tail latency 개선 실험)</li>
+  </ul>
+  <p style="margin:8px 0 0;"><code>go.mod</code>: <code>go 1.25</code> + <code>toolchain go1.25.0</code> 고정. CI matrix는 1.25.x만 — 1.24 호환은 목표 아님.</p>
+</div>
+
+<!-- ============================================================ -->
+<!-- SUMMARY -->
+<!-- ============================================================ -->
+<section id="summary">
+  <h2>요약 (Executive Summary)</h2>
+
+  <p class="lead">왜 바꾸는가: 세션당 Python 프로세스 × 모델 × gRPC 채널 × 키 중복이 <strong>선형 비례로 증가하는 구조</strong>. 상주 데몬으로 바꾸면 세션 수에 무관하게 <strong>상수 자원으로 수렴</strong>하는 정성적 이득이 기대된다.</p>
+
+  <h3>구조적 변화 요약 (정성적)</h3>
+  <div class="metrics">
+    <div class="metric">
+      <div class="label">프로세스 모델</div>
+      <div class="value">세션당 N → 상주 1</div>
+      <div class="delta">선형 비례 → 상수</div>
+    </div>
+    <div class="metric">
+      <div class="label">메모리 복제</div>
+      <div class="value">세션마다 중복 → 공유</div>
+      <div class="delta">모델·키·채널 1벌</div>
+    </div>
+    <div class="metric">
+      <div class="label">Vault gRPC</div>
+      <div class="value">세션마다 → 1 채널</div>
+      <div class="delta">HTTP/2 multiplex</div>
+    </div>
+    <div class="metric">
+      <div class="label">Vault handshake</div>
+      <div class="value">세션마다 → 1회</div>
+      <div class="delta">감사 로그 위생</div>
+    </div>
+    <div class="metric">
+      <div class="label">설치 의존성</div>
+      <div class="value">venv + pip → 정적 바이너리</div>
+      <div class="delta">런타임 deps 제거</div>
+    </div>
+    <div class="metric">
+      <div class="label">Cold start</div>
+      <div class="value">세션마다 → 데몬 수명당</div>
+      <div class="delta">첫 호출만</div>
+    </div>
+  </div>
+
+  <div class="callout warn" style="margin-top:16px;">
+    <strong>⚠ 수치 없음에 대한 공지</strong>: 이 문서는 <strong>정량적 성능 목표·예상치·비교수치를 의도적으로 비워둔다</strong>. 이유: (a) Python baseline을 측정한 적 없고, (b) Go 구현체가 존재하지 않아 비교 대상이 없으며, (c) "N× 이득" 같은 주장은 벤치 없이는 근거가 없기 때문. 측정해야 할 항목과 방법은 <a href="#benchmark-plan">⑩ Benchmark Plan</a>에 모아두었다. 구조적 이득(세션 수와 무관한 상수 자원 수렴, Vault 채널 재사용 등)은 <em>정성적</em>으로만 주장.
+  </div>
+
+  <div class="callout info">
+    <strong>읽는 법:</strong> 각 섹션은 <em>Python 현재 상태</em>와 <em>Go 목표 상태</em>를 나란히 보여줍니다. <a href="#system">⑦ 시스템 설계 고려사항</a>은 정책 보존 + 메모리/반응성/안정성 축, <a href="#structure">⑧ 구조 & 테스트 전략</a>은 모듈화·swappability·테스트 계층 설계, 맨 아래 <a href="#decisions">⑨ 결정 보드</a>에 팀이 확정해야 할 <strong>51개 항목</strong>이 카테고리별로 정리되어 있습니다 (A:암호화·보안 · B:runed 내부 · C:envector 계약 · D:정책 · E:배포·인프라 · F:운영·CI · G:구조 · H:신규 보안/안정성 #46-51).
+  </div>
+
+  <div class="callout success">
+    <strong>문서 검증 상태</strong> (2026-04-17 Python 코드베이스 전체(~11,500 LoC) 직접 읽기 완료):
+    <ul>
+      <li>✅ <strong>확정</strong>: MCP tool 8개 / <code>_classify_novelty</code> 0.3·0.7·0.95 / pre-warm 60s / <code>_ensure_pipelines</code> 120s / <code>_SensitiveFilter</code> 마스킹 / <strong>AES-256-CTR</strong> (pyenvector/utils/aes.py:52-58) / Intent regex <strong>31개</strong> / Stop words 81개 / Domain 19개 / Recency 공식 / envector_sdk 몽키패치 5개 / vault_client 3 RPC + health fallback / embeddings 4 backends / legacy HTTP 분기 코드에 존재 (vault_client.py L70,93-94,117-140) / <strong>Qwen3-0.6B 1024dim 확정</strong> (embedding.py:14-18 "benchmark 2026-04-08")</li>
+      <li>🔧 <strong>수정됨</strong>: "dormant 시 최소 3 tool 등록" → 실제로는 8개 tool unconditional 등록 / "~30 패키지" → 22 (root) + 9 (mcp/) / <code>_init_pipelines</code> L1544-1547에서 dormant 조기 리턴 / fastembed 4단계 self-heal stale 방어 코드 / test count 17→15 / Intent regex 33→31 / <code>record_id</code> suffix는 record_builder.py:338-339 (generate_record_id 아님)</li>
+      <li>➕ <strong>신규 발견</strong>: <a href="#decisions">#34 fastembed 제거</a>, <a href="#decisions">#35 activate.toml stale envector 참조</a> / synthesizer.py에 EN/KO/JA 3언어 마크다운 폴백 템플릿 모두 구현 (MVP scope는 EN-only) / pattern_parser.py `CATEGORY_TO_DOMAIN` 130+ 카테고리 → 19 Domain enum 매핑 / embedding.py:16-18 novelty 상수(0.4/0.7/0.93)와 server.py:100-108 default 인자(0.3/0.7/0.95) 이중성 — 런타임은 server.py 기본값이 승 / <strong>CLAUDE.md vs SKILL.md vs GEMINI.md 호출 모델 3-way drift</strong> (subagent vs 직접 MCP) / SKILL.md:47-48이 envector.endpoint/api_key 필수 체크 (configure.md는 안 씀) / scribe 트리거 21종 (15 주요 + 6 코딩 하위, 초안의 "18종"은 오류)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- INVARIANTS -->
+<!-- ============================================================ -->
+<section id="invariants">
+  <h2>변경되는 것 / 안 되는 것</h2>
+
+  <div class="compare-grid">
+    <div class="compare-card py">
+      <h4>변경되지 않음</h4>
+      <ul>
+        <li><strong>Rune-Vault</strong>: 기존 Go gRPC 서비스 그대로. proto 변경 없음</li>
+        <li><strong>enVector Cloud</strong>: hosted FHE 벡터 DB 그대로</li>
+        <li><strong>~/.rune/config.json 경로/위치</strong></li>
+        <li><strong>~/.rune/keys/ 디렉토리 구조</strong> (EncKey.json, EvalKey.json)</li>
+        <li><strong>~/.rune/capture_log.jsonl 포맷</strong></li>
+        <li><strong>플러그인 배포 채널</strong>: Claude Code plugin / Codex skill / Gemini extension</li>
+        <li><strong>에이전트 md 추출 로직</strong>: Format A/B/C (single, phase_chain, bundle) — 전송 독립적</li>
+        <li><strong>DecisionRecord 스키마 v2.1</strong>: Domain 19종, Status 4종 등</li>
+      </ul>
+    </div>
+    <div class="compare-card go">
+      <h4>변경됨</h4>
+      <ul>
+        <li><strong>런타임</strong>: Python venv + pip → Go 정적 바이너리</li>
+        <li><strong>프로세스 모델</strong>: 세션당 MCP 프로세스 → 단일 상주 데몬</li>
+        <li><strong>전송</strong>: stdio MCP → unix socket HTTP (CLI 또는 MCP shim)</li>
+        <li><strong>설치 트리거</strong>: bootstrap-mcp.sh → launchd/systemd unit</li>
+        <li><strong>Config reload</strong>: 세션 재시작 필요 → fsnotify 자동</li>
+        <li><strong>Legacy 3-tier 캡처 경로 삭제</strong>: ~4,500 LoC (detector/tier2/tier3/pattern_cache/review_queue/Slack-Notion)</li>
+        <li><strong>record_builder 로직</strong>: 서버 → 에이전트 md로 이관 (runed는 metadata opaque)</li>
+        <li><strong>Synthesizer 삭제</strong>: 에이전트가 직접 응답 합성</li>
+        <li><strong>fastembed 의존성 제거</strong>: production 미사용 (sbert + Qwen3만). bootstrap self-heal의 fastembed 캐시 체크도 함께 삭제 — <a href="#decisions">결정 #34</a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- ARCHITECTURE -->
+<!-- ============================================================ -->
+<section id="architecture">
+  <h2>아키텍처 비교</h2>
+
+  <h3>현재 (Python v0.3.x) — 세션당 독립 MCP 프로세스</h3>
+  <div class="diagram">
+    <div class="diagram-title">Python 모델: 세션 × 3 = 모델 × 3 + 키 × 3 + gRPC × 3</div>
+    <div class="mermaid">
+flowchart TD
+  subgraph Hosts["에이전트 호스트"]
+    A1["Claude 창 A<br/>scribe.md + retriever.md"]
+    A2["Claude 창 B<br/>scribe.md + retriever.md"]
+    A3["Codex<br/>scribe.md"]
+  end
+
+  subgraph PyProc["Python MCP 서버 프로세스 (세션당 1개)"]
+    direction LR
+    P1["프로세스 A<br/>venv + pip<br/>모델 1벌<br/>EncKey+EvalKey<br/>gRPC ×2"]
+    P2["프로세스 B<br/>venv + pip<br/>모델 1벌 (복제)<br/>EncKey+EvalKey<br/>gRPC ×2"]
+    P3["프로세스 C<br/>venv + pip<br/>모델 1벌 (복제)<br/>EncKey+EvalKey<br/>gRPC ×2"]
+  end
+
+  subgraph External["외부 서비스"]
+    V[Rune-Vault gRPC]
+    E[enVector Cloud]
+  end
+
+  A1 -- "stdio MCP" --> P1
+  A2 -- "stdio MCP" --> P2
+  A3 -- "stdio MCP" --> P3
+  P1 --> V
+  P1 --> E
+  P2 --> V
+  P2 --> E
+  P3 --> V
+  P3 --> E
+
+  classDef py fill:#eef5fb,stroke:#4B8BBE,color:#1a365d
+  classDef ext fill:#fef5e7,stroke:#d69e2e,color:#744210
+  class P1,P2,P3 py
+  class V,E ext
+    </div>
+  </div>
+
+  <h3>목표 (Go v0.4.0) — 상주 데몬 + 얇은 클라이언트</h3>
+  <div class="diagram">
+    <div class="diagram-title">Go 모델: 세션 수 무관 / runed 1개 / 모델 1벌 / gRPC 1쌍</div>
+    <div class="mermaid">
+flowchart TD
+  subgraph Hosts["에이전트 호스트"]
+    A1["Claude 창 A"]
+    A2["Claude 창 B"]
+    A3["Codex"]
+  end
+
+  subgraph Thin["Thin Client 레이어"]
+    T1["rune CLI<br/>(또는 rune-mcp shim)"]
+    T2["rune CLI<br/>(또는 rune-mcp shim)"]
+    T3["rune CLI<br/>(또는 rune-mcp shim)"]
+  end
+
+  Sock[("~/.rune/sock<br/>unix domain socket · 0600")]
+
+  subgraph Daemon["runed (Go 데몬 · 상주)"]
+    direction TB
+    HTTP["HTTP router<br/>net/http"]
+    Core["Core Logic<br/>config · embed · retriever · capture"]
+    Model["임베딩 모델 1벌 (공유)"]
+    Keys["FHE Keys (EncKey/EvalKey/DEK)"]
+    Pool["gRPC channel pool<br/>Vault + enVector"]
+  end
+
+  subgraph External["외부 서비스"]
+    V[Rune-Vault gRPC]
+    E[enVector Cloud]
+  end
+
+  A1 --> T1
+  A2 --> T2
+  A3 --> T3
+  T1 -- HTTP POST --> Sock
+  T2 -- HTTP POST --> Sock
+  T3 -- HTTP POST --> Sock
+  Sock --> HTTP
+  HTTP --> Core
+  Core --- Model
+  Core --- Keys
+  Core --- Pool
+  Pool --> V
+  Pool --> E
+
+  classDef go fill:#e5f8fb,stroke:#00ADD8,color:#0d4f5c
+  classDef ext fill:#fef5e7,stroke:#d69e2e,color:#744210
+  classDef sockCls fill:#e9d8fd,stroke:#6c5ce7,color:#553c9a
+  class HTTP,Core,Model,Keys,Pool go
+  class T1,T2,T3 go
+  class V,E ext
+  class Sock sockCls
+    </div>
+  </div>
+
+  <h3>전송 레이어 두 가지 안 (Go 공통 데몬 위에서)</h3>
+  <div class="compare-grid">
+    <div class="compare-card go">
+      <h4>안 A — MCP + CLI + runed (3 바이너리)</h4>
+      <ul>
+        <li>세션당 <code>rune-mcp</code> shim 1개 상주 (경량 — 실측 ⑩.2)</li>
+        <li>stdio MCP ↔ HTTP 변환기. 에이전트 md 수정 불필요</li>
+        <li>MCP JSON Schema로 파라미터 구조 강제 가능</li>
+        <li>기존 Claude Code MCP 인프라 재활용</li>
+      </ul>
+    </div>
+    <div class="compare-card go">
+      <h4>안 B — CLI + runed (2 바이너리, RFC 본문)</h4>
+      <ul>
+        <li>세션당 상주 프로세스 없음. <code>rune CLI</code>는 호출 때만</li>
+        <li>에이전트 md에서 Bash exec으로 <code>rune capture</code> 호출</li>
+        <li>에이전트 md Step 3(호출부)만 재작성 — 약 10%</li>
+        <li>배포·디버깅 단순 (curl로 소켓 찔러보기 가능)</li>
+      </ul>
+    </div>
+  </div>
+  <div class="callout info">
+    <strong>중요</strong>: <em>runed 코드 자체는 두 안에서 100% 동일</em>. 차이는 HTTP 요청이 소켓에 도달하기까지의 얇은 껍질(~10-15% LoC)뿐. 안 선택은 Phase 1 이후에도 변경 가능.
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- DEEP DIVE: Python vs Go internals -->
+  <!-- ============================================================ -->
+  <h3 style="margin-top:36px;">🔍 내부 아키텍처 심층 비교 (Python v0.3.x ↔ Go v0.4.0 / Go 1.25)</h3>
+  <p class="lead">바깥 다이어그램만으로는 "세션당 프로세스 → 상주 데몬"이라는 구조 변화의 <em>질적 차이</em>가 잘 드러나지 않는다. 같은 기능(capture/recall)이 두 스택에서 어떻게 <strong>다른 층위·다른 primitive</strong>로 구현되는지를 항목별로 풀어본다.</p>
+
+  <!-- ============== 1. 프로세스 모델 ============== -->
+  <h4>1) 프로세스 모델 & 생성/종료</h4>
+  <div class="compare-grid">
+    <div class="compare-card py">
+      <h4>Python v0.3.x — 세션당 MCP 프로세스</h4>
+      <div class="mermaid">
+flowchart TB
+  Claude1["Claude 창 A"] -- spawn stdio --> PyProc1["python3 -m mcp.server<br/>PID 12001"]
+  Claude2["Claude 창 B"] -- spawn stdio --> PyProc2["python3 -m mcp.server<br/>PID 12002"]
+  PyProc1 -- exit on stdio close --> Terminated1((X))
+  PyProc2 -- exit on stdio close --> Terminated2((X))
+
+  classDef py fill:#eef5fb,stroke:#4B8BBE
+  classDef stop fill:#ffe4e6,stroke:#c53030
+  class PyProc1,PyProc2 py
+  class Terminated1,Terminated2 stop
+      </div>
+    </div>
+    <div class="compare-card go">
+      <h4>Go v0.4.0 — 상주 데몬 (Go 1.25)</h4>
+      <div class="mermaid">
+flowchart TB
+  Boot["launchd / systemd<br/>RunAtLoad / enable --now"]
+  Boot -- bootstrap --> Runed["runed (단일 PID)<br/>PID 501 상주"]
+  Claude3["Claude 창 A"] -- HTTP/unix --> Runed
+  Claude4["Claude 창 B"] -- HTTP/unix --> Runed
+  Claude5["rune CLI 호출"] -- HTTP/unix --> Runed
+  Runed -- SIGTERM --> GracefulStop["30s graceful stop<br/>(inflight 대기 → 소켓 unlink)"]
+
+  classDef go fill:#e5f8fb,stroke:#00ADD8
+  class Runed,Boot,GracefulStop go
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th></th><th>Python v0.3.x</th><th>Go v0.4.0 (1.25)</th></tr></thead>
+    <tbody>
+      <tr><td>생성 시점</td><td>Claude Code가 MCP 서버 spawn (stdio)</td><td>OS 부팅 또는 첫 <code>rune</code> 호출 시 on-demand (launchd <code>RunAtLoad</code>/systemd <code>enable --now</code>)</td></tr>
+      <tr><td>세션 격리</td><td>프로세스 단위 (완전 격리, 자원 N배)</td><td>goroutine 단위 (단일 프로세스 내, context 격리)</td></tr>
+      <tr><td>생명주기</td><td>Claude 창 닫히면 즉시 종료 (stdio EOF)</td><td>사용자가 <code>rune deactivate</code>/<code>rune reset</code>/로그아웃 전까지 상주</td></tr>
+      <tr><td>자원 스케일링</td><td>프로세스 × N (모델·키·채널 중복)</td><td>프로세스 1 + shim N (shim은 경량). 세션 증가에 따른 추가 RSS는 <em>벤치 필요</em></td></tr>
+      <tr><td>크래시 복구</td><td>Claude 재시작 수동</td><td>launchd/systemd 자동 재시작 + 디스크 캐시로 warm 복귀</td></tr>
+      <tr><td>종료 절차</td><td>SIGTERM → 즉시 죽음</td><td>SIGTERM 30s grace: <code>httpServer.Shutdown(ctx)</code> → inflight 대기 → <code>sdk.Close()</code> → <code>os.Remove(sockPath)</code></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============== 2. 실행 모델 ============== -->
+  <h4>2) 실행 모델 — 스레드 vs goroutine</h4>
+  <div class="compare-grid">
+    <div class="compare-card py">
+      <h4>Python: GIL + ThreadPoolExecutor</h4>
+      <div class="mermaid">
+flowchart TB
+  PyMain["asyncio event loop<br/>(FastMCP core)"]
+  PyMain --> PyThread1["ThreadPoolExecutor(max=1)<br/>enVector SDK 호출"]
+  PyMain --> PyThread2["ThreadPoolExecutor<br/>embedding (fastembed)"]
+  PyMain --> PyThread3["ThreadPoolExecutor<br/>blocking I/O"]
+  GIL[["Global Interpreter Lock"]]
+  PyThread1 -.GIL 대기.- GIL
+  PyThread2 -.GIL 대기.- GIL
+  PyThread3 -.GIL 대기.- GIL
+
+  classDef py fill:#eef5fb,stroke:#4B8BBE,color:#1a365d
+  classDef shared fill:#fef5e7,stroke:#d69e2e,color:#744210
+  class PyMain,PyThread1,PyThread2,PyThread3 py
+  class GIL shared
+      </div>
+    </div>
+    <div class="compare-card go">
+      <h4>Go 1.25: runtime scheduler + goroutine</h4>
+      <div class="mermaid">
+flowchart TB
+  GoMain["main goroutine<br/>http.Server"]
+  GoMain -- per-request --> GR1["goroutine 요청 #1<br/>capture flow"]
+  GoMain -- per-request --> GR2["goroutine 요청 #2<br/>recall flow"]
+  GR2 -- "errgroup.Go ×3" --> GR2a["sub-goroutine<br/>expanded[0]"]
+  GR2 -- "errgroup.Go ×3" --> GR2b["sub-goroutine<br/>expanded[1]"]
+  GR2 -- "errgroup.Go ×3" --> GR2c["sub-goroutine<br/>expanded[2]"]
+  RT[["Go 1.25 scheduler<br/>GOMAXPROCS auto from cgroup"]]
+  GR1 -.M:N schedule.- RT
+  GR2a -.M:N schedule.- RT
+
+  classDef go fill:#e5f8fb,stroke:#00ADD8,color:#0d4f5c
+  classDef shared fill:#fef5e7,stroke:#d69e2e,color:#744210
+  class GoMain,GR1,GR2,GR2a,GR2b,GR2c go
+  class RT shared
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th></th><th>Python</th><th>Go</th></tr></thead>
+    <tbody>
+      <tr><td>동시성 단위</td><td>asyncio coroutine + OS thread (GIL 안에서)</td><td>goroutine (수 KB 스택, M:N 스케줄링)</td></tr>
+      <tr><td>병렬성 한계</td><td>GIL: CPU-bound은 실질 1코어. I/O-bound만 async 이득</td><td>GOMAXPROCS만큼 실제 병렬. <strong>Go 1.25: cgroup v2 CPU quota 자동 반영</strong></td></tr>
+      <tr><td>외부 호출 패턴</td><td><code>ThreadPoolExecutor(max_workers=1)</code>로 enVector SDK 직렬화 (mcp/server/server.py 주변)</td><td>goroutine + <code>errgroup.WithContext</code>. multi-query 병렬화 가능 <em>(이득 크기는 벤치 필요, <a href="#benchmark-plan">⑩</a>)</em></td></tr>
+      <tr><td>멀티세션 CPU 기아</td><td>GIL 때문에 세션 B가 세션 A의 임베딩 중 blocking</td><td>없음 — scheduler가 요청을 M 코어에 분산</td></tr>
+      <tr><td>Context 취소</td><td><code>asyncio.CancelledError</code>, 서브스레드 중단 수단 제한</td><td><code>context.Context</code> 트리 전파, gRPC/HTTP까지 자동 cancel</td></tr>
+      <tr><td>동시성 테스트</td><td>수동 sleep + pytest-asyncio → flaky</td><td><strong>Go 1.25 <code>testing/synctest</code></strong>: 가짜 시계, 결정적, 마이크로초 완료</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============== 3. 패키지/파일 구조 ============== -->
+  <h4>3) 패키지 / 파일 구조 side-by-side</h4>
+  <div class="compare-grid">
+    <div class="compare-card" style="background:#f5faff; border-color:#4B8BBE;">
+      <h4>Python v0.3.x (실측 — 22+9 packages)</h4>
+<pre style="background:transparent; padding:0;"><code>rune/
+├── mcp/                               # MCP 진입점
+│   ├── server/
+│   │   ├── server.py        2002 LoC  # FastMCP tools 8개, state 머신, lifecycle
+│   │   ├── errors.py         118 LoC  # RuneError + 6 서브클래스
+│   │   └── _SensitiveFilter         # 로그 마스킹
+│   ├── adapter/
+│   │   ├── envector_sdk.py   386 LoC  # envector SDK 래퍼, AES-CTR
+│   │   ├── vault_client.py   380 LoC  # gRPC 3-RPC + legacy HTTP fallback
+│   │   └── embeddings.py     154 LoC  # sbert/fastembed/qwen 분기
+│   └── __init__.py
+├── agents/                            # 정책 + AI agent 층
+│   ├── common/
+│   │   ├── config.py         366 LoC  # save_config (envector persist)
+│   │   ├── schemas/
+│   │   │   ├── embedding.py          # 1024dim, novelty 0.4/0.7/0.93 (주석)
+│   │   │   └── decision_record.py 259 # v2.1 enum
+│   ├── scribe/
+│   │   ├── server.py
+│   │   ├── detector.py              # 규칙 기반 분류
+│   │   ├── tier2_filter.py          # LLM 1차 필터
+│   │   ├── llm_extractor.py
+│   │   ├── pattern_parser.py
+│   │   ├── review_queue.py
+│   │   ├── record_builder.py 703 LoC # PII mask, quote, suffix
+│   │   └── handlers/
+│   ├── retriever/
+│   │   ├── searcher.py       576 LoC # recency + status mul
+│   │   ├── synthesizer.py    482 LoC
+│   │   └── query_processor.py 436 LoC # intent 31 regex, 81 stop
+│   └── tests/               15 파일
+├── commands/                          # Claude Code 슬래시 명령
+│   ├── claude/
+│   └── rune/*.toml
+├── scripts/
+│   ├── bootstrap-mcp.sh     167 LoC  # 4단계 self-heal
+│   └── ...
+├── config/
+├── plugin.json
+└── pyproject.toml            ~22 deps (root) + 9 (mcp/)</code></pre>
+    </div>
+
+    <div class="compare-card go">
+      <h4>Go v0.4.0 (target — hexagonal)</h4>
+<pre style="background:transparent; padding:0;"><code>rune/    (같은 레포 기준, 단계적 마이그레이션 또는 신규 Go 모듈)
+├── cmd/
+│   ├── runed/main.go                  # 데몬 진입점 (~50 LoC)
+│   └── rune/main.go                   # CLI 진입점 (~80 LoC)
+│
+├── internal/
+│   ├── policy/                        # Tier 1: PURE, zero deps
+│   │   ├── schemes.go                 # DefaultScheme (#41)
+│   │   ├── recency.go                 # 0.7×raw + 0.3×decay
+│   │   ├── novelty.go                 # 0.3/0.7/0.95
+│   │   ├── intent.go                  # regex 31개
+│   │   ├── stopwords.go               # 81개
+│   │   ├── suffix.go                  # _p{n} / _b{n}
+│   │   └── *_test.go                  # table-driven + golden
+│   │
+│   ├── domain/                        # 타입 + 에러
+│   │   ├── capture.go                 # CaptureRequest/Response
+│   │   ├── query.go                   # RecallRequest/Response
+│   │   ├── decision_record.go         # v2.1 enum
+│   │   └── errors.go                  # *Error, Retryable() (#45)
+│   │
+│   ├── ports/                         # Interface 정의 (consumer-local OK)
+│   │   ├── embedder.go
+│   │   ├── vault.go
+│   │   ├── envector.go
+│   │   └── clock.go                   # synctest 호환
+│   │
+│   ├── adapters/                      # Tier 2: port 구현
+│   │   ├── embed/
+│   │   │   ├── onnx.go                # Go ONNX Runtime (Qwen3 int8)
+│   │   │   ├── subprocess.go          # Python fallback
+│   │   │   └── mock.go
+│   │   ├── vault/
+│   │   │   ├── grpc.go                # 3-RPC + health fallback
+│   │   │   ├── breaker.go             # sony/gobreaker (#51)
+│   │   │   └── mock.go
+│   │   ├── envector/                  # ⚠ envector-go SDK 자체는 외부 모듈
+│   │   │   ├── sdk.go                 # 외부 envector-go 호출 wrapper
+│   │   │   └── aes_ctr.go             # AES-CTR + MAC 옵션 (#46) — runed 자체 구현
+│   │   └── fs/
+│   │       └── root.go                # os.Root 바인딩 (Go 1.24)
+│   │
+│   ├── daemon/                        # Tier 3: 비즈니스 서비스
+│   │   ├── capture/
+│   │   │   ├── service.go             # embed → AES → Insert
+│   │   │   ├── recordbuilder.go       # PII mask, quote, suffix
+│   │   │   └── service_test.go
+│   │   ├── recall/
+│   │   │   ├── service.go             # errgroup 병렬
+│   │   │   ├── query_processor.go
+│   │   │   ├── searcher.go            # recency × status
+│   │   │   └── synthesizer.go
+│   │   ├── config/
+│   │   │   ├── loader.go              # atomic.Pointer[Config]
+│   │   │   └── watcher.go             # fsnotify debounce 200ms
+│   │   └── lifecycle/
+│   │       ├── startup.go             # dormant/active 결정
+│   │       └── shutdown.go            # graceful 30s
+│   │
+│   ├── transport/                     # HTTP/socket shim
+│   │   ├── http/
+│   │   │   ├── server.go              # net/http + ServeMux 1.22
+│   │   │   ├── router.go              # method+path 라우팅
+│   │   │   ├── middleware.go          # recover / logging / request_id
+│   │   │   └── peercred_*.go          # SO_PEERCRED / LOCAL_PEERCRED
+│   │   └── mcp/                       # MCP shim (옵션 A 선택 시)
+│   │
+│   └── obs/                           # Observability
+│       ├── slog.go                    # custom Handler + SensitiveFilter
+│       ├── metrics.go                 # rune_* Prometheus
+│       └── flight.go                  # Go 1.25 FlightRecorder
+│
+├── test/
+│   ├── integration/  // +build integration
+│   ├── e2e/
+│   └── testdata/                      # golden fixtures (Python→JSON)
+│
+├── scripts/
+│   ├── install.sh                     # cosign verify + bin 배치 (#49)
+│   └── gen_golden.py                  # Python → golden JSON
+│
+├── go.mod                             # go 1.25 + toolchain go1.25.0
+│                                      #   require github.com/envector/envector-go v0.x  ← 외부 SDK
+│                                      #   require google.golang.org/grpc
+│                                      #   require github.com/fsnotify/fsnotify
+│                                      #   require github.com/sony/gobreaker
+│                                      #   require gopkg.in/natefinch/lumberjack.v2
+│                                      #   require github.com/yalue/onnxruntime_go (옵션)
+└── go.sum
+
+※ envector-go SDK는 이 repo 안에 없다. 별도 repo (팀원 개발)의 Go module을
+   `go.mod require`로 끌어 쓰는 외부 의존성. `internal/adapters/envector/sdk.go`는
+   runed 쪽의 얇은 adapter (외부 SDK 호출 + ports 인터페이스 만족)일 뿐.
+   AES-CTR 암호화·MAC envelope(#46)·몽키패치 로직은 envector-go 밖, 즉 runed
+   쪽에서 담당. 자세한 경계는 docs/runed/04-envector-go-sdk-contract.md 참조.</code></pre>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <strong>Python pyenvector도 마찬가지</strong>: Python 트리의 <code>mcp/adapter/envector_sdk.py</code>는 외부 <code>pyenvector</code> pip 패키지를 호출하는 rune 쪽 wrapper다. 두 스택 모두 <em>벡터 암호화 SDK는 외부 의존성, rune은 소비자</em>라는 구조는 동일. 차이는 "Python은 import+모듈/venv, Go는 <code>go.mod require</code>+정적 링크" 뿐.
+  </div>
+
+  <p><strong>구조 원칙 차이</strong>: Python은 <em>모듈이 곧 파일</em>인 flat layout이라 <code>server.py 2002 LoC</code>처럼 한 파일에 lifecycle/tool/validation이 뭉쳐 있다. Go는 hexagonal/ports-adapters로 <strong>domain → ports → adapters → service → transport</strong> 층을 분리 — 한 층만 교체해도 다른 층은 무변경. 예: AES-CTR → GCM 전환은 <code>adapters/envector/</code>만 수정, 정책이나 서비스는 0줄 변경. envector-go SDK 버전 업그레이드도 <code>go.mod</code>의 버전 pin만 바꾸면 되고, 호환성 문제는 <code>ports.Envector</code> interface 경계에서 격리된다.</p>
+
+  <!-- ============== 4. 메모리 레이아웃 ============== -->
+  <h4>4) 메모리 레이아웃 (구성 요소, 단일 세션)</h4>
+  <div class="compare-grid">
+    <div class="compare-card py">
+      <h4>Python 프로세스 메모리 — 구성 요소</h4>
+      <div class="mermaid">
+flowchart TB
+  PyInt["Python 인터프리터"]
+  PyLib["의존 라이브러리<br/>numpy · grpcio · onnx · torch …"]
+  PyModel["sbert / Qwen3 모델 가중치<br/>(fp32 기준, 대부분 차지)"]
+  PyKeys["FHE 키 EncKey + EvalKey<br/>디스크에서 1회 로드"]
+  PyGRPC["gRPC channel state ×2<br/>Vault + enVector"]
+  PyHeap["런타임 heap<br/>refcount + GC"]
+
+  PyInt --> PyLib --> PyModel --> PyKeys --> PyGRPC --> PyHeap
+
+  classDef py fill:#eef5fb,stroke:#4B8BBE,color:#1a365d
+  class PyInt,PyLib,PyModel,PyKeys,PyGRPC,PyHeap py
+      </div>
+    </div>
+    <div class="compare-card go">
+      <h4>Go runed 메모리 — 구성 요소</h4>
+      <div class="mermaid">
+flowchart TB
+  GoRT["Go 런타임"]
+  GoBin["정적 링크 바이너리 코드"]
+  GoModel["ONNX Runtime + Qwen3<br/>(int8 채택 여부에 따라 변동)"]
+  GoKeysMmap["FHE 키<br/>(로드 방식에 따라 변동)"]
+  GoGRPCPool["gRPC 채널 풀<br/>단일 채널 HTTP/2 multiplex"]
+  GoHeap["Go heap<br/>GOMEMLIMIT soft cap"]
+  GoFlight["FlightRecorder 링 버퍼<br/>Go 1.25"]
+
+  GoRT --> GoBin --> GoModel --> GoKeysMmap --> GoGRPCPool --> GoHeap --> GoFlight
+
+  classDef go fill:#e5f8fb,stroke:#00ADD8,color:#0d4f5c
+  class GoRT,GoBin,GoModel,GoKeysMmap,GoGRPCPool,GoHeap,GoFlight go
+      </div>
+    </div>
+  </div>
+
+  <p><strong>정성적 차이</strong>: Python은 <em>세션 수만큼 프로세스 복제</em>되어 모델·키·채널·heap이 N배로 증가한다. Go는 세션 수와 무관하게 <em>shim만 추가</em>되고 데몬 본체 RSS는 상수로 수렴한다. 실제 RSS 수치 비교는 <a href="#benchmark-plan">⑩ Benchmark Plan</a>의 P1/P2 측정 결과로만 주장할 수 있다 — 현재 문서 시점에는 <strong>Python baseline도 Go 실측도 없다</strong>.</p>
+
+  <!-- ============== 5. HTTP/MCP 경계 ============== -->
+  <h4>5) 에이전트 ↔ 데몬 경계 (stdio MCP vs HTTP over unix socket)</h4>
+  <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant AG as 에이전트
+  participant PY as Python mcp.server
+  participant CLI as Go rune CLI / shim
+  participant SOCK as unix socket
+  participant RUNED as Go runed
+
+  Note over AG,PY: Python v0.3.x — stdio MCP
+  AG->>PY: stdin JSON-RPC tools/call rune_capture
+  activate PY
+  PY->>PY: FastMCP 라우팅 → tool 데코레이터
+  PY->>PY: _validate → _init_pipelines (state check)
+  PY->>PY: embed + AES + Insert
+  PY-->>AG: stdout JSON-RPC result
+  deactivate PY
+
+  Note over AG,RUNED: Go v0.4.0 — HTTP over unix socket
+  AG->>CLI: rune capture 인자 + JSON
+  CLI->>SOCK: POST /capture (HTTP/1.1, JSON body)
+  SOCK->>RUNED: peer cred 검증 + recover MW
+  activate RUNED
+  RUNED->>RUNED: ServeMux 라우팅 → captureHandler
+  RUNED->>RUNED: ctx 30s timeout → Service.Handle
+  RUNED->>RUNED: embed ONNX → AES envelope + MAC → Insert
+  RUNED-->>SOCK: HTTP 200 JSON response
+  SOCK-->>CLI: (pass-through)
+  CLI-->>AG: stdout JSON result
+  deactivate RUNED
+  </div>
+
+  <table>
+    <thead><tr><th></th><th>Python stdio MCP</th><th>Go HTTP over unix socket</th></tr></thead>
+    <tbody>
+      <tr><td>프로토콜</td><td>JSON-RPC 2.0 over stdio</td><td>HTTP/1.1 또는 HTTP/2 over unix socket</td></tr>
+      <tr><td>라우팅</td><td>FastMCP <code>@server.tool(name)</code> 데코레이터</td><td>Go 1.22 <code>mux.Handle("POST /capture", h)</code></td></tr>
+      <tr><td>미들웨어</td><td>FastMCP 기본 (validation/error)</td><td>handler chain: recover → request_id → auth(peer cred) → logging → handler</td></tr>
+      <tr><td>타임아웃</td><td>stdio 무기한. 에이전트가 끊으면 어느 순간 EOF</td><td><code>http.Server</code> ReadHeaderTimeout + <code>ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)</code></td></tr>
+      <tr><td>동시성</td><td>FastMCP가 직렬 처리 (asyncio)</td><td>요청당 goroutine. 세션 간 완전 독립</td></tr>
+      <tr><td>접근 제어</td><td>에이전트 프로세스 자식으로 상속</td><td>socket 0600 + <strong>커널 peer credential 검증</strong> (SO_PEERCRED / LOCAL_PEERCRED) — 결정 #18</td></tr>
+      <tr><td>디버깅</td><td>stdio 가로채기 어려움</td><td><code>curl --unix-socket ~/.rune/sock http://localhost/recall -d '...'</code>로 직접 찔러보기</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============== 6. 외부 통신 ============== -->
+  <h4>6) 외부 통신 — Vault gRPC / enVector</h4>
+  <div class="compare-grid">
+    <div class="compare-card" style="background:#f5faff; border-color:#4B8BBE;">
+      <h4>Python (vault_client.py 380 LoC)</h4>
+      <ul>
+        <li>채널: grpcio Channel × 2 (Vault + envector), 세션마다 각각 별도 생성</li>
+        <li>endpoint 정규화: <code>tcp://</code> / <code>http(s)://</code> / bare hostname (L117-140)</li>
+        <li>Health fallback: gRPC 실패 시 http scheme이면 <code>/mcp</code>/<code>/sse</code> suffix 제거 후 <code>GET /health</code> (L321-332)</li>
+        <li>재연결: envector_sdk.py L185-196 <code>_with_reconnect</code> 재시도 패턴, KeyParameter 몽키패치 5개</li>
+        <li>장애 시 behavior: <code>_set_dormant_with_reason</code>으로 즉시 dormant 전환 → 유저 수동 복구 필요</li>
+      </ul>
+    </div>
+    <div class="compare-card go">
+      <h4>Go (internal/adapters/vault + envector)</h4>
+      <ul>
+        <li>채널: <code>grpc.ClientConn</code> × 2, <strong>프로세스 생애주기 전체 재사용</strong> (HTTP/2 multiplex 덕에 단일 채널이 병렬 요청 다중화)</li>
+        <li>endpoint 정규화: 동일 규칙을 <code>url.Parse</code> + switch로</li>
+        <li>Health fallback: <code>grpc.Dial</code> 실패 시 <code>net/http.Client</code>로 <code>/health</code> probe</li>
+        <li>재연결: gRPC keepalive + <code>retry</code> interceptor — 애플리케이션 코드에서 투명</li>
+        <li><strong>Circuit breaker</strong> (sony/gobreaker, #51): 5회 연속 실패 → open 30s. Open 시 recall은 partial 결과, capture는 fast-fail</li>
+        <li>장애 시 behavior: exponential backoff 2회 (1s, 2s) → <code>retryable=true</code> 에러. 3회 연속 실패 시만 dormant (#40)</li>
+        <li><strong>mTLS</strong> (post-MVP, #47): <code>tls.Config.GetClientCertificate</code> callback으로 atomic rotation</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============== 7. Config ============== -->
+  <h4>7) Config 로딩 & 핫리로드</h4>
+  <div class="compare-grid">
+    <div class="compare-card py">
+      <h4>Python — import-time 로드, 재시작 필요</h4>
+      <div class="mermaid">
+flowchart TB
+  PyRead["config = json.load(open(path))<br/>at module import time"]
+  PyGlobal["module-level 전역 dict"]
+  PyRestart(("프로세스 재시작<br/>= Claude 창 닫았다 열기"))
+
+  PyRead --> PyGlobal
+  PyGlobal -- "변경 반영" --> PyRestart
+
+  classDef py fill:#eef5fb,stroke:#4B8BBE,color:#1a365d
+  classDef warn fill:#ffe4e6,stroke:#c53030,color:#742a2a
+  class PyRead,PyGlobal py
+  class PyRestart warn
+      </div>
+    </div>
+    <div class="compare-card go">
+      <h4>Go 1.25 — fsnotify + atomic swap, 재시작 불필요</h4>
+      <div class="mermaid">
+flowchart TB
+  GoWatch["fsnotify.Watcher<br/>200ms debounce"]
+  GoSIGHUP["SIGHUP / systemctl reload"]
+  GoParse["json.Unmarshal<br/>→ validate"]
+  GoSwap["cfg.Store(newCfg)<br/>= atomic swap"]
+  GoKeep[("기존 cfg 유지<br/>fail-safe")]
+  GoAtomic[["atomic.Pointer[Config]<br/>lock-free reads"]]
+  GoReader["reader: cfg.Load()"]
+
+  GoWatch -- "Write / Rename" --> GoParse
+  GoSIGHUP -- "also triggers" --> GoParse
+  GoParse -- "OK" --> GoSwap
+  GoParse -- "FAIL" --> GoKeep
+  GoSwap --> GoAtomic
+  GoAtomic -.상시.-> GoReader
+
+  classDef go fill:#e5f8fb,stroke:#00ADD8,color:#0d4f5c
+  classDef warn fill:#ffe4e6,stroke:#c53030,color:#742a2a
+  class GoWatch,GoSIGHUP,GoParse,GoSwap,GoAtomic,GoReader go
+  class GoKeep warn
+      </div>
+    </div>
+  </div>
+
+  <p>Python은 config 변경 반영을 위해 <strong>세션 프로세스를 재시작</strong>해야 한다(Claude 창 닫았다 열기). Go는 <code>~/.rune/config.json</code>을 <code>atomic.Pointer[Config]</code>로 감싸, fsnotify 이벤트에 200ms debounce 후 parse → validate → swap. reader는 언제든 <code>cfg.Load()</code>로 lock-free 조회. SIGHUP으로도 동일 경로 트리거 (systemd <code>ExecReload</code> 또는 launchd 수동).</p>
+
+  <!-- ============== 8. Capture 흐름 ============== -->
+  <h4>8) Capture 한 건의 처리 경로 (함수 단위)</h4>
+  <div class="compare-grid">
+    <div class="compare-card" style="background:#f5faff; border-color:#4B8BBE;">
+      <h4>Python (server.py + record_builder.py + envector_sdk.py)</h4>
+<pre style="background:transparent; padding:0; font-size:12px;"><code>stdin JSON (tools/call rune_capture)
+  ↓
+FastMCP router → tool_capture(args)  [server.py:698-1100]
+  ├─ _validate(args)                 [server.py:1244-1324]
+  │    ├─ title[:60]
+  │    ├─ phases[:7]
+  │    └─ confidence clamp [0,1]
+  ├─ _ensure_pipelines(120s timeout) [server.py:1503+]
+  │    └─ state != active → raise
+  ├─ record_builder.build(...)       [record_builder.py:703 LoC]
+  │    ├─ PII mask (5 regex)         [L89-95]
+  │    ├─ quote strip (4 patterns)   [L72-77]
+  │    ├─ generate_record_id(...)    [decision_record.py:245-259]
+  │    └─ suffix _p{n}/_b{n}         [L338-339]
+  ├─ embeddings.embed(text)          [adapter/embeddings.py:154 LoC]
+  │    └─ sbert/qwen3 via ThreadPoolExecutor
+  ├─ _classify_novelty(score)        [server.py:100-108, 0.3/0.7/0.95]
+  ├─ envector_sdk.AES-CTR encrypt    [envector_sdk.py:227-234]
+  ├─ envector_sdk.Insert(bundle)     [via ThreadPoolExecutor(max=1)]
+  └─ _append_capture_log (0600 jsonl)
+  ↓
+stdout JSON result</code></pre>
+    </div>
+    <div class="compare-card go">
+      <h4>Go (internal/daemon/capture/service.go)</h4>
+<pre style="background:transparent; padding:0; font-size:12px;"><code>HTTP POST /capture body
+  ↓
+recoverMW → request_id → peer cred MW
+  ↓
+capture.Handler.ServeHTTP(w, r)      [transport/http]
+  ├─ ctx, cancel := ctx.WithTimeout(r.Context(), 30s)
+  ├─ MaxBytesReader 1MB + json.Decode(&req)
+  └─ svc.Handle(ctx, req)            [daemon/capture/service.go]
+       ├─ policy.Validate(req)        [internal/policy — pure]
+       ├─ recordbuilder.Build(req)    [daemon/capture/recordbuilder.go]
+       │    ├─ PII mask               [policy.PIIPatterns]
+       │    ├─ quote strip
+       │    └─ RecordID + suffix      [policy.Suffix]
+       ├─ svc.embedder.Embed(ctx, text)  [ports.Embedder → ONNX adapter]
+       ├─ policy.ClassifyNovelty(score)
+       ├─ svc.encryptor.Encrypt(...)  [ports.MetadataEncryptor → AES-CTR +MAC #46]
+       ├─ svc.envector.Insert(ctx, bundle) [ports.Envector → sdk + breaker]
+       │    └─ breaker OPEN → ErrRetryable (fast-fail)
+       └─ svc.logio.Append(rec)       [os.Root + O_APPEND]
+  ↓
+w.WriteHeader(200) + json.Encode(resp)</code></pre>
+    </div>
+  </div>
+
+  <p>공통: 정책 값(0.3/0.7/0.95, recency 공식, suffix, PII regex)은 <strong>bit-identical</strong>. 차이는 <em>실행 주체</em>와 <em>격리 수준</em>. Python은 전역 상태와 데코레이터 기반 라우팅에 뒤섞인 반면, Go는 각 단계가 interface(<code>ports.*</code>) 뒤라 단독 테스트 가능 + adapter 교체 가능.</p>
+
+  <!-- ============== 9. Recall 흐름 ============== -->
+  <h4>9) Recall 한 건의 처리 경로</h4>
+  <div class="compare-grid">
+    <div class="compare-card" style="background:#f5faff; border-color:#4B8BBE;">
+      <h4>Python (searcher.py 576 + query_processor.py 436)</h4>
+<pre style="background:transparent; padding:0; font-size:12px;"><code>tool_recall(query)            [server.py:910-1045]
+  ├─ query_processor.parse(query)
+  │    ├─ intent regex 31개
+  │    ├─ stop words 81개
+  │    ├─ entity (quoted / capitalized / tech-name)
+  │    ├─ time scope (LAST_WEEK/MONTH/..)
+  │    └─ expand → expanded_queries[:3]
+  ├─ for q in expanded_queries[:3]:    # ← 순차
+  │    ├─ embed(q)
+  │    ├─ Vault.DecryptScores(q_emb)
+  │    ├─ Vault.DecryptMetadata(top-k)
+  │    └─ results.append(...)
+  ├─ dedup + merge
+  ├─ searcher.rerank                  [searcher.py:297 가중합]
+  │    = (0.7 × raw + 0.3 × decay) × status_mul
+  │       status: 1.0 / 0.9 / 0.5 / 0.3
+  │       half-life: 90일
+  └─ synthesizer.render                [synthesizer.py:482]</code></pre>
+    </div>
+    <div class="compare-card go">
+      <h4>Go (internal/daemon/recall/*)</h4>
+<pre style="background:transparent; padding:0; font-size:12px;"><code>POST /recall  →  recall.Handler.ServeHTTP
+  └─ svc.Handle(ctx, req)
+       ├─ qp.Parse(req.Query)          [policy.IntentPatterns / StopWords]
+       ├─ expanded := qp.Expand(...)[:3]
+       ├─ // ← 병렬 (errgroup, RTT 이득 기대 — 실측은 ⑩ 벤치 계획)
+       │   g, gctx := errgroup.WithContext(ctx)
+       │   for i, q := range expanded {
+       │     g.Go(func() error {
+       │       emb  := svc.embedder.Embed(gctx, q)     // 배치 가능
+       │       sc   := svc.vault.DecryptScores(gctx, emb)   // breaker
+       │       meta := svc.vault.DecryptMetadata(gctx, top-k)
+       │       results[i] = merge(sc, meta); return nil
+       │     })
+       │   }
+       │   _ = g.Wait()                              // partial 허용
+       ├─ svc.dedup(results)
+       ├─ svc.rerank = policy.RerankFormula(...)     // 가중합 동일
+       └─ svc.synth.Render(results)                  // 템플릿</code></pre>
+    </div>
+  </div>
+
+  <p>동일한 수학(재랭킹 공식, half-life 90일, status 1.0/0.9/0.5/0.3)을 유지하되 Python의 <strong>순차 RTT 누적</strong>이 Go의 <strong>errgroup 병렬</strong>로 변경된다. 실제 속도 이득 크기는 Vault/enVector RTT 분포와 gRPC channel 동시 처리 능력에 달려 있어 <strong>벤치가 필요하다</strong> (→ <a href="#benchmark-plan">⑩</a>). circuit breaker가 열리면 <code>errgroup</code> 안의 모든 goroutine이 <code>ErrBreakerOpen</code>으로 빠르게 실패 → partial degrade.</p>
+
+  <!-- ============== 10. 장애 격리 ============== -->
+  <h4>10) 장애 격리 & 복구</h4>
+  <table>
+    <thead><tr><th>이벤트</th><th>Python</th><th>Go</th></tr></thead>
+    <tbody>
+      <tr><td>하나의 handler가 panic/exception</td><td>프로세스 통째로 죽을 수도. FastMCP가 잡으면 stderr에 traceback</td><td><code>recoverMW</code>가 잡아 500 반환 + slog에 stack. 다른 요청·다른 세션은 무영향</td></tr>
+      <tr><td>Vault 일시 장애</td><td>즉시 <code>state=dormant</code>. 유저가 <code>/rune:activate</code> 수동</td><td>2-retry → <code>retryable=true</code>. 3회 연속 실패 시만 dormant. 복구 투명 (#40)</td></tr>
+      <tr><td>Vault 지속 장애</td><td>세션 매번 연결 시도 → dial timeout 누적</td><td>circuit breaker open 30s → fast-fail (#51). cascade 방지</td></tr>
+      <tr><td>OOM</td><td>OS killer → 프로세스 죽음. 다른 세션 무관하나, 그 세션은 사용 불가</td><td>systemd MemoryMax 또는 GOMEMLIMIT이 먼저 반응하도록 aggressive GC. killer 발동 시 launchd/systemd 자동 재시작 + 디스크 캐시로 warm 복귀</td></tr>
+      <tr><td>Config 손상</td><td>import 실패 → 프로세스 안 뜸</td><td>parse 실패면 <strong>기존 config 유지</strong>. slog에 경고 후 정상 동작 지속</td></tr>
+      <tr><td>sleep/wake</td><td>TCP keepalive 끊기면 다음 호출에 재연결 시도</td><td>gRPC keepalive + circuit breaker + 투명 재연결. SLEEP 이벤트 후 wake에 reactive 복구</td></tr>
+      <tr><td>panic 디버깅</td><td>traceback만 (현장 상태 없음)</td><td><strong>Go 1.25 FlightRecorder</strong>로 panic 직전 10-30초 <code>runtime/trace</code>가 <code>logs/flight-&lt;ts&gt;.trace</code>에 자동 덤프</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============== 11. Observability ============== -->
+  <h4>11) Observability pipeline</h4>
+  <div class="compare-grid">
+    <div class="compare-card py">
+      <h4>Python — stderr only</h4>
+      <div class="mermaid">
+flowchart TB
+  PyLog["logging (표준 stdlib)"]
+  PyFilt["_SensitiveFilter<br/>sk- / api_ / evt_ 마스킹"]
+  PyStderr["stderr<br/>Claude가 수집"]
+
+  PyLog --> PyFilt --> PyStderr
+
+  classDef py fill:#eef5fb,stroke:#4B8BBE,color:#1a365d
+  class PyLog,PyFilt,PyStderr py
+      </div>
+    </div>
+    <div class="compare-card go">
+      <h4>Go 1.25 — 4-way fanout (로그 · 메트릭 · pprof · flight)</h4>
+      <div class="mermaid">
+flowchart TB
+  GoSlog["log/slog structured"]
+  GoCustom["custom Handler<br/>ReplaceAttr → SensitiveFilter regex 확장"]
+  GoFile["~/.rune/logs/daemon.log<br/>lumberjack rotate 100MB / 1일"]
+  GoMetrics["Prometheus /metrics<br/>rune_capture_total · rune_recall_duration_seconds<br/>rune_vault_errors_total · rune_circuit_breaker_state"]
+  GoPprof["/debug/pprof<br/>//go:build debug gate"]
+  GoFlight["runtime/trace.FlightRecorder<br/>panic / OOM trigger →<br/>logs/flight-*.trace"]
+
+  GoSlog --> GoCustom
+  GoCustom --> GoFile
+  GoSlog --> GoMetrics
+  GoSlog --> GoPprof
+  GoSlog --> GoFlight
+
+  classDef go fill:#e5f8fb,stroke:#00ADD8,color:#0d4f5c
+  class GoSlog,GoCustom,GoFile,GoMetrics,GoPprof,GoFlight go
+      </div>
+    </div>
+  </div>
+
+  <!-- ============== 12. 빌드/배포 ============== -->
+  <h4>12) 빌드 & 배포</h4>
+  <table>
+    <thead><tr><th></th><th>Python</th><th>Go</th></tr></thead>
+    <tbody>
+      <tr><td>바이너리</td><td>Python 런타임 필요 — <code>bootstrap-mcp.sh</code> 4단계 self-heal (VIRTUAL_ENV unset / Python 버전 / pip shebang / fastembed 캐시)</td><td><strong>단일 static 바이너리</strong>. <code>CGO_ENABLED=0 go build -trimpath -ldflags "-s -w"</code>. 런타임 의존성 0</td></tr>
+      <tr><td>패키지 수</td><td>22 (root) + 9 (mcp/) = 31</td><td>stdlib + 소수 (grpc-go · fsnotify · sony/gobreaker · lumberjack · 선택 onnxruntime-go)</td></tr>
+      <tr><td>버전 핀</td><td><code>pyproject.toml</code> + lockfile. venv로 격리</td><td><code>go.mod</code> <code>go 1.25</code> + <code>toolchain go1.25.0</code> + <code>go.sum</code></td></tr>
+      <tr><td>취약점 스캔</td><td>pip-audit / safety</td><td><code>govulncheck</code> (stdlib 통합)</td></tr>
+      <tr><td>크로스 컴파일</td><td>어려움 (C 확장)</td><td><code>GOOS=linux GOARCH=amd64 go build</code> 한 줄</td></tr>
+      <tr><td>서명/배포</td><td>— (신경 안 씀)</td><td>cosign signature + syft SBOM (#49) + macOS codesign+notarize</td></tr>
+      <tr><td>설치 크기</td><td>venv가 큰 편 (torch 등 포함) — 실측 필요</td><td>정적 바이너리 + ONNX 모델 — 실측 필요</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout success" style="margin-top:20px;">
+    <strong>요약</strong>: Python 아키텍처는 <em>"플러그인이 세션마다 산다"</em>는 전제에 최적화된 flat-module 설계. Go 아키텍처는 <em>"데몬 하나가 모든 세션을 서비스한다"</em>는 전제에 맞춰 <strong>hexagonal 계층 + per-request context + lock-free config + Go 1.25 runtime features</strong>로 재구성. 같은 정책을 지키면서 "프로세스 복제" 비용을 제거하고, "시간 의존 테스트의 flaky"와 "panic 사후 분석 불가" 같은 고질적 문제를 1.25 스펙 그대로 해결한다.
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- INSTALL -->
+<!-- ============================================================ -->
+<section id="install">
+  <h2>① 설치 & Configure 플로우</h2>
+
+  <h3>Python 현재</h3>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as 사용자
+  participant CC as Claude Code
+  participant Boot as bootstrap-mcp.sh
+  participant Pip as pip
+  participant Cfg as ~/.rune/config.json
+
+  U->>CC: claude plugin install rune
+  CC->>CC: 플러그인 파일 캐시에 복사
+  Note over U,Cfg: 플러그인 메타만 있음, Python 환경 미구성
+
+  U->>CC: /rune:configure
+  CC->>Boot: bash scripts/install.sh
+  Boot->>Pip: venv 생성 + install 22 pkg (+ transitive deps)
+  Note over Boot,Pip: 4단계 self-heal:<br/>① VIRTUAL_ENV unset<br/>② Python 버전 불일치<br/>③ pip shebang 오염<br/>④ fastembed .incomplete (stale ⚠)
+  Pip-->>Boot: 완료 (수 분)
+
+  CC->>U: Vault endpoint/token/TLS 질문
+  U-->>CC: 입력
+  CC->>Cfg: Write 3섹션 — vault, state=dormant, metadata
+  CC->>Boot: configure-claude-mcp.sh (MCP 등록)
+  Boot-->>U: 완료 안내 (activate 하세요)
+    </div>
+  </div>
+
+  <h3>Go 목표</h3>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as 사용자
+  participant CC as Claude Code
+  participant CLI as rune CLI
+  participant GH as GitHub Release
+  participant LD as launchd/systemd
+  participant D as runed 데몬
+  participant Cfg as ~/.rune/config.json
+
+  U->>CC: claude plugin install rune
+  CC->>CC: 플러그인 파일 복사 (plugin.json만)
+  Note over U,Cfg: Go 바이너리 아직 없음
+
+  U->>CC: /rune:configure
+  CC->>CLI: OS/arch 감지
+  CLI->>GH: v0.4.0 릴리스 자산 fetch
+  GH-->>CLI: ~/.rune/bin/{rune, runed}
+
+  CC->>U: Vault endpoint/token/TLS 질문
+  U-->>CC: 입력
+  CC->>Cfg: Write 3섹션 — vault, state=dormant, metadata
+
+  CLI->>LD: launchd plist or systemd unit 작성 + load
+  LD->>D: runed 프로세스 start
+  D->>Cfg: load_config (state=dormant)
+  D->>D: 소켓 listen, 대기 모드
+  CLI-->>U: configure 완료 + activate 안내
+    </div>
+  </div>
+
+  <div class="two-col">
+    <div class="compare-card py">
+      <h4>Python 특성</h4>
+      <dl class="kv">
+        <dt>설치 시간</dt><dd>30초 ~ 수 분</dd>
+        <dt>실패 클래스</dt><dd>venv/pip/shebang/torch</dd>
+        <dt>사전 요구사항</dt><dd>Python 3.11+</dd>
+        <dt>자동 hook</dt><dd>없음 (사용자 수동 트리거)</dd>
+      </dl>
+    </div>
+    <div class="compare-card go">
+      <h4>Go 특성</h4>
+      <dl class="kv">
+        <dt>설치 시간</dt><dd>수 초 (바이너리 다운로드만)</dd>
+        <dt>실패 클래스</dt><dd>바이너리 체크섬 정도</dd>
+        <dt>사전 요구사항</dt><dd>OS/arch만 지원</dd>
+        <dt>자동 hook</dt><dd>launchd/systemd로 OS 부팅 시 자동</dd>
+      </dl>
+    </div>
+  </div>
+
+  <h3>bootstrap-mcp.sh의 4단계 self-heal 상세</h3>
+  <table>
+    <thead>
+      <tr><th>#</th><th>단계</th><th>위치</th><th>방어 대상</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td><strong>VIRTUAL_ENV 환경변수 unset</strong></td>
+        <td>L41</td>
+        <td>bootstrap이 다른 venv 안에서 실행될 때 <code>pip install --upgrade pip</code>가 pip shebang을 외부 venv python으로 덮어써서 이후 모든 pip install이 엉뚱한 site-packages로 가는 문제 사전 차단</td>
+      </tr>
+      <tr>
+        <td>2</td>
+        <td><strong>Python 버전 불일치 감지</strong></td>
+        <td>L53-67</td>
+        <td>venv interpreter는 3.10인데 site-packages는 3.12용 (macOS 업데이트 후 시스템 Python 바뀐 경우). 감지 시 venv 통째로 <code>rm -rf</code> 후 재생성</td>
+      </tr>
+      <tr>
+        <td>3</td>
+        <td><strong>Pip shebang 오염 감지</strong></td>
+        <td>L69-96</td>
+        <td>Claude Code 플러그인 시스템이 <code>.venv</code>를 포함한 디렉토리를 캐시 경로로 복사. 복사된 venv의 pip/python 바이너리 shebang이 원본 경로를 가리켜서 로드 실패. sed로 shebang만 재작성 (BSD/GNU 분기)</td>
+      </tr>
+      <tr style="background: #fff5f5;">
+        <td>4</td>
+        <td><strong>Fastembed <code>.incomplete</code> 캐시 정리</strong> ⚠️</td>
+        <td>L117-136</td>
+        <td>fastembed 모델 다운로드가 중단되면 <code>.incomplete</code> 블롭이 남고, fastembed는 스냅샷을 "캐시됨"으로 판단해 재다운로드 skip → ONNXRuntime 크래시. 해당 모델 디렉토리 통째 삭제로 복구</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout danger">
+    <strong>Stale 방어 코드 발견 (#4)</strong>: fastembed 캐시 self-heal은 <em>과거 fastembed가 기본 백엔드였던 시절의 잔재</em>입니다.
+    <ul>
+      <li>현재 production config: <code>embedding.mode = "sbert"</code>, <code>model = "Qwen/Qwen3-Embedding-0.6B"</code></li>
+      <li><code>requirements.txt</code>에 <code>fastembed&gt;=0.7.4</code>는 여전히 있지만 라이브러리만 설치될 뿐 실제 모델 다운로드는 발생 안 함</li>
+      <li>git log: <code>6d26dc0 feat: switch embedding model to Qwen3-Embedding-0.6B</code> 커밋에서 모델만 전환, bootstrap self-heal은 같이 업데이트되지 않음</li>
+      <li>오히려 <code>sentence-transformers</code>/HuggingFace 캐시(<code>~/.cache/huggingface/</code>)에 있을 수 있는 incomplete 문제는 체크 안 함 → <strong>self-heal이 잘못된 대상을 방어 중</strong></li>
+      <li>결론: <a href="#decisions">결정 #34</a> — fastembed 의존성과 self-heal 블록 같이 제거. Go 마이그레이션 시 어차피 venv/pip 자체가 사라지므로 자연 소멸이지만, Python 유지 기간이 있다면 지금 정리 권장</li>
+    </ul>
+  </div>
+
+  <div class="callout info">
+    <strong>Go 관점</strong>: 이 4단계 self-heal 전부가 <code>venv + pip + fastembed 캐시</code> 에코시스템 고유 문제. Go 정적 바이너리로 가면 이 문제 클래스 전체가 소멸합니다 (docs 04-go-migration-plan §"왜 Go, 왜 지금"의 첫 포인트).
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- ACTIVATE -->
+<!-- ============================================================ -->
+<section id="activate">
+  <h2>② Activate & 라이프사이클</h2>
+
+  <h3>Python — 세션마다 반복되는 초기화</h3>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as 사용자
+  participant CC as Claude Code
+  participant Srv as Python MCP 서버
+  participant V as Rune-Vault
+  participant Mdl as sentence-transformers
+  participant Ev as enVector
+
+  U->>CC: Claude Code 재시작
+  CC->>Srv: stdio spawn (bootstrap-mcp.sh)
+  Srv->>Srv: load_config (state=dormant)
+  Note over Srv: 8개 tool 전부 등록됨 (조건부 아님)<br/>runtime에 state!=active 체크로 거절
+
+  U->>CC: /rune:activate
+  CC->>Srv: tool_reload_pipelines
+  Srv->>Srv: _init_pipelines 진입 · state=dormant 체크 후 active로 전환
+  Srv->>V: GetPublicKey(token)
+  V-->>Srv: EncKey + EvalKey + envector creds
+  Srv->>Srv: ~/.rune/keys/ 디스크 캐시
+  Srv->>Srv: save_config() → config.json 3섹션→7섹션 확장
+  Srv->>Mdl: Qwen3-0.6B 로드 (~수초)
+  Srv->>Ev: pre-warm get_index_list (60s)
+  Srv-->>CC: pipeline 준비 완료
+  Note over U,Ev: ※ 다른 세션 열면 위 전체 반복
+    </div>
+  </div>
+
+  <h3>Go — 데몬 수명당 1회</h3>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as 사용자
+  participant LD as launchd
+  participant D as runed
+  participant Disk as ~/.rune/keys/
+  participant V as Rune-Vault
+  participant Mdl as 임베딩 런타임
+
+  LD->>D: 프로세스 start (부팅 시 자동)
+  D->>D: load_config
+  alt state=active & 캐시 있음
+    D->>Disk: EncKey.json / EvalKey.json 로드
+    Note over D,Disk: Vault 호출 skip
+  else state=active & 캐시 없음
+    D->>V: GetPublicKey(token)
+    V-->>D: 키 번들
+    D->>Disk: 캐시 저장
+  end
+  D->>Mdl: 모델 로드 (~10s)
+  D->>D: gRPC 채널 풀 open · keepalive 30s
+  D->>D: ~/.rune/sock listen (0600)
+  D->>D: fsnotify watch(config.json)
+
+  U->>D: POST /reload (첫 활성화 시만)
+  D-->>U: state=active
+  Note over U,Mdl: ※ 세션이 몇 개 열려도<br/>이후 추가 init 없음
+    </div>
+  </div>
+
+  <h3>/rune:deactivate / 재부팅 / 크래시 복구</h3>
+  <table>
+    <thead>
+      <tr><th>이벤트</th><th>Python</th><th>Go</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>deactivate</strong></td>
+        <td>config.json state=dormant 쓰기. 타 세션은 수동 reload 필요</td>
+        <td>POST /reload → 즉시 모든 세션에 반영. 프로세스 유지 (권장) or stop</td>
+      </tr>
+      <tr>
+        <td><strong>머신 재부팅</strong></td>
+        <td>아무것도 안 일어남. 다음 세션 열면 전체 init 반복</td>
+        <td>launchd/systemd 자동 재기동 → 디스크 캐시로 빠른 복구</td>
+      </tr>
+      <tr>
+        <td><strong>sleep/wake</strong></td>
+        <td>gRPC 채널 stale. 세션 재시작에 의존</td>
+        <td>reactive reconnect + 필요 시 OS wake 이벤트 구독</td>
+      </tr>
+      <tr>
+        <td><strong>데몬 크래시</strong></td>
+        <td>호스트가 다음 세션에서 재 spawn (암묵적)</td>
+        <td>launchd/systemd가 자동 재시작. 디스크 캐시로 warm</td>
+      </tr>
+      <tr>
+        <td><strong>reset</strong></td>
+        <td>config.json + keys 삭제</td>
+        <td>config.json + keys + launchd unit + 프로세스 stop</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- CAPTURE -->
+<!-- ============================================================ -->
+<section id="capture">
+  <h2>③ Capture Flow</h2>
+
+  <h3>Python — 서버가 record_builder까지 수행</h3>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor Agt as scribe 서브에이전트
+  participant Srv as Python MCP 서버
+  participant RB as RecordBuilder
+  participant Emb as Embedding
+  participant Ev as enVector
+  participant V as Vault
+  participant Log as capture_log.jsonl
+
+  Agt->>Agt: 트리거 감지 + extracted JSON 조립
+  Agt->>Srv: tool_capture(text, extracted)
+  Srv->>Srv: state·tier2·phases[:7]·title[:60] 검증
+  Srv->>RB: build_phases(pre_extraction)
+  RB->>RB: PII 마스킹 (5 regex)
+  RB->>RB: certainty/status/domain 판정
+  RB->>RB: generate_record_id + suffix
+  RB-->>Srv: DecisionRecord(s)
+  Srv->>Emb: embed(record.embed_text) 1024-dim
+  Srv->>Ev: score(vec) → FHE ciphertext
+  Srv->>V: DecryptScores
+  V-->>Srv: top-k 유사도
+  Note over Srv: ≥0.95 → near_duplicate 블록
+  Srv->>Srv: AES-256-CTR encrypt metadata
+  Srv->>Ev: insert(vec, metadata) → record_id
+  Srv->>Log: append (0600)
+  Srv-->>Agt: {ok, record_id, novelty}
+    </div>
+  </div>
+
+  <h3>Go — 데몬은 metadata를 opaque로 취급</h3>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor Agt as scribe 서브에이전트
+  participant CLI as rune CLI (또는 MCP shim)
+  participant D as runed
+  participant Emb as Embedding
+  participant Ev as envector-go
+  participant Log as capture_log.jsonl
+
+  Agt->>Agt: 트리거 감지 · text_to_embed 선택 · metadata 조립 · PII 마스킹 · record_id 생성
+  Agt->>CLI: rune capture --text-to-embed ... --metadata {...}
+  CLI->>D: POST /capture
+  D->>Emb: embed(text_to_embed) 1024-dim
+  D->>Ev: EncryptVector vec EncKey — CGO to envector C++
+  Ev-->>D: CipherBlock
+  D->>D: AES-256-CTR encrypt(json(metadata), agent_dek)
+  Note over D: 에이전트가 전달한 metadata를<br/>해석하지 않고 봉투만 만듦
+  D->>Ev: Insert(index, [CipherBlock], [envelope])
+  Ev-->>D: vector_id
+  D->>Log: append (0600)
+  D-->>CLI: {ok, record_id}
+  CLI-->>Agt: stdout JSON
+    </div>
+  </div>
+
+  <h3>단계별 이관 매핑</h3>
+  <table>
+    <thead>
+      <tr><th>단계</th><th>Python 위치</th><th>Go 목표 위치</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>트리거 감지</td><td>agents/claude/scribe.md 프롬프트</td><td>동일 (프롬프트 유지)</td></tr>
+      <tr><td>extracted JSON 조립</td><td>서브에이전트 프롬프트</td><td>동일</td></tr>
+      <tr><td>MCP/CLI 경계</td><td><code>tool_capture(text, source, user, channel, extracted)</code></td><td><code>POST /capture {text_to_embed, metadata}</code></td></tr>
+      <tr><td>입력 검증/클램핑</td><td>server.py:1244-1324</td><td><strong>에이전트 md로 이관</strong></td></tr>
+      <tr><td>ExtractionResult → DecisionRecord</td><td>record_builder.py</td><td><strong>삭제 (에이전트 md 책임)</strong></td></tr>
+      <tr><td>PII 마스킹 5 regex</td><td>record_builder.py:89-95</td><td><strong>에이전트 md로 이관</strong></td></tr>
+      <tr><td>Domain / Certainty / Status 판정</td><td>record_builder.py:543-655</td><td><strong>에이전트 md로 이관</strong></td></tr>
+      <tr><td>generate_record_id + suffix</td><td>decision_record.py:245-259</td><td><strong>에이전트 md 또는 envector vector_id 사용</strong></td></tr>
+      <tr><td>Novelty check (≥0.95 블록)</td><td>server.py::_classify_novelty</td><td class="callout warn">(Open Question #7)</td></tr>
+      <tr><td>Embedding</td><td>embedding_service.embed</td><td>internal/embed (런타임은 Open Question #1)</td></tr>
+      <tr><td>FHE 벡터 암호화</td><td>pyenvector 내부</td><td>envector-go + CGO</td></tr>
+      <tr><td>AES-256-CTR metadata 암호화</td><td>pyenvector.utils.aes</td><td>Go crypto/aes CTR 모드</td></tr>
+      <tr><td>enVector Insert</td><td>envector_sdk.py</td><td>envector-go.Insert</td></tr>
+      <tr><td>capture_log append</td><td>server.py::_append_capture_log (0600)</td><td>internal/logio/jsonl.go (0600)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- RECALL -->
+<!-- ============================================================ -->
+<section id="recall">
+  <h2>④ Recall Flow</h2>
+
+  <h3>Python — 합성까지 서버가 처리 (옵션)</h3>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor Agt as retriever 에이전트
+  participant Srv as Python MCP 서버
+  participant QP as QueryProcessor
+  participant S as Searcher
+  participant Emb as Embedding
+  participant Ev as enVector
+  participant V as Vault
+  participant Syn as Synthesizer
+
+  Agt->>Srv: tool_recall(query, topk, filters)
+  Srv->>QP: parse(query)
+  QP->>QP: intent 분류 31 regex 8종 · 엔티티/시간/확장 쿼리
+  QP-->>Srv: ParsedQuery
+  loop expanded[:3]
+    Srv->>Emb: embed(q)
+    Srv->>Ev: score(vec)
+    Srv->>V: DecryptScores
+    Srv->>Ev: remind(entries)
+    Srv->>V: DecryptMetadata
+  end
+  Srv->>S: phase chain 확장 (max 2)
+  Srv->>S: group assembly + filter + recency rerank
+  Srv->>Syn: agent-delegated이면 raw, 아니면 LLM 합성
+  Srv-->>Agt: {results, confidence, sources}
+    </div>
+  </div>
+
+  <h3>Go — 합성은 에이전트가, phase chain은 DEFER</h3>
+  <div class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  actor Agt as retriever 에이전트
+  participant CLI as rune CLI
+  participant D as runed
+  participant QP as query.go
+  participant Emb as Embedding
+  participant Ev as envector-go
+  participant V as vault-go
+
+  Agt->>CLI: rune recall --query ... --topk 5
+  CLI->>D: POST /recall
+  D->>QP: Parse(query)
+  QP-->>D: intent/entities/time/expansion (영어만)
+  loop expanded[:3]
+    D->>Emb: Embed(q)
+    D->>Ev: Score(vec)
+    D->>V: DecryptScores
+    D->>Ev: Remind(entries)
+    D->>V: DecryptMetadata
+  end
+  D->>D: dedup + filter + recency rerank · phase chain DEFER → flat list
+  D-->>CLI: {results, confidence}
+  CLI-->>Agt: stdout JSON
+  Note over Agt: 에이전트가 certainty/사용자 어조에 맞게 직접 합성
+    </div>
+  </div>
+
+  <h3>재랭킹 공식 (양쪽 동일 유지)</h3>
+  <pre><code>adjusted_score = (0.7 × raw_score + 0.3 × recency_decay) × status_multiplier
+recency_decay  = 0.5^(age_days / 90)         // 90일 half-life
+status_mul:    accepted=1.0, proposed=0.9, superseded=0.5, reverted=0.3</code></pre>
+
+  <h3>Phase Chain / Group Expansion</h3>
+  <table>
+    <thead><tr><th>기능</th><th>Python</th><th>Go MVP</th><th>후속</th></tr></thead>
+    <tbody>
+      <tr><td>Phase chain 확장 (sibling fetch)</td><td>구현 (max 2 chains)</td><td class="callout warn"><strong>DEFER</strong> (flat list 반환)</td><td>v1.1 고려</td></tr>
+      <tr><td>Group assembly (phase_seq 정렬)</td><td>구현</td><td><strong>DEFER</strong></td><td>v1.1</td></tr>
+      <tr><td>group_id / phase_seq / phase_total 필드</td><td>응답에 포함</td><td><strong>응답 스키마에는 유지</strong> (에이전트가 그룹핑 가능)</td><td>—</td></tr>
+      <tr><td>Server-side LLM synthesis</td><td>Claude Sonnet 옵션</td><td><strong>삭제</strong> (에이전트가 합성)</td><td>필요 시 추가</td></tr>
+      <tr><td>Multi-query (expanded[:3])</td><td>구현</td><td>단일 쿼리 or 유지 — 결정 필요</td><td>—</td></tr>
+      <tr><td>비영어 LLM 라우팅</td><td>언어 감지 후 LLM</td><td><strong>DEFER</strong> (영어 regex만)</td><td>v1.1</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- MULTISESSION -->
+<!-- ============================================================ -->
+<section id="multisession">
+  <h2>⑤ 멀티세션 & 리소스</h2>
+
+  <div class="compare-grid">
+    <div class="compare-card py">
+      <h4>Python: N 세션 = N 프로세스</h4>
+      <dl class="kv">
+        <dt>프로세스</dt><dd>세션당 1개</dd>
+        <dt>모델 인스턴스</dt><dd>세션 수만큼 복제 (프로세스당 1벌)</dd>
+        <dt>FHE 키</dt><dd>세션 수만큼 로드</dd>
+        <dt>Vault gRPC</dt><dd>세션 수만큼 채널</dd>
+        <dt>Vault handshake</dt><dd>세션마다 새로</dd>
+        <dt>Cold start</dt><dd>세션마다</dd>
+        <dt>State 갱신</dt><dd>세션별로 reload 필요</dd>
+      </dl>
+    </div>
+    <div class="compare-card go">
+      <h4>Go: N 세션 = 1 데몬</h4>
+      <dl class="kv">
+        <dt>프로세스</dt><dd>데몬 1개 (+ CLI는 ephemeral)</dd>
+        <dt>모델 인스턴스</dt><dd>1벌 (세션 수 무관)</dd>
+        <dt>FHE 키</dt><dd>메모리 1세트</dd>
+        <dt>Vault gRPC</dt><dd>채널 1개 (HTTP/2 multiplex)</dd>
+        <dt>Vault handshake</dt><dd>데몬 수명당 1회</dd>
+        <dt>Cold start</dt><dd>데몬 기동 시 1회</dd>
+        <dt>State 갱신</dt><dd>즉시 모든 세션 반영</dd>
+      </dl>
+    </div>
+  </div>
+
+  <h3>동시성 처리 (Go)</h3>
+  <div class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A[세션 A · recall] --> Sock
+  B[세션 B · capture] --> Sock
+  C[세션 C · recall] --> Sock
+  Sock[("~/.rune/sock")] --> Router["HTTP Router"]
+  Router --> G1["goroutine 1<br/>recall(A)"]
+  Router --> G2["goroutine 2<br/>capture(B)"]
+  Router --> G3["goroutine 3<br/>recall(C)"]
+
+  subgraph Shared["공유 자원 (read-only or mutex)"]
+    M[임베딩 모델]
+    K[FHE 키]
+    P[gRPC 채널 풀]
+    S["state (RWMutex)"]
+  end
+
+  G1 --- M
+  G1 --- K
+  G1 --- P
+  G2 --- M
+  G2 --- K
+  G2 --- P
+  G3 --- M
+  G3 --- K
+  G3 --- P
+  G1 -.-> S
+  G2 -.-> S
+  G3 -.-> S
+
+  classDef g fill:#e5f8fb,stroke:#00ADD8
+  classDef shared fill:#f0fff4,stroke:#38a169
+  class G1,G2,G3 g
+  class M,K,P,S shared
+    </div>
+  </div>
+
+  <div class="callout success">
+    <strong>동시성 안전 근거</strong>:
+    <ul>
+      <li><strong>모델 가중치</strong>: 로드 후 read-only 메모리. 행렬 곱만 수행하므로 lock 불필요</li>
+      <li><strong>gRPC 채널</strong>: <code>ClientConn</code>이 goroutine-safe, HTTP/2 stream 다중화</li>
+      <li><strong>FHE 키</strong>: 로드 후 read-only</li>
+      <li><strong>config</strong>: <code>atomic.Pointer[Config]</code>. reader는 <code>cfg.Load()</code>로 lock-free, reload 시 <code>cfg.Store(newCfg)</code>로 atomic swap</li>
+      <li><strong>capture_log.jsonl</strong>: 파일 쓰기는 <code>sync.Mutex</code>로 직렬화</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- CONFIG -->
+<!-- ============================================================ -->
+<section id="config">
+  <h2>⑥ config.json Lifecycle (팀 리뷰 핵심 영역)</h2>
+
+  <p class="lead">이 섹션은 팀이 가장 많이 혼란스러워할 부분입니다. 현재 Python 코드베이스의 실제 동작을 추적한 결과입니다.</p>
+
+  <div class="timeline">
+    <div class="tl-item">
+      <div class="tl-time">T0 — 설치 직후</div>
+      <h5>파일 없음</h5>
+      <p>플러그인 메타데이터만 디스크에 복사됨. <code>~/.rune/</code> 디렉토리 자체가 아직 없음.</p>
+    </div>
+    <div class="tl-item">
+      <div class="tl-time">T1 — /rune:configure 직후</div>
+      <h5>3섹션 최소 JSON</h5>
+      <pre><code>{
+  "vault":    {endpoint, token, ca_cert, tls_disable},
+  "state":    "dormant",
+  "metadata": {configVersion, lastUpdated, installedFrom}
+}</code></pre>
+      <p><code>commands/claude/configure.md</code>가 Write 툴로 JSON을 <strong>직접 하드코딩</strong>. <code>save_config()</code> 경유하지 않음.</p>
+    </div>
+    <div class="tl-item">
+      <div class="tl-time">T2 — 첫 /rune:activate 후</div>
+      <h5>7섹션으로 자동 확장 + metadata 증발</h5>
+      <pre><code>{
+  "vault":     {...},
+  "envector":  {endpoint, api_key},    // ← Vault 번들에서 받은 값
+  "embedding": {mode, model},           // ← dataclass 기본값
+  "llm":       {provider, ... 10 필드}, // ← dataclass 기본값
+  "scribe":    {... 8 필드},            // ← dataclass 기본값
+  "retriever": {topk, confidence_threshold},
+  "state":     "active"
+  // "metadata" 섹션 사라짐 ⚠
+}</code></pre>
+      <p>트리거: <code>server.py:1585</code>에서 <code>save_config(rune_config)</code> 호출 → <code>config.py:311-349</code>의 <code>save_config</code>가 dataclass 전체를 unconditional하게 직렬화.</p>
+    </div>
+  </div>
+
+  <div class="callout danger">
+    <strong>문서와 코드 drift 발견</strong>:
+    <ul>
+      <li><code>commands/claude/configure.md:98</code>은 "enVector credentials are no longer stored locally"라고 주석</li>
+      <li>그러나 <code>save_config()</code>의 L318-321은 envector 섹션을 <strong>명시적으로 씀</strong></li>
+      <li><code>test_save_config_has_envector_section</code>(test_config.py:175)이 이 동작을 스펙으로 <strong>못박음</strong></li>
+      <li>git log: 커밋 <code>5e5033e</code>에서 EnVectorConfig 제거 → <code>95abbbb</code>에서 "cache enVector credentials"로 <strong>되돌림</strong></li>
+      <li>즉 configure.md 주석이 stale. Go 문서 정리 시 반드시 방향 결정 필요</li>
+    </ul>
+  </div>
+
+  <h3>Go에서 결정해야 할 2가지</h3>
+  <table>
+    <thead>
+      <tr><th>이슈</th><th>선택지</th><th>영향</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>enVector 자격증명 persist?</strong></td>
+        <td>(a) Python 방식 유지 (config.json에 캐시)<br/>(b) persist 안 함, 매 부팅 GetPublicKey 재호출</td>
+        <td>(b) 선택 시 config.json 영구 3섹션 유지. 단순. 단 Vault 일시 장애 시 캐시 이점 상실</td>
+      </tr>
+      <tr>
+        <td><strong>T1의 metadata 섹션</strong></td>
+        <td>(a) 유지 (Go 로더가 라운드트립)<br/>(b) 폐기 (현재 Python 방식)<br/>(c) lastUpdated만 갱신</td>
+        <td>(a)(c) 선택 시 <code>configVersion</code>/<code>installedFrom</code> 디버깅 정보 보존</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- SYSTEM CONSIDERATIONS -->
+<!-- ============================================================ -->
+<section id="system">
+  <h2>⑦ 시스템 설계 고려사항 (Go 포팅)</h2>
+  <p class="lead">정책(스코어링, threshold, 공식 등 logical rules)은 <strong>bit-identical 유지</strong>하면서, 시스템 관점에서 <strong>메모리 ↓ · 반응성 ↑ · 안정성 ↑</strong> 데몬으로 전환하기 위한 구체적 고려사항. 4축으로 분리.</p>
+
+  <div class="callout warn">
+    <strong>정량 목표치는 이 문서에 없음</strong> — Python baseline 미측정 + Go 구현 부재라 숫자 commit이 불가능하다. 이 섹션은 <em>정성적 방향</em> (메모리 절감 기대 · 반응성 기대 · 관용적 장애 대응 · 결정적 테스트)만 기술한다. "얼마나" 좋아지는지는 <a href="#benchmark-plan">⑩ Benchmark Plan</a>에서 측정 절차를 정의하고, 실측 후 별도 문서(<code>benchmark/results.md</code>)에 기록한다.
+  </div>
+
+  <h3>7.1 정책 보존 (변경 금지 리스트)</h3>
+  <p>Go로 이식해도 수학적/논리적으로 동일한 결과가 나와야 하는 항목들. <code>internal/policy/</code> 패키지에 단일 진실 소스로 모으고 Python 테스트 fixture를 JSON으로 들여와 회귀 방지.</p>
+
+  <table>
+    <thead>
+      <tr><th>카테고리</th><th>보존할 것</th><th>소스</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Recall 스코어링</td><td>공식 <code>(0.7×raw + 0.3×decay) × status_mul</code>, half-life 90일</td><td>searcher.py:297</td></tr>
+      <tr><td>Status 승수</td><td>accepted 1.0 / proposed 0.9 / superseded 0.5 / reverted 0.3</td><td>searcher.py:35-40</td></tr>
+      <tr><td>Confidence 계산</td><td>top 5, position × certainty × score, min(1, total/2)</td><td>server.py:393-412</td></tr>
+      <tr><td>Novelty 분류</td><td>0.3/0.7/0.95 (runtime) 또는 0.4/0.7/0.93 (benchmark) 중 택일</td><td>embedding.py:16-18, server.py:100-108</td></tr>
+      <tr><td>Query expansion</td><td>상위 3 + 원본, lowercase dedup, 최대 5</td><td>query_processor.py:372-417</td></tr>
+      <tr><td>Intent regex</td><td><strong>31 pattern</strong>, 8 intent, 순서대로 첫 매치</td><td>query_processor.py:70-116</td></tr>
+      <tr><td>Stop words</td><td>정확히 이 81개</td><td>query_processor.py:127-137</td></tr>
+      <tr><td>Entity 추출</td><td>quoted → capitalized(i&gt;0) → tech-name regex 4종, max 10</td><td>query_processor.py:318-356</td></tr>
+      <tr><td>Time scope</td><td>LAST_WEEK/MONTH/QUARTER/YEAR + ALL_TIME default</td><td>query_processor.py:119-124</td></tr>
+      <tr><td>DecisionRecord v2.1</td><td>Domain 19 / Status 4 / Certainty 3 / ReviewState 4 / Sensitivity 3 / SourceType 7</td><td>decision_record.py</td></tr>
+      <tr><td>Embedding text</td><td>reusable_insight &gt; payload.text (trim 후)</td><td>embedding.py:27-30</td></tr>
+      <tr><td>Capture 검증</td><td>phases[:7], title[:60], confidence clamp [0,1]</td><td>server.py:1244-1324</td></tr>
+      <tr><td>AES 모드</td><td>AES-256-CTR, IV 16B random, IV‖CT→base64, 봉투 <code>{"a","c"}</code> — <strong>MAC 없음 (malleability 취약, #46 참조)</strong></td><td>pyenvector/utils/aes.py:52-58</td></tr>
+      <tr><td>Record ID 포맷</td><td><code>dec_YYYY-MM-DD_&lt;domain&gt;_&lt;slug&gt;</code>, slug=title 첫 3단어 lowercase 언더바</td><td>decision_record.py:245-259</td></tr>
+      <tr><td>Suffix 규칙</td><td>멀티 레코드 <code>_p{seq}</code> (phase_chain) / <code>_b{seq}</code> (bundle)</td><td>record_builder.py:338-339</td></tr>
+      <tr><td>Vault endpoint 파싱</td><td>tcp:// / http:// / bare hostname 3가지 → :50051 정규화</td><td>vault_client.py:117-140</td></tr>
+      <tr><td>Health fallback</td><td>gRPC 실패 시 http(s) scheme이면 /mcp /sse suffix 제거 + GET /health</td><td>vault_client.py:321-332</td></tr>
+      <tr><td>PII 마스킹</td><td>email / phone / API key prefix / 32+자 hex / card 5종 regex</td><td>record_builder.py:89-95</td></tr>
+      <tr><td>Quote 패턴</td><td>4종: " " / ' ' / 「 」 / « »</td><td>record_builder.py:72-77</td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.2 메모리 — 구조적 기대</h3>
+  <p>Go 전환의 메모리 이득은 <em>세션 수에 비례하던 복제를 상수로 고정</em>하는 데서 나온다. 단일 데몬 RSS 자체의 절대값은 임베딩 런타임·양자화·EvalKey 로드 방식에 따라 크게 달라지며, <strong>측정 전까지는 수치를 commit하지 않는다</strong>. 실측 계획은 <a href="#benchmark-plan">⑩.2 메모리 벤치</a>.</p>
+
+  <h4>7.2.1 임베딩 모델 (RSS의 큰 비중)</h4>
+  <table>
+    <thead>
+      <tr><th>옵션</th><th>특징</th><th>주의</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>ONNX Runtime Go + Qwen3 ONNX (fp32)</td><td>정확도 최대, pure Go + 단일 바이너리</td><td>Qwen3-0.6B 공식 ONNX export + tokenizer 확인 (완료)</td></tr>
+      <tr style="background: #f0fff4;"><td><strong>int8 양자화 ONNX</strong> (후보)</td><td>RSS 감소 기대, 정확도 손실 가능</td><td>채택 판단은 <strong>벤치 기반</strong>: fp32 vs int8의 novelty/recall@5 품질 차이를 측정해서 허용 범위인지 확인 (<a href="#benchmark-plan">⑩.1</a>). 허용 임계치는 데이터 수집 후 결정</td></tr>
+      <tr><td>Python subprocess 위임</td><td>호환성 보장</td><td>"단일 바이너리" 목표 포기. Fallback 용도</td></tr>
+      <tr><td>Ollama HTTP 위임</td><td>runed 자체 경량화</td><td>외부 서비스 의존성</td></tr>
+    </tbody>
+  </table>
+
+  <h4>7.2.2 EvalKey.json mmap (post-MVP 고려)</h4>
+  <p>디스크 캐시 <code>~/.rune/keys/&lt;key_id&gt;/EvalKey.json</code>을 mmap으로 로드하면 이론적으로 RSS 절감 여지가 있다. 그러나 <strong>이는 premature optimization</strong>이다 — envector-go SDK는 보통 <code>LoadEvalKey(path string)</code> 수준 API만 있으면 충분하고 내부 구현(full-load vs mmap)은 SDK detail이다. FHE evaluation이 EvalKey 전체를 고루 touch하면 page fault로 결국 전부 RSS에 올라가 이득이 0일 수도 있다. <strong>MVP 태도</strong>: 평범한 full-load로 시작 → ⑩.2 벤치로 실측 후 RSS 압박이 실제로 있으면 그때 SDK 팀과 논의. 자세히는 <a href="#decisions">결정 #37</a>.</p>
+
+  <h4>7.2.3 Go 1.25 런타임 튜닝 — 초기 설정 / 벤치 후 조정</h4>
+  <pre><code># 아래 값은 벤치 전 초기 추정치. 실측(⑩.2, ⑩.3) 후 확정.
+
+# OS 레벨 soft cap — heap 사용량이 이 값 근처 오면 GC 더 자주
+GOMEMLIMIT=&lt;TBD&gt;   # 초기값은 실측된 steady-state RSS의 120-150%로 설정
+                    # systemd MemoryMax와 정렬 (cgroup OOM kill 전에 GC 반응)
+
+# GC frequency (기본 100; 낮추면 메모리↓ CPU↑)
+GOGC=&lt;TBD&gt;         # 데몬 idle 시간이 길면 기본 100 유지, heap 압박 시 50으로
+                    # GOMEMLIMIT이 있으므로 GOGC 세밀 조정은 후순위
+
+# CPU 코어 제한 — Go 1.25부터 cgroup v2 CPU quota 자동 인식
+GOMAXPROCS=0        # 기본값. Go 1.25는 cgroup v2의 cpu.max(quota/period)를
+                    # 읽어 GOMAXPROCS를 자동 조정. systemd CPUQuota와 자연 정렬
+                    # 과거 runtime.GOMAXPROCS(runtime.NumCPU()) 수동 조정은 이제
+                    # 안티패턴 (cgroup 초과 → throttling 유발)
+
+# 실험: Green Tea GC — tail latency 개선 (Go 1.25 experimental)
+# GOEXPERIMENT=greenteagc   # 관측성 데이터 충분히 쌓인 뒤 A/B로 검토</code></pre>
+  <p><strong>튜닝 절차</strong>: Phase 1-2 skeleton 완성 후 ⑩.2 벤치로 steady-state RSS 실측 → <code>GOMEMLIMIT</code>을 그 값의 120-150%로 세팅 → <code>GOGC</code>는 idle/active 부하별로 A/B. Green Tea GC는 tail latency가 문제될 때만.</p>
+
+  <h4>7.2.4 메모리 leak 방지 체크리스트</h4>
+  <ul>
+    <li>모든 <code>io.Closer</code>는 <code>defer Close()</code> — HTTP body, gRPC stream</li>
+    <li>goroutine leak: 모든 <code>go func()</code>에 <code>ctx</code> 전파, 상위 cancel로 정리</li>
+    <li><code>context.WithTimeout</code> 필수: HTTP handler 30s / gRPC 10s / embed 5s</li>
+    <li>CI에 <code>go.uber.org/goleak</code>로 테스트 종료 후 남은 goroutine 0 검증</li>
+    <li><code>/debug/pprof/</code> endpoint (<strong>build tag gate: <code>//go:build debug</code></strong>, dev 빌드에서만 컴파일 포함, unix socket 내부로 한정) → heap/goroutine live profiling. 상세는 #50</li>
+    <li>agent_dek 사용 후 best-effort zeroize: <code>for i := range dek { dek[i] = 0 }; runtime.KeepAlive(dek)</code> — <code>KeepAlive</code> 없으면 컴파일러가 앞선 루프를 "dead store"로 제거할 수 있음. 단, escape analysis로 heap 할당 가능성 있으므로 GC 사이클 완료까지는 메모리에 남을 수 있다는 한계 인지 (hard guarantee 아님)</li>
+  </ul>
+
+  <h3>7.3 반응성 — 구조적 이득 기대</h3>
+
+  <h4>7.3.1 Recall 병렬화 — 가장 큰 승리</h4>
+  <pre><code>// Python: expanded_queries[:3] 순차 → 3× RTT
+// Go 1.25: errgroup으로 병렬 → HTTP/2 multiplexing으로 단일 채널 재사용
+// (Go 1.22+ loop-var per-iteration binding으로 `i, q := i, q` shadow 불필요)
+
+g, gctx := errgroup.WithContext(ctx)
+results := make([][]SearchResult, 3)
+errs := make([]error, 3)
+
+for i, q := range parsed.ExpandedQueries[:3] {
+    g.Go(func() error {
+        r, err := searchSingle(gctx, q)
+        if err != nil {
+            errs[i] = err          // 개별 실패 기록 → 메트릭/로그에 반영
+            return nil             // 의도적 nil: 형제 goroutine cancel 방지
+        }                          // (errgroup은 non-nil 반환 시 ctx cancel)
+        results[i] = r
+        return nil
+    })
+}
+_ = g.Wait()                       // nil만 반환되므로 err 사용 안 함
+
+// 전체 실패 감지: 3개 모두 에러면 상위로 전파 (errors.Join는 Go 1.20+)
+if errs[0] != nil && errs[1] != nil && errs[2] != nil {
+    return nil, fmt.Errorf("all recall sub-queries failed: %w", errors.Join(errs...))
+}
+// dedup + merge (partial 허용)</code></pre>
+  <p><strong>구조적 주장</strong>: 순차 RTT 누적이 병렬로 압축될 수 있다. 실제 이득 크기는 Vault/enVector RTT 분포 · gRPC channel HOL blocking · HTTP/2 multiplex 효율에 의존하므로 <strong>벤치가 필요하다</strong> (<a href="#benchmark-plan">⑩.3</a>). gRPC 채널은 goroutine-safe이므로 단일 채널로 병렬 호출 가능하다는 점은 확정된 사실.</p>
+  <p><strong>핵심 구현 주의</strong>: errgroup은 non-nil 반환 시 <code>gctx</code>를 cancel해서 형제 goroutine을 조기 종료한다. 개별 실패를 "부분 결과로 계속"으로 처리하려면 반드시 <code>return nil</code>하고 에러를 외부 슬라이스에 기록해야 한다.</p>
+  <p><strong>Go 1.25 대안 — <code>sync.WaitGroup.Go</code></strong>: errgroup이 제공하는 "첫 에러 시 cancel" 세만틱이 필요 없고 순수한 fan-out만 원한다면 Go 1.25부터 stdlib <code>sync.WaitGroup</code>에 추가된 <code>wg.Go(func())</code>로 Add/Done 보일러플레이트 없이 작성 가능. 단, Recall은 errgroup의 ctx 연동이 필요해 그대로 두고, 더 단순한 사례(로그 라인 병렬 masking 등)에 적용.</p>
+
+  <h4>7.3.2 임베딩 batch</h4>
+  <p>Qwen3-0.6B ONNX는 batch dim 지원. <code>expanded_queries[:3]</code>을 <strong>단일 embed 호출</strong>로 묶으면 3회 inference → 1회로 축소된다. 절감 폭은 batch overhead · 모델 크기 · CPU 캐시 거동에 따라 달라지므로 <strong>벤치 필요</strong> (<a href="#benchmark-plan">⑩.3</a>).</p>
+
+  <h4>7.3.3 Cold start 특성</h4>
+  <ul>
+    <li>데몬 수명 동안 모델 1회 로드 → 세션/요청별 cold start는 구조적으로 소멸 (정성적 주장)</li>
+    <li>데몬 startup 자체는 모델 로드 시간에 좌우됨 — 실측 필요. 대응: <code>/health → 503 {"status":"starting"}</code>로 명시적 상태 표시</li>
+    <li>launchd/systemd로 OS 부팅 시 미리 기동하면 첫 요청 직전에는 준비 완료</li>
+    <li>디스크 캐시 모델 mmap 사용 시 warm cache 이득 존재 여부는 벤치로 확인 (<a href="#benchmark-plan">⑩.2</a>)</li>
+  </ul>
+
+  <h4>7.3.4 Vault RTT 최소화 (post-MVP 가능성)</h4>
+  <p>현재 recall은 Vault 왕복 2회 (<code>DecryptScores</code> + <code>DecryptMetadata</code>). 하나의 <code>DecryptBundle</code> RPC로 묶으면 왕복 1회로 줄일 수 있다. 절감 폭은 단일 Vault RTT 크기에 비례 — 벤치 기반으로 우선순위 판단. rune-admin proto 변경 필요 → <a href="#decisions">결정 #39</a>로 post-MVP 추적.</p>
+
+  <h3>7.4 안정성</h3>
+
+  <h4>7.4.1 Panic isolation + Go 1.22 routing</h4>
+  <pre><code>// Go 1.22+ stdlib ServeMux — method+path 라우팅 (gorilla/mux, chi 등 외부 router 불필요)
+mux := http.NewServeMux()
+mux.Handle("POST /capture",        recoverMW(captureH))
+mux.Handle("POST /recall",         recoverMW(recallH))
+mux.Handle("GET  /vault/status",   recoverMW(vaultStatusH))
+mux.Handle("GET  /captures/{id}",  recoverMW(captureByIDH))  // path param
+mux.Handle("POST /reload",         recoverMW(reloadH))
+
+// 모든 HTTP handler 첫 줄 (middleware로 자동 적용)
+func recoverMW(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        defer func() {
+            if rec := recover(); rec != nil {
+                slog.ErrorContext(r.Context(), "panic in handler",
+                    "panic", rec, "stack", debug.Stack())
+                writeError(w, 500, "INTERNAL_ERROR", "unexpected error")
+            }
+        }()
+        next.ServeHTTP(w, r)
+    })
+}</code></pre>
+  <p>한 handler 버그가 데몬 전체를 죽이지 않음. Go 1.22 stdlib mux는 method mismatch면 405, 미등록 path는 404를 자동 반환해 <strong>별도 router 라이브러리를 도입할 필요가 없다</strong> — 외부 deps 하나 줄임. path param은 <code>r.PathValue("id")</code>로 접근.</p>
+
+  <h4>7.4.2 Graceful shutdown (30s 예산)</h4>
+  <pre><code>ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+// 1. 새 요청 차단 + inflight 완료 대기
+httpServer.Shutdown(ctx)
+
+// 2. 외부 리소스 순서대로 닫기
+sdk.Close()
+vaultConn.Close()
+embedService.Close()
+
+// 3. socket 파일 unlink
+os.Remove(sockPath)</code></pre>
+  <p>inflight capture는 Vault/enVector insert 완료까지 대기 (데이터 유실 방지).</p>
+
+  <h4>7.4.3 외부 의존성 장애 격리 — Python보다 관용적</h4>
+  <div class="callout warn">
+    <strong>Python 현재 동작</strong>: Vault/enVector 일시 장애 시 <code>_set_dormant_with_reason</code>으로 <strong>즉시 dormant 전환</strong> → 너무 공격적이라 복구 시 사용자가 <code>/rune:activate</code> 재실행해야 함.<br>
+    <strong>Go 권장 동작</strong>: exponential backoff 2-retry (1s, 2s) → <code>retryable=true</code> 에러 반환. 연속 3회 이상 실패 시에만 dormant 전환. → <a href="#decisions">결정 #40</a><br>
+    <strong>추가 계층 (권장)</strong>: <code>github.com/sony/gobreaker</code> circuit breaker. 장애가 지속되면 retry도 무의미하고 dial timeout만 누적되므로, open 상태에서는 fast-fail → cascade 방지. recall은 partial result degrade, capture는 fast-fail backpressure. → <a href="#decisions">결정 #51</a>
+  </div>
+
+  <h4>7.4.4 동시성 안전</h4>
+  <table>
+    <thead>
+      <tr><th>자원</th><th>동시성 보장</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>임베딩 모델 가중치</td><td>read-only, lock 불필요</td></tr>
+      <tr><td>FHE 키 (EncKey/EvalKey/DEK)</td><td>read-only, lock 불필요</td></tr>
+      <tr><td>gRPC 채널 (Vault, enVector)</td><td>stdlib thread-safe, HTTP/2 multiplexing</td></tr>
+      <tr><td>config 구조체</td><td><code>atomic.Pointer[Config]</code> (lock-free reads). reload 시 <code>cfg.Store(newCfg)</code>로 atomic swap</td></tr>
+      <tr><td>capture_log.jsonl</td><td><code>sync.Mutex</code> (write 직렬화)</td></tr>
+    </tbody>
+  </table>
+  <p>CI에 <code>go test -race</code> 필수. Go의 race는 Python과 달리 silent failure 가능성 높음.</p>
+
+  <h4>7.4.5 Config reload 안전</h4>
+  <ul>
+    <li>fsnotify debounce <strong>200ms</strong> (vim <code>:w</code> 등 에디터가 rename+write로 다중 이벤트 발생 — 100ms는 짧을 수 있음)</li>
+    <li>파싱 실패 시 <strong>기존 config 유지</strong> (fail-safe, 빈 config로 바뀌지 않도록)</li>
+    <li>reload 완료 시 atomic swap: <code>var cfg atomic.Pointer[Config]; cfg.Store(newCfg)</code> — reader는 <code>cfg.Load()</code>로 lock-free 읽기</li>
+    <li>SIGHUP 핸들러로도 reload 트리거 (launchd에서 보낼 때 유용)</li>
+    <li>fsnotify는 파일 삭제 시 watch 끊김 — atomic rename(`os.Rename`) 기반 재등록 로직 필요</li>
+  </ul>
+
+  <h4>7.4.6 Observability</h4>
+  <ul>
+    <li><code>log/slog</code> structured logging + context 전파로 request_id 자동 주입</li>
+    <li><code>/metrics</code> (opt-in Prometheus): 메트릭 이름은 Prometheus 관례에 따라 <strong>namespace prefix</strong> <code>rune_</code> 필수. <code>rune_capture_total</code>, <code>rune_recall_duration_seconds</code> (histogram, buckets: 0.05/0.1/0.25/0.5/1/2/5), <code>rune_vault_errors_total{endpoint}</code>, <code>rune_embed_duration_seconds</code>, <code>rune_circuit_breaker_state{target}</code> (0=closed/1=open/2=half-open)</li>
+    <li><code>/debug/pprof/</code> (<code>//go:build debug</code> gate + unix socket 내부, prod 바이너리에 컴파일 포함되지 않음): live heap/goroutine profiling</li>
+    <li><strong>Go 1.25 <code>runtime/trace.FlightRecorder</code></strong>: 프로덕션에서 항상 on (low-overhead ring buffer). panic / OOM / latency threshold 초과 시 직전 trace를 <code>~/.rune/logs/flight-&lt;ts&gt;.trace</code>로 덤프 → <code>go tool trace</code>로 사후 분석. 기존 pprof는 snapshot이라 "이미 늦은" 순간 못 찾는 반면, FlightRecorder는 <em>사건 직전</em>을 보존. 크래시 복구(§7.4.1)와 조합하면 원인 분석이 극적으로 쉬워진다. (buffer 크기 · trigger threshold는 ⑩.8 관측성 테스트에서 튜닝)</li>
+    <li><code>_SensitiveFilter</code> 포팅 — <code>log/slog</code> custom Handler (ReplaceAttr hook)에서 value 문자열에 regex 적용. 패턴 세트:
+      <ul>
+        <li>접두사 기반: <code>sk-</code>, <code>pk-</code>, <code>api_</code>, <code>envector_</code>, <code>evt_</code>, <code>ghp_</code> (GitHub PAT), <code>Bearer\s+</code>, <code>AKIA[0-9A-Z]{16}</code> (AWS access key)</li>
+        <li>키워드 뒤 20자 이상: <code>(?i)(token|key|secret|password|authorization|cookie|session)\s*[=:]\s*\S{20,}</code></li>
+        <li>이메일: <code>[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}</code> → <code>user@&lt;redacted&gt;</code></li>
+        <li>카드/전화/JWT: <code>eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}</code> (JWT 3-파트)</li>
+      </ul>
+      Python <code>record_builder.py:89-95</code> PII 마스킹은 record 저장 전 단계, <code>_SensitiveFilter</code>는 <strong>로그 전용</strong> — 두 계층 모두 필요 (중복이 아닌 defense in depth).
+    </li>
+  </ul>
+
+  <h4>7.4.7 프로세스 수명 관리</h4>
+  <pre><code># macOS launchd (~/Library/LaunchAgents/io.envector.runed.plist)
+# 등록: launchctl bootstrap gui/$UID (modern, 10.11+),  load는 deprecated
+# 해제: launchctl bootout gui/$UID ~/Library/LaunchAgents/io.envector.runed.plist
+KeepAlive: true              # 크래시 시 자동 재시작
+RunAtLoad: true              # 로그인 시 자동 기동
+ThrottleInterval: 10         # 재시작 간격 하한 (crash loop 방지)
+StandardOutPath: ~/.rune/logs/stdout.log   # launchd는 리디렉션 필수 (상속 X)
+StandardErrorPath: ~/.rune/logs/stderr.log
+
+# Linux systemd (~/.config/systemd/user/runed.service)
+# 등록: systemctl --user daemon-reload && systemctl --user enable --now runed
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60     # 재시작 루프 방지 (5회/60s 초과 시 멈춤)
+ExecReload=/bin/kill -HUP $MAINPID   # systemctl --user reload runed → SIGHUP
+TimeoutStopSec=30            # graceful shutdown 최대 시간
+OOMScoreAdjust=-100          # OOM killer 우선순위 낮춤
+MemoryMax=1200M              # GOMEMLIMIT과 정렬된 cgroup 한계 (옵션)</code></pre>
+  <p><strong>주의</strong>: launchd의 <code>load</code>/<code>unload</code>는 deprecated, 반드시 <code>bootstrap gui/$UID</code>/<code>bootout</code>로 쓴다. systemd unit은 <code>--user</code> scope로 사용자별 설치 — linger가 꺼져 있으면 로그아웃 시 종료되므로 <code>loginctl enable-linger $USER</code>를 설치 시 같이 실행해야 백그라운드 유지 가능.</p>
+
+  <h4>7.4.8 파일시스템 경계 — Go 1.24 <code>os.Root</code></h4>
+  <p>데몬의 모든 파일 I/O는 <code>~/.rune/</code> 하위로 제한된다. <code>os.Open</code>에 외부 입력 경로를 그대로 넘기면 <code>../</code> 이나 symlink 조작으로 경계 밖으로 탈출할 수 있다. Go 1.24 <code>os.Root</code>는 <strong>커널 수준(<code>openat2</code>/<code>RESOLVE_BENEATH</code>) 경계 검사</strong>를 제공해서 이 클래스 취약점을 원천 차단한다:</p>
+  <pre><code>root, err := os.OpenRoot(os.ExpandEnv("$HOME/.rune"))
+if err != nil { return err }
+defer root.Close()
+
+// 이후 모든 접근은 root 안에서만
+f, err := root.Open("keys/" + keyID + "/EvalKey.json")
+// → "keys/../../etc/passwd" 같은 입력은 에러. symlink가 바깥을 가리켜도 에러.
+</code></pre>
+  <p>영향 범위: <code>config.json</code>, <code>keys/</code>, <code>capture_log.jsonl</code>, <code>logs/</code>, <code>sock</code>, <code>bin/</code> 모두. socket 경로는 <code>root.Path() + "/sock"</code>처럼 합성.</p>
+
+  <h3>7.5 놓치기 쉬운 것 10</h3>
+  <table>
+    <thead>
+      <tr><th>#</th><th>항목</th><th>왜 중요</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>Context 전파</td><td>HTTP → handler → gRPC → embed 전체에 <code>ctx</code>. 상위 cancel이 외부 호출까지 중단</td></tr>
+      <tr><td>2</td><td>Request 크기 제한</td><td><code>http.MaxBytesReader(w, r.Body, 1&lt;&lt;20)</code> — 악성 요청 OOM 유도 방지</td></tr>
+      <tr><td>3</td><td>Rate limit (opt)</td><td><code>golang.org/x/time/rate</code>로 per-endpoint. 멀티세션 폭주 backpressure</td></tr>
+      <tr><td>4</td><td>capture_log rotation</td><td>파일 무한 성장. lumberjack 또는 주기적 truncate. Python엔 없음 — 신규 기능</td></tr>
+      <tr><td>5</td><td>Model SHA256 검증</td><td>다운로드 후 해시 검증, 손상 시 재다운로드</td></tr>
+      <tr><td>6</td><td>Sleep/wake 감지</td><td>OS 이벤트 구독 복잡 → reactive(호출 실패 시 재연결)로 충분</td></tr>
+      <tr><td>7</td><td>Version mismatch</td><td>runed vs CLI 버전 다를 때. HTTP API 버저닝 <code>/v1/</code> 또는 헤더 협상</td></tr>
+      <tr><td>8</td><td>Log rotation</td><td>slog + lumberjack: 100MB or 1일 rotate, retain 5개</td></tr>
+      <tr><td>9</td><td>Time drift</td><td>created_at UTC 통일, NTP 의존 명시. recency 공식은 UTC 전제</td></tr>
+      <tr><td>10</td><td>Embedding 실패 격리</td><td>한 expanded query가 embed 실패해도 다른 쿼리 결과로 계속 응답</td></tr>
+    </tbody>
+  </table>
+
+  <h3>7.6 Phase 1 skeleton 우선순위</h3>
+  <p>최우선 5가지 — 다른 거 아무리 해도 이게 없으면 반응성/안정성 조준 못 함:</p>
+  <ol>
+    <li><strong><code>internal/policy/</code> 패키지</strong> — §7.1 상수를 모두 여기에. Python 테스트 fixture를 JSON으로 들여와 unit test로 pin.</li>
+    <li><strong><code>context.Context</code> 관행</strong> — 모든 함수 시그니처 <code>ctx context.Context</code> 첫 인자. 타임아웃 체인.</li>
+    <li><strong><code>defer recover()</code> 래퍼</strong> — HTTP middleware로 모든 handler 자동 보호.</li>
+    <li><strong>structured logging + request_id</strong> — <code>slog</code> + context에 request_id 주입.</li>
+    <li><strong>recall 병렬화 (<code>errgroup</code>)</strong> — 반응성 최대 이득 포인트.</li>
+  </ol>
+  <p>다음 6-10:</p>
+  <ol start="6">
+    <li><code>GOMEMLIMIT</code> 설정 + pprof endpoint</li>
+    <li>Graceful shutdown (SIGTERM 30s)</li>
+    <li>fsnotify debounce 200ms (rename+write 다중 이벤트 대응, 100ms는 짧을 수 있음)</li>
+    <li>goroutine leak test (<code>goleak</code>)</li>
+    <li>외부 장애 시 2-retry 후 dormant 대신 retryable error</li>
+  </ol>
+</section>
+
+<!-- ============================================================ -->
+<!-- STRUCTURE & TESTING -->
+<!-- ============================================================ -->
+<section id="structure">
+  <h2>⑧ 구조 & 테스트 전략 (모듈화 · Swappability · 온보딩)</h2>
+  <p class="lead">어떤 컴포넌트든 — 정책, 임베딩 런타임, Vault 클라이언트, 에러 응답 포맷 — <strong>쉽게 갈아끼울 수 있게</strong> 설계. 새 기여자가 <strong>30분 안에 구조를 이해</strong>하고, 모듈별로 제대로 동작하는지 <strong>실질 테스트</strong>를 작성할 수 있도록.</p>
+
+  <h3>8.1 설계 원칙 5</h3>
+  <div class="compare-grid">
+    <div class="compare-card go">
+      <h4>1. No globals. 모든 것 주입</h4>
+      <p>생성자 파라미터로 dependency 전달. <code>init()</code> 마법 금지. 전역 변수는 <code>version</code> 같은 build-time 상수만.</p>
+    </div>
+    <div class="compare-card go">
+      <h4>2. Narrow interfaces at consumption point</h4>
+      <p>"Accept interfaces, return structs" (Rob Pike). Interface는 사용하는 쪽(<code>internal/ports/</code>)에서 정의, 구현은 <code>internal/adapters/</code>.</p>
+    </div>
+    <div class="compare-card go">
+      <h4>3. Pure policy 패키지</h4>
+      <p><code>internal/policy/</code>는 I/O 없음, 외부 deps 없음. 순수 함수 + 상수만. 테스트 극히 빠르고, Python 동작과 bit-identical 검증 쉬움.</p>
+    </div>
+    <div class="compare-card go">
+      <h4>4. Thin transport layer</h4>
+      <p><code>internal/transport/http/</code>는 I/O만 — request 파싱, middleware, response 포맷. 비즈니스 로직 금지. 모두 <code>internal/daemon/*/service.go</code>로 위임.</p>
+    </div>
+    <div class="compare-card go" style="grid-column: 1 / -1;">
+      <h4>5. Every port has a mock</h4>
+      <p>각 <code>ports.*</code> interface는 같은 패키지에 <code>Mock*</code> 구조체를 제공. 테스트에서 한 줄로 주입. testify/mock 같은 framework는 도입 안 함 (stdlib <code>testing</code>만).</p>
+    </div>
+  </div>
+
+  <h3>8.2 패키지 레이아웃 (Hexagonal / Ports &amp; Adapters)</h3>
+  <pre><code>core/
+├── README.md                    # 5분 아키텍처 요약
+├── ARCHITECTURE.md              # 30분 심화
+├── CONTRIBUTING.md              # dev loop, 테스트, PR
+│
+├── cmd/                         # entry points
+│   ├── rune/main.go             #   CLI (thin argv → HTTP)
+│   ├── runed/main.go            #   daemon
+│   └── rune-mcp/main.go         #   MCP shim (optional)
+│
+├── internal/
+│   ├── policy/                  # ★ PURE. I/O 없음. deps 없음.
+│   │   ├── doc.go               #   패키지 역할 설명
+│   │   ├── recency.go           #   (0.7×raw + 0.3×decay) × mul
+│   │   ├── novelty.go           #   near_duplicate/related/evolution/novel
+│   │   ├── confidence.go        #   top 5 weighted average
+│   │   ├── intent.go            #   31 regex patterns
+│   │   ├── entities.go          #   4-stage extraction
+│   │   ├── expansion.go         #   intent + entity expansion
+│   │   ├── timescope.go         #   16 patterns
+│   │   ├── stopwords.go         #   81 words
+│   │   ├── recordid.go          #   dec_YYYY-MM-DD_domain_slug
+│   │   ├── pii.go               #   5 regex masking
+│   │   ├── schemes.go           #   DefaultScheme / BenchmarkScheme 버저닝
+│   │   └── testdata/            #   Python에서 생성한 golden fixtures
+│   │
+│   ├── domain/                  # 도메인 타입
+│   │   ├── record.go            #   DecisionRecord v2.1
+│   │   ├── query.go             #   ParsedQuery, SearchResult
+│   │   └── errors.go            #   RuneError codes + mapping
+│   │
+│   ├── ports/                   # ★ 인터페이스 (계약)
+│   │   ├── embedder.go          #   Embedder interface
+│   │   ├── envector.go          #   EnVectorClient interface
+│   │   ├── vault.go             #   VaultClient interface
+│   │   ├── crypto.go            #   MetadataEncryptor interface
+│   │   ├── store.go             #   CaptureLog interface
+│   │   ├── config.go            #   ConfigStore interface
+│   │   └── clock.go             #   Clock interface (테스트 시간 고정)
+│   │
+│   ├── adapters/                # ★ 구현체 (swappable)
+│   │   ├── embed/
+│   │   │   ├── onnx.go          #   ONNX Runtime Go
+│   │   │   ├── subprocess.go    #   Python subprocess (fallback)
+│   │   │   ├── ollama.go        #   HTTP 위임
+│   │   │   ├── mock.go          #   테스트용
+│   │   │   └── factory.go       #   cfg.Mode → 적절한 impl
+│   │   ├── envector/
+│   │   │   ├── client.go        #   envector-go SDK wrapper
+│   │   │   └── mock.go
+│   │   ├── vault/
+│   │   │   ├── client.go        #   gRPC VaultClient
+│   │   │   └── mock.go
+│   │   ├── crypto/
+│   │   │   ├── aes_ctr.go       #   AES-256-CTR 구현
+│   │   │   └── mock.go
+│   │   ├── store/
+│   │   │   ├── jsonl.go         #   capture_log.jsonl append-only
+│   │   │   └── mock.go
+│   │   └── clock/
+│   │       ├── real.go          #   time.Now
+│   │       └── fake.go          #   FixedClock{Now: ...}
+│   │
+│   ├── daemon/                  # 비즈니스 로직 (services)
+│   │   ├── capture/
+│   │   │   ├── service.go       #   Service struct + Capture(ctx, req)
+│   │   │   ├── batch.go         #   BatchCapture
+│   │   │   ├── service_test.go  #   mock deps로 검증
+│   │   │   └── doc.go
+│   │   ├── retriever/
+│   │   │   ├── service.go
+│   │   │   ├── query.go         #   uses policy.Intent + policy.Entity
+│   │   │   ├── search.go        #   errgroup 병렬 FHE round-trip
+│   │   │   ├── rerank.go        #   uses policy.Recency + policy.Status
+│   │   │   ├── service_test.go
+│   │   │   └── doc.go
+│   │   └── lifecycle/
+│   │       ├── startup.go
+│   │       ├── shutdown.go
+│   │       └── reload.go
+│   │
+│   ├── transport/               # I/O 레이어
+│   │   ├── http/
+│   │   │   ├── server.go        #   unix socket listener
+│   │   │   ├── middleware.go    #   recover, logging, request_id
+│   │   │   ├── handlers.go      #   thin: req → service → resp
+│   │   │   └── handlers_test.go
+│   │   └── mcp/                 #   MCP shim (if kept)
+│   │       └── stdio.go
+│   │
+│   ├── logging/
+│   │   ├── logger.go            #   slog setup
+│   │   ├── filter.go            #   SensitiveFilter (포팅)
+│   │   └── requestid.go
+│   │
+│   └── version/
+│       └── version.go           #   build-time injected
+│
+└── test/
+    ├── integration/             # 실 Vault + enVector (tag: integration)
+    └── e2e/                     # 데몬 spawn + CLI 전체 스택</code></pre>
+
+  <h3>8.3 Ports — 핵심 interface 예시</h3>
+  <pre><code>// internal/ports/embedder.go
+package ports
+
+import "context"
+
+// Embedder converts text to L2-normalized float32 vectors.
+//
+// Implementations:
+//   - adapters/embed.ONNXAdapter     — ONNX Runtime Go (prod default)
+//   - adapters/embed.SubprocessAdapter — Python subprocess (fallback)
+//   - adapters/embed.OllamaAdapter   — HTTP delegation
+//   - adapters/embed.MockEmbedder    — unit tests
+//
+// Swap by changing config.embedding.mode + restarting daemon.
+// No code change needed in consumers (daemon/capture, daemon/retriever).
+type Embedder interface {
+    // Embed returns a single vector. Dimension equals Dimension().
+    Embed(ctx context.Context, text string) ([]float32, error)
+
+    // EmbedBatch returns vectors for each text. Implementations
+    // may batch internally for efficiency (ONNX supports batch dim).
+    EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
+
+    // Dimension returns the output vector dimension (1024 for Qwen3-0.6B).
+    Dimension() int
+
+    // Ready reports whether the model is loaded and ready to serve.
+    Ready() bool
+}</code></pre>
+
+  <h3>8.4 Adapter 예시 (ONNX + Mock)</h3>
+  <pre><code>// internal/adapters/embed/onnx.go
+package embed
+
+type ONNXAdapter struct {
+    session   *ort.DynamicAdvancedSession
+    tokenizer *Tokenizer
+    dim       int
+    ready     atomic.Bool
+}
+
+func NewONNX(cfg ONNXConfig) (*ONNXAdapter, error) { /* ... */ }
+
+func (a *ONNXAdapter) Embed(ctx context.Context, text string) ([]float32, error) {
+    // 1. tokenize, 2. run session, 3. L2 normalize
+}
+
+// internal/adapters/embed/mock.go
+package embed
+
+type MockEmbedder struct {
+    EmbedFunc      func(ctx context.Context, text string) ([]float32, error)
+    EmbedBatchFunc func(ctx context.Context, texts []string) ([][]float32, error)
+    Dim            int
+    CallCount      atomic.Int64
+}
+
+func (m *MockEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+    m.CallCount.Add(1)
+    if m.EmbedFunc != nil {
+        return m.EmbedFunc(ctx, text)
+    }
+    // default: deterministic unit vector (first dim = 1.0)
+    v := make([]float32, m.Dim)
+    v[0] = 1.0
+    return v, nil
+}
+
+func (m *MockEmbedder) Dimension() int { return m.Dim }
+func (m *MockEmbedder) Ready() bool    { return true }</code></pre>
+
+  <h3>8.5 Policy 버저닝 (수학 정책 스와핑)</h3>
+  <pre><code>// internal/policy/schemes.go
+package policy
+
+// Scheme bundles all tunable policy constants for a single coherent version.
+type Scheme struct {
+    Recency      RecencyScheme     // (0.7×raw + 0.3×decay) × status_mul, half-life
+    Novelty      NoveltyThresholds // novel / related / near_duplicate
+    StatusMul    map[string]float64
+    Intent       IntentPatterns    // 31 regex, ordered
+    StopWords    map[string]struct{}
+    TimeScope    TimeScopePatterns
+    PII          []PIIRule
+}
+
+// DefaultScheme은 현재 Python runtime 동작과 일치 (2026-04-17).
+var DefaultScheme = Scheme{
+    Recency: RecencyScheme{
+        HalfLifeDays:     90,
+        SimilarityWeight: 0.7,
+        RecencyWeight:    0.3,
+    },
+    Novelty: NoveltyThresholds{
+        Novel:   0.3,   // server.py:100-108 default 인자
+        Related: 0.7,
+        NearDup: 0.95,
+    },
+    StatusMul: map[string]float64{
+        "accepted": 1.0, "proposed": 0.9, "superseded": 0.5, "reverted": 0.3,
+    },
+    // ... 나머지
+}
+
+// BenchmarkScheme은 embedding.py:16-18의 Qwen3-0.6B benchmark 2026-04-08 튜닝 값.
+// 결정 #7에서 canonical로 채택 시 사용.
+var BenchmarkScheme = Scheme{
+    Novelty: NoveltyThresholds{Novel: 0.4, Related: 0.7, NearDup: 0.93},
+    // 나머지는 Default와 동일
+}</code></pre>
+  <p>Service는 <code>*Scheme</code>을 생성자로 받음. config에서 scheme 이름 선택. A/B 테스트도 가능.</p>
+
+  <h3>8.6 테스트 전략 5-tier (+ Go 1.25 synctest)</h3>
+  <table>
+    <thead>
+      <tr><th>Tier</th><th>위치</th><th>특징</th><th>예시</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1. Pure policy</strong></td>
+        <td><code>internal/policy/*_test.go</code></td>
+        <td>zero deps, 매우 빠름 (pure function), table-driven, golden fixture</td>
+        <td><code>TestRecencyFormula</code>: <code>(raw=0.87, age=30d, accepted) → 0.847</code></td>
+      </tr>
+      <tr>
+        <td><strong>2. Adapter</strong></td>
+        <td><code>internal/adapters/*/[impl]_test.go</code></td>
+        <td>adapter가 port 계약 만족 검증. gRPC는 bufconn, HTTP는 httptest</td>
+        <td><code>TestONNXAdapter_EmbedsDim1024</code>, <code>TestVaultClient_HealthFallback</code></td>
+      </tr>
+      <tr>
+        <td><strong>3. Service</strong></td>
+        <td><code>internal/daemon/*/service_test.go</code></td>
+        <td>모든 deps를 mock으로 주입. 비즈니스 로직 happy/edge/error 경로</td>
+        <td><code>TestCapture_NearDuplicate_Blocked</code>, <code>TestRecall_ParallelExpansion</code></td>
+      </tr>
+      <tr style="background:#f0f9ff;">
+        <td><strong>3½. Concurrency (synctest)</strong></td>
+        <td><code>internal/daemon/*/sync_test.go</code></td>
+        <td><strong>Go 1.25 <code>testing/synctest</code></strong>: 가짜 시계 + goroutine barrier. <code>time.Sleep</code>/<code>time.After</code>/<code>time.Ticker</code>를 결정적으로 빠르게 진행. sleep 기반 테스트가 <em>flaky 없이, 1μs 안에</em> 완료</td>
+        <td><code>TestDebounce_FsNotify_200ms</code>, <code>TestCircuitBreaker_OpenAfter5Failures</code>, <code>TestRetry_ExponentialBackoff</code>, <code>TestConfigReload_AtomicSwap</code></td>
+      </tr>
+      <tr>
+        <td><strong>4. Integration</strong></td>
+        <td><code>test/integration/</code> (build tag <code>//go:build integration</code>)</td>
+        <td>실 Vault + enVector 테스트 환경. CI 별도 잡</td>
+        <td><code>TestCaptureThenRecall_RealBackends</code></td>
+      </tr>
+      <tr>
+        <td><strong>5. E2E</strong></td>
+        <td><code>test/e2e/</code></td>
+        <td>데몬 spawn + CLI 호출 + 응답 검증</td>
+        <td><code>TestDaemon_GracefulShutdown</code>, <code>TestCLI_CaptureFlow</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h4>8.6a synctest 예시 — fsnotify debounce 200ms</h4>
+  <pre><code>// internal/daemon/config/reload_sync_test.go
+//go:build go1.25   // synctest는 1.25부터 stable (1.24는 GOEXPERIMENT)
+
+func TestDebounce(t *testing.T) {
+    synctest.Test(t, func(t *testing.T) {
+        loader := newLoader(200 * time.Millisecond)
+        done := make(chan struct{})
+        go func() {
+            loader.Run()      // fsnotify 이벤트 처리 루프
+            close(done)
+        }()
+
+        // 150ms 간격으로 3번 이벤트 → debounce로 1번만 reload 기대
+        loader.events &lt;- "write"
+        synctest.Wait()       // 모든 goroutine이 blocked될 때까지 기다림
+        time.Sleep(150 * time.Millisecond)
+        loader.events &lt;- "write"
+        synctest.Wait()
+        time.Sleep(150 * time.Millisecond)
+        loader.events &lt;- "write"
+
+        // 300ms 대기 → debounce 발화
+        time.Sleep(300 * time.Millisecond)
+        synctest.Wait()
+        require.Equal(t, 1, loader.reloadCount.Load())
+    })
+}</code></pre>
+  <p><strong>왜 중요한가</strong>: fsnotify/circuit breaker/retry는 "시간 의존성" 때문에 전통적으로 <code>time.Sleep(500 * time.Millisecond)</code>을 테스트에 박아야 했다 → flaky + 느림. synctest는 <strong>시계를 소스 레벨 수정 없이</strong> 가상화하고 "모든 goroutine이 blocked"되는 순간을 <code>synctest.Wait()</code>로 잡아낸다. 결과적으로 타이밍 테스트가 <em>결정적</em>이 되고 초당 수천 개 실행 가능.</p>
+
+  <h4>Pure policy test 예시 (table-driven + golden)</h4>
+  <pre><code>// internal/policy/recency_test.go
+func TestRecencyDecay(t *testing.T) {
+    tests := []struct {
+        name    string
+        ageDays float64
+        want    float64
+    }{
+        {"fresh", 0, 1.0},
+        {"30d", 30, 0.7937},
+        {"90d (half-life)", 90, 0.5},
+        {"180d", 180, 0.25},
+        {"365d", 365, 0.0625},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got := policy.RecencyDecay(tt.ageDays, policy.DefaultScheme.Recency)
+            if math.Abs(got-tt.want) > 0.001 {
+                t.Errorf("got %.4f, want %.4f", got, tt.want)
+            }
+        })
+    }
+}
+
+// Python golden fixture 검증
+func TestNovelty_MatchesPython(t *testing.T) {
+    // testdata/novelty_python.json was generated by:
+    //   python scripts/gen_golden.py novelty > testdata/novelty_python.json
+    data, _ := os.ReadFile("testdata/novelty_python.json")
+    var cases []struct {
+        Similarity float64 `json:"similarity"`
+        Expected   string  `json:"expected_class"`
+    }
+    json.Unmarshal(data, &amp;cases)
+
+    for _, c := range cases {
+        got := policy.ClassifyNovelty(c.Similarity, policy.DefaultScheme.Novelty)
+        if got.Class != c.Expected {
+            t.Errorf("sim=%.3f: got %s, want %s", c.Similarity, got.Class, c.Expected)
+        }
+    }
+}</code></pre>
+
+  <h4>Service test 예시 (mock 주입)</h4>
+  <pre><code>// internal/daemon/capture/service_test.go
+func TestCapture_HappyPath(t *testing.T) {
+    fakeClock := &amp;clock.Fixed{Now: time.Date(2026,4,17,0,0,0,0,time.UTC)}
+    mockEmbed := &amp;embed.MockEmbedder{Dim: 1024}
+    mockEnv := &amp;envector.MockClient{
+        InsertFunc: func(ctx context.Context, idx string, vs [][]float32, m []string) ([]string, error) {
+            return []string{"vec_abc123"}, nil
+        },
+    }
+    mockVault := &amp;vault.MockClient{
+        DecryptScoresFunc: func(ctx context.Context, _ string, _ int) ([]ScoreEntry, error) {
+            return []ScoreEntry{{Score: 0.3}}, nil // novel (&lt; 0.95)
+        },
+    }
+    mockLog := &amp;store.MockLog{}
+    mockCrypto := &amp;crypto.MockEncryptor{
+        EncryptFunc: func(plain []byte, _ string, _ []byte) (string, error) {
+            return `{"a":"agent1","c":"ct"}`, nil
+        },
+    }
+
+    svc := capture.New(capture.Deps{
+        Embedder: mockEmbed, EnVector: mockEnv, Vault: mockVault,
+        Crypto: mockCrypto, Log: mockLog, Clock: fakeClock,
+        Scheme: policy.DefaultScheme, AgentID: "agent1",
+        IndexName: "team-decisions",
+    })
+
+    resp, err := svc.Capture(ctx, capture.Request{
+        TextToEmbed: "PostgreSQL chosen over MongoDB",
+        Metadata:    map[string]any{"title": "PG choice"},
+    })
+
+    require.NoError(t, err)
+    assert.Equal(t, "vec_abc123", resp.RecordID)
+    assert.Equal(t, int64(1), mockEmbed.CallCount.Load())
+    assert.Len(t, mockLog.Entries, 1)
+}
+
+func TestCapture_NearDuplicate_Blocked(t *testing.T) {
+    mockVault := &amp;vault.MockClient{
+        DecryptScoresFunc: func(context.Context, string, int) ([]ScoreEntry, error) {
+            return []ScoreEntry{{Score: 0.97}}, nil // near_duplicate (≥ 0.95)
+        },
+    }
+    // ... 주입
+    resp, _ := svc.Capture(ctx, req)
+
+    assert.False(t, resp.Captured)
+    assert.Equal(t, "near_duplicate", resp.Novelty.Class)
+    // Insert는 호출 안 되었는지 확인
+    assert.Equal(t, int64(0), mockEnv.InsertCallCount.Load())
+}</code></pre>
+
+  <h3>8.7 Mock convention (handwritten, generator 없음)</h3>
+  <p><strong>전략</strong>: mock <em>generator</em> (gomock / mockery / moq)는 도입하지 않고 <strong>handwritten mock</strong>만 쓴다. 그러나 assertion library로 <code>testify/{require,assert}</code>는 사용 — 테스트 코드 ergonomics를 위한 실용적 타협.</p>
+  <p>모든 mock은 같은 패턴:</p>
+  <ul>
+    <li>구조체 이름: <code>Mock&lt;InterfaceName&gt;</code> (예: <code>MockEmbedder</code>)</li>
+    <li>각 메서드마다 <code>XxxFunc func(...)</code> 필드 — 지정 시 그 동작, 없으면 default</li>
+    <li>호출 카운트: <code>XxxCallCount atomic.Int64</code> — spy 역할, race detector 대응</li>
+    <li>기록 슬라이스 (필요 시): <code>Entries []&lt;type&gt;</code></li>
+  </ul>
+  <p><strong>왜 generator 안 씀</strong>: (a) 코드 생성 diff로 리뷰 부담 추가, (b) stack trace가 generated code 경로로 가서 가독성 저하, (c) 100 LoC 미만이라 유지 부담 없음, (d) 팀원이 새 mock 만들 때 명확한 pattern 복제 가능.</p>
+  <p><strong>왜 testify assertions 씀</strong>: <code>require.NoError(t, err)</code> (fatal)과 <code>assert.Equal(t, want, got)</code> (non-fatal)의 구분이 실질적 가치. 표현력 있는 실패 메시지 무료. stdlib `if err != nil { t.Fatalf(...) }`보다 의도 명확.</p>
+  <div class="callout info">
+    <strong>대안 (더 엄격한 선택)</strong>: testify도 버리고 stdlib만 쓰려면 helper 함수 (<code>mustNoErr(t, err)</code>, <code>checkEqual(t, want, got)</code>)를 <code>test/helper.go</code>에 모아 사용. deps zero가 되지만 표현력은 다소 감소. 팀 선호에 따라 결정.
+  </div>
+
+  <h3>8.8 Golden fixture: Python ↔ Go 일치 검증</h3>
+  <pre><code># scripts/gen_golden.py
+# Python에서 실측값을 JSON으로 덤프 → Go가 같은 입력으로 재현
+
+import json
+from agents.common.schemas.embedding import classify_novelty
+
+cases = [
+    {"similarity": 0.0, "expected_class": classify_novelty(0.0)["class"]},
+    {"similarity": 0.5, "expected_class": classify_novelty(0.5)["class"]},
+    {"similarity": 0.95, "expected_class": classify_novelty(0.95)["class"]},
+    # ...
+]
+print(json.dumps(cases, indent=2))
+# → testdata/novelty_python.json</code></pre>
+  <p>Go 테스트가 이 JSON을 읽고 자기 구현과 비교. policy 변경 시 Python과 drift가 발견됨.</p>
+
+  <h3>8.9 Swap 시나리오 — "어떻게 갈아끼나"</h3>
+  <table>
+    <thead>
+      <tr><th>작업</th><th>어디 건드리나</th><th>나머지 코드 영향</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Recency half-life 90d → 60d</td>
+        <td><code>internal/policy/schemes.go</code>의 <code>DefaultScheme.Recency</code></td>
+        <td>없음 (service는 scheme struct만 참조)</td>
+      </tr>
+      <tr>
+        <td>ONNX → Python subprocess</td>
+        <td>config <code>embedding.mode = "subprocess"</code>. adapter factory가 자동 선택</td>
+        <td>없음. service는 <code>ports.Embedder</code>만 알고 구현체는 모름</td>
+      </tr>
+      <tr>
+        <td>AES 모드 CTR → GCM</td>
+        <td>새 adapter <code>crypto/aes_gcm.go</code> 추가 + config flag</td>
+        <td>없음. <code>ports.MetadataEncryptor</code>는 동일</td>
+      </tr>
+      <tr>
+        <td>Vault 인증 방식 변경</td>
+        <td><code>adapters/vault/client.go</code>의 connect 로직만</td>
+        <td>없음</td>
+      </tr>
+      <tr>
+        <td>Recall 응답 포맷 추가 필드</td>
+        <td><code>domain/query.go</code>의 <code>RecallResponse</code> + handler의 마샬링</td>
+        <td>Service 로직 무변경</td>
+      </tr>
+      <tr>
+        <td>Intent regex 31 → 35개</td>
+        <td><code>internal/policy/intent.go</code>의 슬라이스만</td>
+        <td>test fixture 업데이트 필요</td>
+      </tr>
+      <tr>
+        <td>새 벡터 DB 백엔드 추가</td>
+        <td>새 adapter <code>envector/qdrant.go</code> 또는 비슷한 구현. factory에 분기</td>
+        <td>없음. <code>ports.EnVectorClient</code> 계약만 만족하면 됨</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>8.10 온보딩 자료 (README.md 첫 페이지)</h3>
+  <pre><code># runed — Rune Daemon
+
+3-min read.
+
+## What is this?
+FHE-encrypted team memory daemon. Captures decisions, recalls relevant past decisions.
+
+## Architecture in 1 diagram
+[hexagonal diagram: policy core + ports/adapters layers]
+
+## Key idea
+- POLICY (수학, regex, constants) → internal/policy/ (PURE, swappable version)
+- PORTS (interfaces runed depends on) → internal/ports/
+- ADAPTERS (real implementations + mocks) → internal/adapters/
+- SERVICES (business logic) → internal/daemon/*/
+- TRANSPORT (HTTP/MCP I/O) → internal/transport/
+
+## "I want to..."
+| Task | Where to start |
+|---|---|
+| Change recall scoring formula | internal/policy/recency.go |
+| Tune novelty threshold | internal/policy/schemes.go |
+| Add new embedding backend | internal/adapters/embed/mynew.go implementing ports.Embedder |
+| Test capture without real Vault | &amp;vault.MockClient{DecryptScoresFunc: ...} 주입 |
+| Add new MCP tool | internal/transport/http/handlers.go에 handler + internal/daemon에 service 추가 |
+| Debug live issue | /debug/pprof endpoint (opt-in) + ~/.rune/logs/daemon.log |
+| Run full test suite | mise run test (또는 go test ./...) |
+| Run integration tests | mise run test:integration (실 Vault/enVector 필요) |
+
+## 5 Principles
+1. No globals. Everything injected.
+2. Narrow interfaces at consumption point.
+3. Pure policy package (no I/O).
+4. Thin transport layer.
+5. Every port has a mock.
+
+## Next
+- 30-min deep dive: ARCHITECTURE.md
+- Per-package docs: internal/*/doc.go
+- PR guide: CONTRIBUTING.md</code></pre>
+
+  <h3>8.11 doc.go 관행 — 각 패키지에</h3>
+  <pre><code>// internal/policy/doc.go
+//
+// Package policy contains pure, dependency-free logic for all
+// scoring, classification, and text processing rules that must be
+// bit-identical to the Python implementation.
+//
+// Nothing in this package:
+//   - reads files or network
+//   - uses time.Now() directly (takes time.Time as param)
+//   - logs
+//   - allocates goroutines
+//
+// Everything is pure: same input → same output. Trivially testable,
+// trivially swappable via Scheme versioning.
+//
+// To change a policy constant:
+//   1. Edit schemes.go (add a new named Scheme or modify DefaultScheme)
+//   2. Update testdata golden fixtures (scripts/gen_golden.py)
+//   3. Run go test ./internal/policy/...
+//
+// To swap runtime behavior: change config.policy.scheme_name and
+// restart daemon. No code change needed.
+package policy</code></pre>
+
+  <div class="callout success">
+    <strong>결과적 품질</strong>: 이 구조면 새 기여자가 (a) README 3분 읽고 큰 그림 이해, (b) "I want to..." 표로 건드릴 위치 즉시 파악, (c) 해당 파일 옆의 doc.go로 제약 파악, (d) 기존 mock 패턴 복사해서 테스트 작성 — 각 단계가 분리되어 있어 한 번에 이해할 분량이 작음.
+  </div>
+
+  <h3>8.12 Phase 1에 먼저 만들 것 (구조 기반)</h3>
+  <ol>
+    <li><code>internal/policy/</code> 패키지 + Scheme 타입 + DefaultScheme 상수 + 모든 pure 함수</li>
+    <li><code>internal/ports/</code> 6개 interface (Embedder, EnVectorClient, VaultClient, MetadataEncryptor, CaptureLog, Clock)</li>
+    <li>각 port의 <code>Mock*</code> 구조체 (adapters/*/mock.go)</li>
+    <li><code>internal/domain/</code>의 DecisionRecord v2.1 타입 + RuneError</li>
+    <li><code>README.md</code> + <code>ARCHITECTURE.md</code> + 각 패키지 <code>doc.go</code></li>
+    <li>Policy 패키지 golden fixture generation (<code>scripts/gen_golden.py</code>) + test</li>
+  </ol>
+  <p>이 6개가 갖춰지면 실제 adapter/service 구현 전에 이미 <strong>Python 동작과 일치하는 pure policy 레이어 + 모든 경계 계약</strong>이 CI를 통과함. 그 상태에서 adapter를 하나씩 추가.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- DECISIONS -->
+<!-- ============================================================ -->
+<section id="decisions">
+  <h2>⑨ 결정 보드 (팀 리뷰 포인트)</h2>
+
+  <p class="lead">카테고리별로 구분된 결정 카드들입니다. 우선순위(블로킹/높음/중간/낮음)와 해당 Phase를 표시했습니다.</p>
+
+  <h3>A. Phase 0 블로킹 결정 (1주 내)</h3>
+  <div class="decisions">
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#1</span>
+        <span class="tag success" style="background:#c6f6d5; color:#22543d;">✅ 결정됨</span>
+        <span class="tag phase">Phase 0</span>
+        <span class="tag cat">런타임</span>
+      </div>
+      <h4>임베딩 런타임 선택 — ONNX Runtime Go + wrapper re-export</h4>
+      <p><strong>최종</strong>: ONNX Runtime Go 채택. PyTorch wrapper로 재-export하여 pooling / normalization / position_ids 생성 / KV cache 제거를 그래프에 포함시킴. 배선 ~50 LoC로 단순화.</p>
+      <div class="opts">
+        <strong>구체 선택</strong>:
+        <ul>
+          <li><strong>1a ONNX 바인딩</strong>: <code>github.com/yalue/onnxruntime_go</code> (MS 공식 C 라이브러리 CGO 래퍼)</li>
+          <li><strong>1b Tokenizer</strong>: <code>github.com/daulet/tokenizers</code> (HuggingFace Rust tokenizers CGO 래퍼, <code>padding_side=left</code>)</li>
+          <li><strong>1c Fallback</strong> (Python subprocess / Ollama): <strong>포팅 안 함</strong></li>
+          <li><strong>1d int8 swap</strong>: config <code>embedding.model_path</code>만 바꾸면 됨. 채택 여부는 <a href="#decisions">#36</a>에서 벤치 기반 판단</li>
+          <li><strong>1e ONNX wrapper re-export</strong>: PyTorch wrapper로 last-token pooling + L2 normalization + position_ids 생성 + <code>use_cache=False</code>(KV cache 제거)를 그래프에 포함. 결과 시그니처: <code>(input_ids, attention_mask) → embedding</code></li>
+          <li><strong>1f 결과물 관리</strong>: <code>scripts/export_qwen3_onnx.py</code>를 repo에 commit. 배포용 <code>.onnx</code>는 GitHub Release 자산</li>
+          <li><strong>1g 파리티 검증</strong>: Python sentence-transformers 결과 vs wrapped ONNX 결과 샘플 N≥100에서 cosine similarity ≥0.999 (<code>scripts/verify_onnx_parity.py</code>)</li>
+        </ul>
+      </div>
+      <div class="status">상태: ✅ 결정 완료. Phase 0 export script 작성 + Phase 1 Go adapter ~50 LoC 구현</div>
+
+      <details class="decision-log">
+        <summary>📋 결정 로그 · 문제 상황 · 자료 조사 · 근거 (클릭 펼치기)</summary>
+        <div class="log-body">
+          <h5>문제 상황</h5>
+          <p>현재 Python rune은 <code>sentence-transformers</code>(PyTorch 기반)로 Qwen3-Embedding-0.6B를 실행. Go로 포팅하려면 동일 모델을 Go에서 돌릴 방법이 필요함. 그러나 Go 생태계에는 PyTorch 바인딩이 사실상 부재(gotch는 유지 중단 상태). 현실적 경로는 <strong>ONNX Runtime</strong>(언어 독립 실행 엔진) 또는 <strong>외부 delegate</strong>(Python subprocess / Ollama). 단일 바이너리·정적 배포 원칙을 지키려면 ONNX 쪽이 정답 후보.</p>
+
+          <h5>자료 조사 / 사실 확인 (2026-04-17)</h5>
+          <ul>
+            <li><strong>Qwen3-Embedding-0.6B ONNX export 존재</strong> — <a href="https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX" target="_blank">onnx-community/Qwen3-Embedding-0.6B-ONNX</a> (HF). 사용자 확인 완료</li>
+            <li><strong>기존 export의 범위</strong> — base transformer만 포함. 입력이 <code>input_ids</code>, <code>attention_mask</code>, <code>position_ids</code>, <code>past_key_values.{0..27}.{key,value}</code>(KV cache 28 layer × 2)로 노출. 출력은 <code>last_hidden_state</code>. <strong>tokenize · pooling · normalization은 사용자 책임</strong> (discussion #3의 Python 샘플 코드로 확인)</li>
+            <li><strong>KV cache 입력이 노출된 이유</strong> — HuggingFace transformers 기본 ONNX export가 <code>use_cache=True</code>(generation-ready)라 decoder-only 모델의 cache 인터페이스를 그대로 드러냄. embedding 용도에서는 dead weight</li>
+            <li><strong>Python rune은 KV cache를 실질 사용 안 함</strong> — <code>mcp/adapter/embeddings.py:93-97</code>의 <code>SBERTSDKAdapter.get_embedding</code>이 <code>SentenceTransformer.encode()</code> 단일 호출. 내부적으로 단일 forward pass만 수행</li>
+            <li><strong>Pooling 전략</strong> — Qwen3는 decoder-only(causal attention)라 encoder 모델의 mean pool 대신 <strong>last-token pool</strong> 사용. <code>padding_side='left'</code>가 전제</li>
+            <li><strong>Go ONNX 바인딩</strong>: <code>github.com/yalue/onnxruntime_go</code>가 de facto. <code>github.com/owulveryck/onnx-go</code>는 pure Go지만 operator 지원 제한적 → 최신 모델 대부분 못 돌림</li>
+            <li><strong>Go tokenizer</strong>: <code>github.com/daulet/tokenizers</code>가 HF Rust <code>tokenizers</code>를 CGO 래핑 → Python과 bit-identical 결과. 대안 <code>github.com/sugarme/tokenizer</code>는 pure Go 재구현이라 Qwen3 BPE 호환성 검증 필요</li>
+            <li><strong>ONNX wrapper 재-export 가능 범위</strong>: PyTorch에서 <code>torch.onnx.export</code>에 nn.Module wrapper를 감싸면 position_ids 생성, <code>use_cache=False</code>(KV cache 입력 제거), last-token pool, L2 normalize를 <strong>그래프 안에 포함</strong> 가능. tokenizer만 구조적으로 불가능(문자열 파싱이라 ONNX 텐서 연산 아님)</li>
+          </ul>
+
+          <h5>검토한 선택지</h5>
+          <ul>
+            <li><strong>(a) 기존 onnx-community export + Go 전부 구현</strong>: tokenize + KV cache 빈 텐서 초기화(28×2) + position_ids + last-token pool + L2 norm 모두 Go로 (~200-300 LoC). 부동소수점 순서 차이로 Python과 미세 결과 불일치 리스크</li>
+            <li><strong>(b) PyTorch wrapper로 재-export + Go 최소 배선</strong>: pooling/norm/position_ids/no-KV-cache 를 그래프에 포함. Go 코드 ~50 LoC. Python(ONNX Runtime Python)과 Go가 <em>같은 그래프</em>를 호출하므로 결과 비트 일치</li>
+            <li><strong>(c) Python subprocess delegate</strong>: 단일 바이너리 목표 포기. 의존성·배포 복잡도 증가</li>
+            <li><strong>(d) Ollama HTTP delegate</strong>: 외부 서비스 의존. 오프라인 실패</li>
+          </ul>
+
+          <h5>최종 결정: (b) + 위의 1a-1g</h5>
+          <p><strong>왜 (b)를 선택했나</strong>:</p>
+          <ul>
+            <li><strong>Go 코드 대폭 감소</strong> (~300줄 → ~50줄). last-token pool의 attention_mask 기반 인덱싱은 off-by-one/left-padding 처리 등 실수하기 쉬운 영역 — 이걸 PyTorch에서 처리하면 Python이 이미 검증한 로직을 그대로 사용</li>
+            <li><strong>Python/Go 비트 일치</strong>: 같은 ONNX 그래프를 두 언어가 호출하므로 부동소수점 연산 순서까지 동일. 기존 Python으로 저장된 레코드 호환성 보장 (결정 #23과 연동)</li>
+            <li><strong>KV cache 비대칭 해소</strong>: Python rune이 실질 사용하지 않는 KV cache를 Go만 빈 텐서로 억지 관리하는 건 비대칭. <code>use_cache=False</code>로 재-export하면 그래프에서 입력 자체가 사라져 대칭 회복</li>
+            <li><strong>유지 비용</strong>: <code>scripts/export_qwen3_onnx.py</code> 스크립트 한 번 작성·commit, Qwen 업스트림 업데이트 시에만 재실행. Go 코드는 모델 업데이트와 무관</li>
+            <li><strong>(c)/(d) 비권장</strong>: 단일 바이너리 원칙 위배 + 유지 비용 증가. ONNX 실패 시나리오는 회피가 아닌 해결 대상</li>
+          </ul>
+          <p><strong>주의 사항 (Phase 0 실무)</strong>:</p>
+          <ul>
+            <li>wrapper export 시 <code>use_cache=False</code> 명시 + <code>past_key_values</code> 인자 제거</li>
+            <li>Qwen3-Embedding 모델 라이선스 확인 (Apache-2.0인 경우 자체 export 결과물 재배포 문제 없음)</li>
+            <li>ONNX Runtime 자체는 동적 라이브러리 (<code>libonnxruntime.{so,dylib,dll}</code>) → 배포 시 runed 바이너리 + 이 라이브러리 2-file bundle. 엄밀히 "단일 바이너리"는 아니지만 venv/pip/torch 대비 훨씬 단순</li>
+          </ul>
+
+          <p class="log-meta">참고: <a href="https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX" target="_blank">onnx-community/Qwen3-Embedding-0.6B-ONNX</a> · <a href="https://huggingface.co/onnx-community/Qwen3-Embedding-0.6B-ONNX/discussions/3" target="_blank">Discussion #3 (Python 샘플 코드)</a> · <a href="https://huggingface.co/Qwen/Qwen3-Embedding-0.6B" target="_blank">Qwen/Qwen3-Embedding-0.6B (원본)</a></p>
+        </div>
+      </details>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#2</span>
+        <span class="tag success" style="background:#c6f6d5; color:#22543d;">✅ 결정됨</span>
+        <span class="tag phase">Phase 0</span>
+        <span class="tag cat">스키마</span>
+      </div>
+      <h4>Qwen3-0.6B 출력 차원 — 1024 유지</h4>
+      <p><strong>최종</strong>: Go enVector 인덱스 스키마도 <strong>1024 dim</strong>으로 commit. 현재 Python에서 사용 중인 차원이라 변경 없음 — 기존 데이터 그대로 호환.</p>
+      <div class="opts">
+        <strong>근거</strong>: <code>agents/common/schemas/embedding.py:14-18</code> 주석 "Novelty thresholds — Calibrated for Qwen3-Embedding-0.6B (<strong>1024dim</strong>) via benchmark 2026-04-08"에서 확정. envector-go SDK의 <code>WithKeyDim(1024)</code> / <code>WithIndexDim(1024)</code>도 같은 값으로 세팅.
+      </div>
+      <div class="status">상태: ✅ 1024 유지. 변경 작업 없음</div>
+
+      <details class="decision-log">
+        <summary>📋 결정 로그 · 문제 상황 · 자료 조사 · 근거 (클릭 펼치기)</summary>
+        <div class="log-body">
+          <h5>문제 상황</h5>
+          <p>enVector 인덱스는 한 번 <strong>차원 지정 후 삽입된 데이터를 가진 상태에서는 차원 변경 불가</strong>. Go로 포팅 시 차원 값을 잘못 박으면 기존 레코드를 못 읽게 됨. 초기 분석에서 "384 (MiniLM default)"라는 루머가 있어서 확인이 필요했음.</p>
+
+          <h5>자료 조사 / 사실 확인</h5>
+          <ul>
+            <li><code>agents/common/schemas/embedding.py:14-18</code>에 명시적 주석: "Novelty thresholds — Calibrated for Qwen3-Embedding-0.6B (<strong>1024dim</strong>) via benchmark 2026-04-08"</li>
+            <li>Qwen3-Embedding-0.6B 공식 모델 카드 확인: 출력 차원 1024</li>
+            <li>"384" 루머는 <code>sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2</code> default 값. 과거 초안에서 혼동된 것 — 현재 production 모델은 Qwen3</li>
+            <li>envector-go SDK (<code>docs/migration/envector-go-sdk/</code>) API 확인: <code>WithKeyDim(d int)</code>, <code>WithIndexDim(d int)</code> 옵션으로 차원 고정</li>
+          </ul>
+
+          <h5>검토한 선택지</h5>
+          <ul>
+            <li><strong>(a) 1024 그대로 유지</strong>: 기존 데이터 호환, 추가 작업 없음</li>
+            <li>(b) 다른 모델로 바꿔 차원 변경: 기존 저장 레코드 마이그레이션 필요 — MVP 스코프 밖</li>
+          </ul>
+
+          <h5>최종 결정: (a) 1024 유지</h5>
+          <p><strong>왜</strong>: Python 현 production과 동일하게 유지하는 것 외에 다른 선택지가 사실상 없음. 모델 교체(#1에서 Qwen3 유지 확정)와 결합되어 차원 이슈는 자동으로 닫힘.</p>
+          <p><strong>후속 영향</strong>: 결정 #23 (v0.3.x 레코드 역호환) 자동 충족. enVector 인덱스 recreation 불필요.</p>
+        </div>
+      </details>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#3</span>
+        <span class="tag success" style="background:#c6f6d5; color:#22543d;">✅ 결정됨</span>
+        <span class="tag phase">Phase 1</span>
+        <span class="tag cat">외부 SDK</span>
+      </div>
+      <h4>envector-go SDK 접근 — <code>docs/migration/envector-go-sdk/</code> 채택</h4>
+      <p><strong>최종</strong>: 팀원이 작성한 프로토타입 SDK(<code>github.com/CryptoLabInc/envector-go-sdk</code>, 현재 repo에 vendor된 사본이 <code>docs/migration/envector-go-sdk/</code>)를 기반으로 adapter 작성. <code>go.mod require</code>로 직접 참조 (또는 동일 회사 내부 repo에서 import).</p>
+      <div class="opts">
+        <strong>SDK 표면 요약 (읽어 확인)</strong>:
+        <ul>
+          <li><strong>Client</strong>: <code>NewClient(ctx, WithAddress, WithAccessToken, WithInsecure, WithKeepaliveTime, WithMaxMsgSize)</code>. gRPC 연결은 lazy</li>
+          <li><strong>Keys</strong> (FHE 키 3-file 번들): <code>KeysExist</code> / <code>GenerateKeys</code> / <code>OpenKeysFromFile</code>, options <code>WithKeyPath / WithKeyID / WithKeyPreset / WithKeyEvalMode / WithKeyDim(1024)</code></li>
+          <li><strong>서버 resident</strong>: <code>client.ActivateKeys(ctx, keys)</code> 호출 (4-RPC auto-setup: list → register → unload-others → load)</li>
+          <li><strong>Index</strong>: <code>client.Index(ctx, WithIndexName, WithIndexKeys, WithIndexDim(1024))</code> idempotent open-or-create</li>
+          <li><strong>Insert</strong>: <code>idx.Insert(ctx, InsertRequest{Vectors, Metadata})</code> — 벡터는 SDK가 <code>keys.Encrypt</code>로 FHE 암호화 후 streaming. Metadata는 <strong>verbatim opaque string</strong> (rune이 AES envelope JSON 넣음)</li>
+          <li><strong>Score</strong>: <code>idx.Score(ctx, []float32) → [][]byte</code> CiphertextScore protos (각각 <code>keys.Decrypt</code>로 score/shard 복원)</li>
+          <li><strong>GetMetadata</strong>: <code>idx.GetMetadata(ctx, refs, []string{"metadata"}) → []Metadata</code></li>
+          <li><strong>Build tags</strong>: 기본 deterministic mock (wire-fidelity test/cross-compile용), <code>-tags=libevi</code>로 실제 libevi_crypto CGO 연결</li>
+        </ul>
+        <strong>rune 측 연동 방침</strong>:
+        <ul>
+          <li><code>internal/ports/envector.go</code>: <code>Insert / Score / GetMetadata / ActivateKeys / OpenKeys</code> 범위만 포함하는 좁은 interface 정의</li>
+          <li><code>internal/adapters/envector/sdk.go</code>: 위 interface를 SDK 호출로 구현. SDK의 option builder를 rune config → option slice 변환</li>
+          <li><strong>AES envelope은 rune 책임</strong>: SDK는 metadata를 opaque string으로 취급하므로, <code>{"a","c","m"}</code> JSON 생성은 rune의 <code>internal/adapters/envector/aes_ctr.go</code>에서 수행 (결정 #4, #46 참조)</li>
+          <li>dev/test는 기본 mock 사용, prod 빌드만 <code>-tags=libevi</code></li>
+        </ul>
+      </div>
+      <div class="status">상태: ✅ SDK 구조 확정. Phase 1에서 ports interface + adapter 구현. 실 CGO 연결(<code>-tags=libevi</code>)은 Phase 2 integration test부터</div>
+
+      <details class="decision-log">
+        <summary>📋 결정 로그 · 문제 상황 · 자료 조사 · 근거 (클릭 펼치기)</summary>
+        <div class="log-body">
+          <h5>문제 상황</h5>
+          <p>Capture/Recall 경로가 enVector Cloud (FHE 벡터 DB)에 의존. Python은 <code>pyenvector</code> SDK를 썼는데 Go 포팅 시 같은 기능의 Go SDK가 필요. "없으면 직접 gRPC stub 생성" 경로는 있지만 FHE 암호화가 CGO 기반이라 SDK 없이는 사실상 불가능.</p>
+
+          <h5>자료 조사 / 사실 확인 (2026-04-20)</h5>
+          <ul>
+            <li><strong>팀원이 프로토타입 SDK 작성 중</strong> (<code>github.com/CryptoLabInc/envector-go-sdk</code>). repo 클론해서 <code>docs/migration/envector-go-sdk/</code>에 배치 — 이번 결정 세션에서 source 직접 확인</li>
+            <li><strong>Package doc (<code>doc.go</code>) 읽음</strong>: 의도한 surface는 "retriever(Score+GetMetadata) + capture(local FHE encrypt + Insert) + key/index lifecycle". 구조는 functional options pattern</li>
+            <li><strong>Client 구조 (<code>client.go</code>)</strong>: gRPC dial이 lazy (첫 RPC에서 연결). TLS는 system CA pool + TLS1.2 min, <code>WithInsecure()</code>로 bufconn test 지원. keepalive 옵션 지원. <code>authCtx()</code>로 access token을 <code>authorization: Bearer</code> metadata에 주입</li>
+            <li><strong>Keys (<code>keys.go</code>)</strong>: CKKS FHE 키 3-file 번들 (EncKey/EvalKey/SecKey). <code>Encryptor</code>/<code>Decryptor</code>는 CGO. <code>Keys.Close()</code>로 리소스 정리 — rune에서 graceful shutdown에 포함 필요</li>
+            <li><strong>Index operations</strong>: <code>Client.Index()</code>는 idempotent (<code>GetIndexList</code>로 존재 확인 후 없으면 create). <code>Insert</code>는 vectors를 local FHE encrypt 후 1MiB 청크로 streaming. <code>Score</code>는 <code>[][]byte</code> CiphertextScore proto 반환 → rune이 <code>keys.Decrypt</code>로 복원</li>
+            <li><strong>Metadata 취급</strong>: <code>InsertRequest.Metadata []string</code>는 SDK가 verbatim 저장 — "rune uses a JSON envelope; other callers may store anything" (doc.go 명시). 즉 <strong>AES-CTR envelope 생성은 SDK 바깥 rune 책임</strong></li>
+            <li><strong>Build tag 이중성</strong>: 기본은 deterministic mock(wire-fidelity test/cross-compile용), <code>-tags=libevi</code>로 실제 CGO crypto 연결. 개발 cycle 단축에 유리</li>
+            <li><strong>에러 surface (<code>errors.go</code>)</strong>: <code>ErrAddressRequired / ErrClientClosed / ErrKeysRequired / ErrKeysClosed / ErrKeysNotFound / ErrKeysAlreadyExist</code> — 명확한 typed errors</li>
+          </ul>
+
+          <h5>검토한 선택지</h5>
+          <ul>
+            <li><strong>(a) 팀 프로토타입 SDK를 그대로 사용</strong>: API 이미 존재, surface 명확, mock backend로 개발 cycle 빠름</li>
+            <li>(b) Python <code>pyenvector</code>를 Go에서 subprocess로 부르기: 복잡도 폭증, 성능 저하, 단일 바이너리 목표 포기</li>
+            <li>(c) Go에서 envector gRPC proto만 직접 stub 생성: FHE encryption이 CGO 기반이라 결국 유사 SDK 재작성 — 중복</li>
+            <li>(d) MVP에서 envector 자체 지연, fake backend로만 Phase 1 진행: 의미 있는 통합 테스트 불가 — 권장 안 함</li>
+          </ul>
+
+          <h5>최종 결정: (a) 팀 프로토타입 채택</h5>
+          <p><strong>왜</strong>:</p>
+          <ul>
+            <li>surface가 rune의 실제 필요(Insert/Score/GetMetadata/Key lifecycle)와 일대일 매칭</li>
+            <li>기본 mock backend로 Phase 1 skeleton을 CGO 없이 개발 가능 — "libevi 툴체인 준비" 블로커를 Phase 2로 밀어둠</li>
+            <li>Metadata를 opaque string으로 취급하는 설계라 rune의 AES envelope 전략(<a href="#decisions">#4</a>, <a href="#decisions">#46</a>)이 깔끔하게 얹힘</li>
+            <li>같은 회사 내부 팀 작성이라 API 변경 시 coordination 비용 낮음</li>
+          </ul>
+          <p><strong>후속 작업</strong>:</p>
+          <ul>
+            <li>rune repo의 <code>go.mod</code>에 <code>github.com/CryptoLabInc/envector-go-sdk</code> require 추가 (버전 pin 필요 — 팀과 협의)</li>
+            <li><code>internal/ports/envector.go</code>에 좁은 interface 정의 (SDK 변경이 service 레이어에 전파되지 않도록)</li>
+            <li><code>internal/adapters/envector/sdk.go</code>에서 SDK 호출 + metadata AES envelope 생성</li>
+            <li>CI에서 default(mock) tag로 fast tests, <code>integration</code> job에서 <code>-tags=libevi</code>로 실 CGO 테스트</li>
+            <li>SDK 릴리스 채널·버전 정책을 팀과 합의 (semver? 내부 tag?) — 미해결 항목</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#4</span>
+        <span class="tag success" style="background:#c6f6d5; color:#22543d;">✅ 결정됨</span>
+        <span class="tag phase">Phase 0</span>
+        <span class="tag cat">암호화</span>
+      </div>
+      <h4>AES-256-CTR 바이너리 포맷 — pyenvector와 bit-identical</h4>
+      <p><strong>최종 포맷</strong> (Go에서 동일 재현):</p>
+      <div class="opts">
+        <ul>
+          <li><strong>알고리즘</strong>: AES-256-CTR (pyenvector/utils/aes.py L52-58 실측)</li>
+          <li><strong>키</strong>: 32 바이트 (256비트) agent-specific DEK (Vault가 번들로 제공)</li>
+          <li><strong>IV</strong>: 16 바이트 <code>crypto/rand.Read</code>로 **매 암호화마다 새로 생성**. counter 재사용 금지 (CTR 모드 IV 재사용은 동일 키로 암호화 시 keystream 노출)</li>
+          <li><strong>Ciphertext 바이너리</strong>: <code>IV(16B) || CT(=plaintext 길이)</code>. CTR은 stream cipher이므로 <strong>padding 불필요</strong>, 출력 길이 = plaintext 길이 + 16</li>
+          <li><strong>Wire 인코딩</strong>: 위 바이너리 전체를 <code>base64.StdEncoding</code>으로 문자열화</li>
+          <li><strong>Envelope JSON</strong>: <code>{"a": "agent_xyz", "c": "&lt;base64(IV||CT)&gt;"}</code> — 필드 순서 무관, JSON object. 결정 #46 A안 채택 시 <code>"m"</code> 필드(HMAC-SHA256) 추가</li>
+        </ul>
+        <strong>Go 구현 (참고)</strong>:
+        <pre style="font-size:12px; margin:8px 0; padding:10px;"><code>block, _ := aes.NewCipher(dek)          // 32B DEK
+iv := make([]byte, 16)
+_, _ = io.ReadFull(rand.Reader, iv)
+stream := cipher.NewCTR(block, iv)
+ct := make([]byte, len(plaintext))
+stream.XORKeyStream(ct, plaintext)
+combined := append(iv, ct...)
+envelope := map[string]string{
+    "a": agentID,
+    "c": base64.StdEncoding.EncodeToString(combined),
+}</code></pre>
+      </div>
+      <div class="status">상태: ✅ 바이너리 포맷 확정. Go <code>crypto/cipher.NewCTR</code>로 구현 가능. "IV random vs nonce" 미결은 해소됨 — <strong>random (crypto/rand)</strong></div>
+
+      <details class="decision-log">
+        <summary>📋 결정 로그 · 문제 상황 · 자료 조사 · 근거 (클릭 펼치기)</summary>
+        <div class="log-body">
+          <h5>문제 상황</h5>
+          <p>rune이 capture 시 metadata를 agent-specific DEK로 AES 암호화해서 envector에 저장. Vault의 <code>DecryptMetadata</code> RPC 또는 클라이언트(pyenvector/envector-go)가 같은 바이너리 포맷을 읽어야 함. Go로 포팅 시 <strong>pyenvector가 쓰는 것과 비트 단위로 같은 포맷</strong>을 내야 기존 저장 레코드가 호환됨 (결정 #23과 연결). 문서(pyenvector docstring)에 "AES-GCM"이라고 쓰여 있지만 실제 구현이 어느 모드인지 불명확 → 실측 필요.</p>
+
+          <h5>자료 조사 / 사실 확인 (2026-04-17)</h5>
+          <ul>
+            <li><strong>pyenvector 소스 직접 확인</strong> (<code>pyenvector/utils/aes.py</code> L52-58):
+              <ul>
+                <li><code>cryptography</code> 라이브러리 사용</li>
+                <li><code>Cipher(algorithms.AES(key), modes.CTR(iv))</code>로 AES-256-CTR</li>
+                <li>IV 16 바이트 <code>os.urandom(16)</code>로 생성 → random</li>
+                <li>결과: <code>iv + ciphertext</code> concat → <code>base64.b64encode()</code></li>
+              </ul>
+            </li>
+            <li><strong>docstring의 "AES-GCM" 언급은 stale</strong>. git blame 상 오래된 주석이고 실 구현은 CTR. 초기 RFC 분석이 docstring에 의존해 "GCM"이라고 기술한 것이 혼란의 원인</li>
+            <li><strong>CTR mode 특성</strong>:
+              <ul>
+                <li>stream cipher로 동작 → <strong>padding 불필요</strong> (CBC/ECB와 다름)</li>
+                <li>인증 없음 → 바이트 flip malleability 공격 가능 (<a href="#decisions">결정 #46</a>에서 HMAC 추가 검토)</li>
+                <li>동일 키로 동일 IV 재사용 시 keystream 노출 → IV는 반드시 매회 random 또는 counter 순증</li>
+              </ul>
+            </li>
+            <li><strong>Envelope JSON 포맷</strong>: <code>{"a": agent_id, "c": base64(IV||CT)}</code>. 필드 2개뿐. 결정 #46 채택 시 <code>"m"</code> 추가 (HMAC-SHA256 앞 16B base64)</li>
+            <li><strong>DEK 출처</strong>: Vault의 <code>GetPublicKey</code> 응답 번들에 agent-specific <code>agent_dek</code>(32B) 포함. runed가 메모리에 들고 있다가 encrypt/decrypt에 사용. 세부는 <code>docs/runed/03-external-communication.md</code></li>
+            <li><strong>Go stdlib 커버리지</strong>: <code>crypto/aes.NewCipher</code> + <code>crypto/cipher.NewCTR</code> + <code>crypto/rand</code> + <code>encoding/base64</code>로 전부 구현 가능. 외부 deps 0</li>
+          </ul>
+
+          <h5>검토한 선택지 (구현 관점)</h5>
+          <ul>
+            <li><strong>(a) pyenvector 포맷 그대로 재현 (AES-256-CTR, IV random, no padding)</strong>: 기존 레코드 비트 호환</li>
+            <li>(b) AES-GCM으로 변경 (MAC 내장): malleability 해결하지만 포맷 변경 → 기존 레코드 마이그레이션 필요. 결정 #46 옵션 B로 이관</li>
+            <li>(c) Fernet 등 high-level 래퍼 사용: Python과 포맷 불일치 → 호환 깨짐</li>
+          </ul>
+
+          <h5>최종 결정: (a) pyenvector CTR 포맷 그대로 재현</h5>
+          <p><strong>왜</strong>:</p>
+          <ul>
+            <li>기존 저장 레코드를 Go 데몬이 읽을 수 있어야 함 (결정 #23 역호환 요구)</li>
+            <li>pyenvector upstream 변경 없이 Go 측만으로 구현 가능 — 크로스팀 coordination 불필요</li>
+            <li>Go stdlib만으로 커버 (외부 dependency 추가 없음)</li>
+            <li>MAC 없는 malleability 이슈는 별도 결정 #46(HMAC 필드 추가)에서 진화 경로 확보. CTR 포맷 자체는 유지하며 <code>"m"</code> 필드만 optional하게 추가</li>
+          </ul>
+          <p><strong>후속 작업</strong>:</p>
+          <ul>
+            <li><code>internal/adapters/envector/aes_ctr.go</code>에서 encrypt/decrypt 구현</li>
+            <li>pyenvector golden fixture: 같은 (DEK, IV, plaintext) 입력에 대해 Python과 Go가 바이트 동일 envelope JSON을 내는지 CI 검증 (Part 7.6 · 7.7 벤치/보안 테스트)</li>
+            <li>IV 생성 시 <code>crypto/rand.Read</code> 사용 강제 — <code>math/rand</code> 절대 사용 금지 (암호학적 보안 약함)</li>
+            <li>DEK zeroize 패턴 (결정 #1의 7.2.4 리스트에 이미 포함: <code>runtime.KeepAlive</code>)</li>
+          </ul>
+          <p><strong>관련 결정</strong>: <a href="#decisions">#23</a> 역호환 · <a href="#decisions">#46</a> AES-MAC envelope (이 카드는 CTR 포맷 자체, #46은 MAC 필드 추가)</p>
+        </div>
+      </details>
+    </div>
+
+  </div>
+
+  <h3>B. runed 내부 결정 (전송 선택과 무관)</h3>
+  <div class="decisions">
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#5</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 1</span>
+        <span class="tag cat">Config</span>
+      </div>
+      <h4>enVector 자격증명 persist 여부</h4>
+      <p>코드/문서/테스트가 서로 다른 방향 가리키는 <strong>가장 혼란스러운 항목</strong>.</p>
+      <div class="opts">
+        <strong>선택지</strong>:
+        <ul>
+          <li>(a) Python 방식 유지 — config.json에 캐시</li>
+          <li>(b) 데몬 메모리만 — 매 부팅 GetPublicKey 재호출</li>
+        </ul>
+      </div>
+      <div class="status">drift: configure.md("no longer stored") vs save_config(L318-321) vs test_save_config_has_envector_section</div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#6</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 1</span>
+        <span class="tag cat">Config</span>
+      </div>
+      <h4>config.json metadata 섹션 처리</h4>
+      <p>configure.md가 쓰는 <code>metadata.{configVersion,lastUpdated,installedFrom}</code>을 Go가 존중할지.</p>
+      <div class="opts">
+        <strong>선택지</strong>: (a) 라운드트립 보존 / (b) 폐기 (현재 Python) / (c) lastUpdated만 갱신
+      </div>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#7</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 2</span>
+        <span class="tag cat">Capture</span>
+      </div>
+      <h4>Novelty check 유지 여부</h4>
+      <p>capture 시 ≥0.95 similarity면 near_duplicate로 블록하는 로직. RFC는 드롭, MASTER 문서는 유지 제안.</p>
+      <div class="opts">
+        <strong>선택지</strong>:
+        <ul>
+          <li>(a) KEEP — cross-session/team dedup, 에이전트가 못 하는 일</li>
+          <li>(b) DROP — 에이전트 md 책임으로 (같은 세션 내 dedup은 이미 에이전트가 함)</li>
+        </ul>
+      </div>
+      <div class="status">차이: cross-session dedup 품질 vs 데몬 단순성</div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#8</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 3</span>
+        <span class="tag cat">Recall</span>
+      </div>
+      <h4>Phase chain expansion</h4>
+      <p>group_id 공유 sibling을 추가 envector 쿼리로 가져와서 체인 재구성하는 기능.</p>
+      <div class="opts">
+        <strong>합의</strong>: DEFER (MVP는 flat list). 단 응답 스키마의 <code>group_id</code>/<code>phase_seq</code>/<code>phase_total</code>은 <strong>유지</strong> — 에이전트가 그룹핑 가능
+      </div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#9</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 3</span>
+        <span class="tag cat">Recall</span>
+      </div>
+      <h4>Multi-query search (expanded[:3])</h4>
+      <p>쿼리를 3개로 확장해서 병렬 검색 후 dedup.</p>
+      <div class="opts">
+        <strong>선택지</strong>: (a) MVP 포팅 / (b) MVP는 단일 쿼리, 확장은 v1.1
+      </div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#10</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 4</span>
+        <span class="tag cat">Lifecycle</span>
+      </div>
+      <h4>deactivate 시 프로세스 동작</h4>
+      <p>권장은 (a) dormant만 — 재활성 빠름, 모델·gRPC 유지.</p>
+      <div class="opts">
+        <strong>선택지</strong>:
+        <ul>
+          <li>(a) dormant만, 프로세스 유지 — RSS 그대로 유지, 재활성화 즉시</li>
+          <li>(b) 프로세스 stop — RSS 회수, 재기동 시 모델 로드 시간 발생 (크기는 벤치 필요)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#11</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Post-MVP</span>
+        <span class="tag cat">Vault</span>
+      </div>
+      <h4>키 로테이션 감지</h4>
+      <p>현재 Python에 없음. Go에서 신규 기능으로 넣을지.</p>
+      <div class="opts">
+        <strong>선택지</strong>: (a) 없음 (수동 reload) / (b) key_id mismatch 시 refetch / (c) 주기적 refetch
+      </div>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#12</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Post-MVP</span>
+        <span class="tag cat">Recall</span>
+      </div>
+      <h4>Server-side LLM synthesizer</h4>
+      <p>합성 결과를 원하는 에이전트 경우 (MCP 없는 CLI 도구 등).</p>
+      <div class="opts">
+        <strong>합의</strong>: DEFER. MVP는 에이전트가 합성
+      </div>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#13</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">에이전트 md</span>
+      </div>
+      <h4>record_builder 로직 이관 범위</h4>
+      <p>RFC는 "전부 에이전트 md로". scribe.md 재작성 범위 결정.</p>
+      <div class="opts">
+        <strong>이관 항목</strong>: text_to_embed 선택 / metadata 최종 조립 / PII 마스킹 / domain 판정 / certainty/status 판정 / record_id 생성
+      </div>
+      <div class="status">프롬프트 업데이트 필요. 기존 Format A/B/C 유지하되 출력 명시적으로 text_to_embed + metadata 분리</div>
+    </div>
+
+  </div>
+
+  <h3>C. 전송 레이어 결정 (독립)</h3>
+  <div class="decisions">
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#14</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 1</span>
+        <span class="tag cat">전송</span>
+      </div>
+      <h4>Primary transport</h4>
+      <p>RFC 본문은 CLI-only 제안. jh-lee 코멘트는 MCP stdio shim을 primary로 되돌리자고 역제안.</p>
+      <div class="opts">
+        <strong>선택지</strong>:
+        <ul>
+          <li>(a) <strong>CLI-only</strong> — 에이전트 md에서 Bash exec로 <code>rune capture</code> 호출. 상주 프로세스 0</li>
+          <li>(b) <strong>MCP primary + CLI ops</strong> — <code>rune-mcp</code> shim 세션당 상주. MCP JSON Schema 구조 강제</li>
+          <li>(c) <strong>둘 다 제공</strong> — 사용자 선택 가능</li>
+        </ul>
+      </div>
+      <div class="status">runed HTTP API를 MCP tool schema와 1:1 설계하면 (a)→(c) 전환 언제든 가능</div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#15</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">전송</span>
+      </div>
+      <h4>plugin.json의 mcpServers 블록</h4>
+      <p>#14에 종속. CLI only면 제거, MCP 포함이면 유지.</p>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#16</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">에이전트 md</span>
+      </div>
+      <h4>에이전트 md 재작성 범위</h4>
+      <p>CLI 안이면 Step 3 (호출부, ~10%) 재작성. 추출 로직 (Step 1-2, transport-independent)은 유지.</p>
+    </div>
+
+  </div>
+
+  <h3>D. Lifecycle / 인프라 (Phase 4)</h3>
+  <div class="decisions">
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#17</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 4</span>
+        <span class="tag cat">OS</span>
+      </div>
+      <h4>데몬 관리</h4>
+      <p>macOS launchd plist / Linux systemd user unit. Windows는 post-MVP 제외 제안.</p>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#18</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Phase 4</span>
+        <span class="tag cat">보안</span>
+      </div>
+      <h4>소켓 접근 제어</h4>
+      <p>권장: <strong>syscall 기반 peer credential 검증</strong> (Linux <code>SO_PEERCRED</code> / macOS <code>LOCAL_PEERCRED</code> 또는 <code>getpeereid(2)</code>) + 0600. 파일 <code>stat</code>의 <code>Sys().(*syscall.Stat_t).Uid</code>는 <strong>소유자</strong>만 알려줄 뿐, 실제 연결한 프로세스의 uid가 아니므로 불충분. TCP 금지.</p>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#19</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 4</span>
+        <span class="tag cat">운영</span>
+      </div>
+      <h4>데몬 크래시 복구</h4>
+      <p>launchd/systemd 자동 재시작. 디스크 캐시로 warm 복귀. supervisor는 불필요.</p>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#20</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 4</span>
+        <span class="tag cat">네트워크</span>
+      </div>
+      <h4>sleep/wake 복구</h4>
+      <p>권장: reactive reconnect (실패 감지 후 재연결) + 능동 teardown.</p>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#21</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Phase 4</span>
+        <span class="tag cat">관측성</span>
+      </div>
+      <h4>로그 / 메트릭</h4>
+      <p><code>~/.rune/logs/daemon.log</code> rotating + prometheus <code>/metrics</code> opt-in.</p>
+    </div>
+
+  </div>
+
+  <h3>E. 호환성 / 마이그레이션 (Phase 5)</h3>
+  <div class="decisions">
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#22</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">호환</span>
+      </div>
+      <h4>v0.3.x config.json 호환</h4>
+      <p>Go <code>json.Unmarshal</code>이 unknown 필드 무시 (기본 동작)로 자연스럽게 호환.</p>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#23</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">호환</span>
+      </div>
+      <h4>v0.3.x 저장 레코드 recall 가능성</h4>
+      <p>AES 포맷 · 벡터 스키마 동일 가정. <strong>역호환 검증 필수</strong>.</p>
+      <div class="status">verification checklist 10.3: 기존 pyenvector로 저장한 레코드를 Go 데몬이 정상 recall해야 함</div>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#24</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">호환</span>
+      </div>
+      <h4>기존 ~/.rune/review_queue.json</h4>
+      <p>MVP에서 소비자 없음. 건드리지 말고 방치 권장 (사용자가 제거를 알아채지 못하도록).</p>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#25</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">UX</span>
+      </div>
+      <h4>기존 .venv/ 정리</h4>
+      <p>/rune:configure 재실행 시 자동 삭제 vs 수동 안내.</p>
+      <div class="opts">권장: 자동 삭제 + 진행 안내 로그</div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#26</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">문서</span>
+      </div>
+      <h4>configure.md의 "no longer stored locally" 주석</h4>
+      <p>#5 결정에 따라 갱신 또는 삭제. 현재 코드와 drift 상태.</p>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#27</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Post-MVP</span>
+        <span class="tag cat">감사</span>
+      </div>
+      <h4>Vault proto에 session_id 필드</h4>
+      <p>per-session 감사 품질 향상. rune-admin 팀과 협의 필요.</p>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#35</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">문서</span>
+      </div>
+      <h4>activate.toml의 stale envector 참조 정리</h4>
+      <p><code>commands/rune/activate.toml</code> L21-22가 <code>envector.endpoint</code>, <code>envector.api_key</code>를 언급하지만, 현재 <code>commands/claude/configure.md</code>는 이 필드를 설정하지 않음 (Vault만 저장).</p>
+      <div class="opts">
+        <strong>액션</strong>: activate.toml에서 envector 관련 언급 삭제 (또는 configure.md와 통일)
+      </div>
+      <div class="status">configure.md L98의 "enVector credentials are no longer stored locally" 주석과 #5 결정에 연동. #26과 함께 정리</div>
+    </div>
+
+    <div class="decision high" style="border-color: var(--danger);">
+      <div class="decision-head">
+        <span class="tag id">#34</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">즉시 / Phase 5</span>
+        <span class="tag cat">클린업</span>
+      </div>
+      <h4>Fastembed 의존성 제거 (신규 발견)</h4>
+      <p>현재 production은 sbert + Qwen3만 사용. fastembed는 라이브러리만 설치될 뿐 실제 모델 다운로드 없음. <code>bootstrap-mcp.sh</code>의 self-heal ④단계가 <strong>잘못된 대상을 방어 중</strong>.</p>
+      <div class="opts">
+        <strong>권장 액션 (a)</strong>:
+        <ul>
+          <li><code>requirements.txt</code>에서 <code>fastembed&gt;=0.7.4</code> 삭제</li>
+          <li><code>mcp/adapter/embeddings.py</code>에서 <code>FastEmbedSDKAdapter</code> 분기 제거</li>
+          <li><code>bootstrap-mcp.sh</code>의 L117-136 fastembed 캐시 self-heal 블록 삭제</li>
+          <li>(선택) sentence-transformers/HuggingFace 캐시 incomplete 방어 코드로 교체</li>
+        </ul>
+      </div>
+      <div class="status">docs 04-go-migration-plan §6.1은 fastembed를 DEFER로 표기했지만, production 미사용이라면 DROP이 정확. Python 유지 기간 있다면 지금 정리 권장. Go 마이그레이션 후에는 venv/pip 자체가 사라져 자연 소멸</div>
+    </div>
+
+  </div>
+
+  <h3>F. 문서 / CI (Phase 5)</h3>
+  <div class="decisions">
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#28</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">문서</span>
+      </div>
+      <h4>CONTRIBUTING.md 전면 재작성</h4>
+      <p>현재 Python 3.12 dev 루프 기준. Go dev loop용으로 교체.</p>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#29</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">문서</span>
+      </div>
+      <h4>GEMINI.md 정리</h4>
+      <p>Routing Rules 중복 제거 + Plugin Root Detection 규칙 일반화.</p>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#30</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 1 이전</span>
+        <span class="tag cat">문서</span>
+      </div>
+      <h4>CLAUDE.md vs SKILL.md vs GEMINI.md 호출 모델 3-way 통일</h4>
+      <p>현재 세 파일이 서로 다른 통합 모델을 전제:</p>
+      <ul>
+        <li><code>CLAUDE.md:24-43</code>: <strong>subagent 스폰</strong> 모델 (<code>Agent</code> tool, <code>subagent_type: "rune:scribe"</code>)</li>
+        <li><code>GEMINI.md:33-39</code>: 직접 <code>mcp_envector_capture</code> MCP 호출 (Gemini는 subagent 미지원)</li>
+        <li><code>SKILL.md:259-280</code>: 직접 MCP 호출, subagent 언급 없음</li>
+      </ul>
+      <p>또한 <code>SKILL.md:47-48</code>은 <code>envector.endpoint</code> + <code>envector.api_key</code>를 activation 필수 체크 필드로 요구하지만, <code>commands/claude/configure.md</code>는 이 필드를 쓰지 않음 → 모든 플랫폼에서 SKILL.md 기준 activation 실패 상태 (drift).</p>
+      <div class="opts">
+        <strong>액션</strong>: Go 포팅 시 통합 모델 결정 (#14 전송 레이어와 연동). <code>SKILL.md</code>의 activation 체크 필드도 통일 (#5 envector persist 결정에 연동).
+      </div>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#31</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">CI</span>
+      </div>
+      <h4>ci/tests Go 포팅</h4>
+      <p><code>ci/tests/test_ci_changed_tests.py</code>를 Go 버전으로.</p>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#32</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Post-MVP</span>
+        <span class="tag cat">품질</span>
+      </div>
+      <h4>benchmark/ Go 포팅</h4>
+      <p>유용하지만 MVP 필수 아님. post-MVP.</p>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#33</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">문서</span>
+      </div>
+      <h4>rune-onepager.drawio.png 갱신</h4>
+      <p>새 Go 아키텍처 반영. 릴리스 전.</p>
+    </div>
+
+  </div>
+
+  <h3>G. 시스템 설계 (Go 포팅 · 정책 보존 + 시스템 품질)</h3>
+  <div class="decisions">
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#36</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 0</span>
+        <span class="tag cat">메모리</span>
+      </div>
+      <h4>int8 양자화 채택 여부</h4>
+      <p>Qwen3-0.6B fp32를 int8로 양자화하면 메모리가 줄어든다 — 얼마나 줄어드는지, 정확도 손실이 허용 범위인지는 <strong>측정 전까지 불명</strong>.</p>
+      <div class="opts">
+        <strong>선택지</strong>:
+        <ul>
+          <li>(a) int8 채택 — 메모리 감소. 정확도 손실 가능</li>
+          <li>(b) fp32 유지 — 정확도 최대. 메모리 더 사용</li>
+        </ul>
+        <strong>판단 방법</strong>: 같은 샘플 셋에 대해 fp32 vs int8의 novelty 분류 일치율과 recall@5 순위 일치율을 측정 (<a href="#benchmark-plan">⑩.1</a>). 허용 임계치는 데이터 수집 후 결정 — 섣불리 "&lt;X% 차이" 박지 않음.
+      </div>
+      <div class="status">결정 시점: ⑩.1 벤치 결과 확보 후</div>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#37</span>
+        <span class="tag low">낮음 (post-MVP)</span>
+        <span class="tag phase">Post-MVP</span>
+        <span class="tag cat">메모리</span>
+      </div>
+      <h4>EvalKey mmap 여부 — premature optimization, 실측 후 판단</h4>
+      <p>EvalKey를 <code>syscall.Mmap</code>으로 demand-paging하면 RSS가 줄 수도 있지만, <strong>이건 premature optimization</strong>이다. envector-go SDK는 보통 <code>LoadEvalKey(path string)</code> 수준 API만 있으면 충분하고, 내부에서 full-load하든 mmap 쓰든 SDK 구현 detail. FHE evaluation이 EvalKey 전체를 고루 touch하면 page fault로 결국 다 RSS에 잡히므로 이득이 0이 될 수도 있다.</p>
+      <div class="opts">
+        <strong>재평가된 태도</strong>: MVP에서는 <strong>평범하게 full-load</strong>로 시작, ⑩.2 벤치로 RSS 실측 후 압박이 실제로 관찰되면 그때 SDK 팀과 mmap 지원 논의. 사전 전제(interface 요구) 박지 않음.
+      </div>
+      <div class="status">결정 시점: MVP 실측 후 RSS 초과 시. 그 전까지는 <code>LoadEvalKey(path)</code>만 사용</div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#38</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 4</span>
+        <span class="tag cat">관측성</span>
+      </div>
+      <h4>pprof / metrics opt-in 기본값</h4>
+      <p>운영 편의 vs 보안 표면. unix socket 내부라 공격면은 작지만 prod에서 민감 데이터가 pprof 덤프에 포함될 수 있음. <strong>#50에서 pprof를 build-tag로 강화</strong> — 이 카드는 metrics에 한정해서 본다.</p>
+      <div class="opts">
+        <strong>권장</strong>: 기본 <strong>off</strong>, config flag(<code>observability.enable_pprof</code>, <code>observability.enable_metrics</code>)로 opt-in. <code>/debug/pprof/</code>는 unix socket 내부에서만 노출 (외부 TCP 금지).
+      </div>
+    </div>
+
+    <div class="decision low">
+      <div class="decision-head">
+        <span class="tag id">#39</span>
+        <span class="tag low">낮음</span>
+        <span class="tag phase">Post-MVP</span>
+        <span class="tag cat">성능</span>
+      </div>
+      <h4>Vault RPC 2회 → 1회 통합 (DecryptBundle)</h4>
+      <p>현재 recall이 <code>DecryptScores</code> + <code>DecryptMetadata</code> 두 번 왕복. 하나의 <code>DecryptBundle</code> RPC로 묶으면 왕복 횟수가 줄어든다. 절감 폭은 단일 Vault RTT 크기에 비례 — <strong>벤치 기반 우선순위 판단</strong> (⑩.3에서 Vault RTT 측정 후 결정).</p>
+      <div class="opts">
+        <strong>비용</strong>: rune-admin proto 변경 + Vault 서버 배포 필요. Cross-team coordination. MVP 스코프 밖.
+      </div>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#40</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 2</span>
+        <span class="tag cat">안정성</span>
+      </div>
+      <h4>외부 장애 대응 정책: retry vs immediate dormant</h4>
+      <p>현재 Python은 Vault/enVector 일시 장애 시 <code>_set_dormant_with_reason</code>으로 <strong>즉시 dormant 전환</strong>. 사용자가 <code>/rune:activate</code> 재실행해야 복구 → 너무 공격적.</p>
+      <div class="opts">
+        <strong>권장</strong>: exponential backoff 2-retry (1s, 2s) → <code>retryable=true</code> 에러 반환. 연속 <strong>3회 이상</strong> 실패 시에만 dormant 전환. 사용자는 자동으로 살아나는 경험을 얻음.
+      </div>
+      <div class="status">Phase 2 capture/recall 구현 시 같이 결정</div>
+    </div>
+
+  </div>
+
+  <h3>H. 구조 & 테스트 (모듈화 · Swappability)</h3>
+  <div class="decisions">
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#41</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 1</span>
+        <span class="tag cat">구조</span>
+      </div>
+      <h4>Policy scheme 버저닝 + canonical 선택</h4>
+      <p>Recency/Novelty/Intent 등 정책 상수를 <code>Scheme</code> 타입으로 묶어 버전 관리. 현재 <code>DefaultScheme</code>(server.py 0.3/0.7/0.95)과 <code>BenchmarkScheme</code>(embedding.py 0.4/0.7/0.93) 중 canonical 결정.</p>
+      <div class="opts">
+        <strong>제안</strong>: MVP는 <code>DefaultScheme</code> (현재 Python 런타임과 bit-identical). Post-MVP에 <code>BenchmarkScheme</code>으로 A/B 검증 후 switch 여부 결정. 결정 #7과 연동.
+      </div>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#42</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Phase 1</span>
+        <span class="tag cat">테스트</span>
+      </div>
+      <h4>Mock 전략: stdlib pattern vs testify/mock vs gomock</h4>
+      <p>각 port의 <code>Mock*</code> 구조체 스타일(<code>XxxFunc func(...)</code> 필드 + CallCount atomic)이 가장 깨끗. framework 도입 없음.</p>
+      <div class="opts">
+        <strong>권장</strong>: <strong>stdlib pattern</strong>. 이유: (a) 코드 생성 없어 리뷰 쉬움, (b) stack trace 깨끗, (c) 100 LoC 미만이라 유지 부담 없음, (d) 팀원이 새 mock 만들 때 진입장벽 낮음.
+      </div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#43</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 1</span>
+        <span class="tag cat">테스트</span>
+      </div>
+      <h4>Golden fixture 방식 — Python ↔ Go 일치 검증</h4>
+      <p><code>scripts/gen_golden.py</code>가 Python 코드로 known input들을 실행해 output을 JSON으로 덤프. Go 테스트가 이 JSON을 읽고 자기 구현과 비교. policy 변경 시 자동 drift 감지.</p>
+      <div class="opts">
+        <strong>대상</strong>: novelty 분류, recency 공식, confidence 공식, intent 분류, entity 추출, record_id 생성, PII 마스킹 — 7종 golden fixture.
+      </div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#44</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 1</span>
+        <span class="tag cat">로깅</span>
+      </div>
+      <h4>로깅 라이브러리: stdlib slog vs zap vs zerolog</h4>
+      <p>stdlib <code>log/slog</code>는 Go 1.21부터 안정화되었고 1.25 기준으로 벤더 라이브러리들(zap/zerolog) 성능의 80-90% 수준. 외부 의존성 없음.</p>
+      <div class="opts">
+        <strong>권장</strong>: <strong>stdlib <code>log/slog</code></strong>. 이유: (a) 외부 deps 불필요, (b) structured + context-aware, (c) <code>_SensitiveFilter</code> 포팅은 custom Handler로 구현 가능, (d) 팀에 zap 경험 없으면 학습 비용 없음.
+      </div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#45</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 2</span>
+        <span class="tag cat">에러</span>
+      </div>
+      <h4>에러 타입 체계 — typed errors vs sentinel + wrap</h4>
+      <p>현재 Python은 `RuneError` 기본 + 6개 서브클래스. Go로 어떻게 옮길지.</p>
+      <div class="opts">
+        <strong>제안</strong>: <code>internal/domain/errors.go</code>에 typed errors 정의:
+        <pre style="margin:8px 0; padding:10px; font-size:12px;"><code>type Error struct {
+    Code         string // "VAULT_CONNECTION_ERROR"
+    Message      string
+    Retryable    bool
+    RecoveryHint string
+    Cause        error  // wrapping
+}
+func (e *Error) Error() string { return e.Message }
+func (e *Error) Unwrap() error { return e.Cause }
+
+var (
+    ErrVaultUnavailable = &amp;Error{Code:"VAULT_CONNECTION_ERROR", Retryable:true}
+    ErrInvalidInput     = &amp;Error{Code:"INVALID_INPUT", Retryable:false}
+    // ...
+)
+
+// 사용: errors.Is(err, domain.ErrVaultUnavailable)</code></pre>
+        Python의 <code>make_error()</code>는 HTTP middleware에서 <code>*Error</code> → JSON 변환으로 대체. <code>Retryable()</code>은 별도 interface로 노출 (<code>type retryable interface { Retryable() bool }</code>)해서 <code>errors.As</code> 없이 duck-typing 검사 가능하게.
+      </div>
+    </div>
+
+    <div class="decision blocking">
+      <div class="decision-head">
+        <span class="tag id">#46</span>
+        <span class="tag blocking">블로킹</span>
+        <span class="tag phase">Phase 0→1</span>
+        <span class="tag cat">암호화</span>
+      </div>
+      <h4>AES-256-CTR envelope에 MAC 추가 (malleability 차단)</h4>
+      <p>현행 <code>{"a":agent_id, "c":base64(IV||CT)}</code>는 <strong>인증 없는 CTR</strong>이다. 공격자가 envelope의 IV 또는 CT 바이트를 flip하면 복호화 측이 이를 감지하지 못하고 임의 plaintext를 뱉을 수 있다. pyenvector와의 호환을 유지하면서 순차적으로 닫는 전략:</p>
+      <div class="callout info" style="margin:10px 0;">
+        <strong>암호화/복호화 주체 명확화</strong>: AES-256-CTR envelope는 <strong>클라이언트 측(pyenvector / envector-go)</strong>에서 암·복호화된다. Vault는 FHE CipherBlock(<code>DecryptScores</code>/<code>DecryptMetadata</code>)만 담당하며 AES envelope 경로에는 관여하지 않는다. 따라서 <strong>업스트림 수정 범위는 pyenvector + envector-go 두 군데</strong>, Vault는 변경 없음.
+      </div>
+      <div class="opts">
+        <strong>옵션 A (추천, Phase 1 내)</strong>: envelope 필드 <code>"m"</code> 추가 — <code>HMAC-SHA256(dek, a || iv || ct)</code>의 16B prefix. pyenvector·envector-go가 legacy(m 없음)와 신(m 있음) 두 모드 모두 decrypt 지원하도록 동시 패치. 기존 레코드는 <code>m</code> 필드 부재 시 verify skip (migration grace period 4주 후에는 경고 로그).<br>
+        <strong>옵션 B (장기)</strong>: <code>crypto/cipher.NewGCM</code>으로 마이그레이션. pyenvector 내부 포맷 자체 변경이라 legacy 레코드 재암호화 경로 필요 — 장기 로드맵.<br>
+        <strong>옵션 C</strong>: 현상 유지 (<span style="color:#c53030;">비권장</span>) — metadata malleability 취약 그대로 남음.
+      </div>
+      <div class="status">상태: 결정 필요. <strong>영향 범위: pyenvector(Python) + envector-go(Go) — 둘 다 클라이언트 측.</strong> Vault와 FHE CipherBlock 경로는 무관. Phase 1 초반 A안 채택 → 두 SDK 동시 릴리스 필요.</div>
+    </div>
+
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#47</span>
+        <span class="tag high">높음</span>
+        <span class="tag phase">Post-MVP</span>
+        <span class="tag cat">보안</span>
+      </div>
+      <h4>Vault ↔ runed 채널의 mTLS 상호 인증</h4>
+      <p>현재 <code>grpc.TransportCredentials</code>는 3-mode (insecure / server TLS / mTLS)를 이미 지원. MVP는 <strong>server TLS only</strong>로 진입, <strong>post-MVP 프로덕션 배포 전에 mTLS 전환</strong>. 이유: 로컬 single-tenant MVP 구간에서는 client cert 프로비저닝 인프라가 부재하고, 실익보다 운영 비용이 크다. 전환 시 cert 갱신은 <code>crypto/tls.Config.GetClientCertificate</code> callback으로 atomic rotation.</p>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#48</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 3</span>
+        <span class="tag cat">운영</span>
+      </div>
+      <h4>Scientist pattern — Python/Go shadow run 비교</h4>
+      <p>cutover 전 <strong>Strangler Fig + Scientist</strong>: 프로덕션 트래픽을 Python이 처리하되, 동일 request를 Go 데몬으로 비동기 mirror한 후 결과 diff를 <code>~/.rune/logs/diff.jsonl</code>에 기록. capture는 Go 측을 <strong>no-op mode</strong>로 (insert skip, embedding/AES envelope byte 단위 비교). recall은 top-k 결과 셋 Jaccard similarity와 순위 상관계수 기록. <strong>cutover 임계치(mirror 기간·허용 diff)는 실측 데이터 수집 후 결정</strong> — 초반 기대값을 문서에 commit하지 않고, 실측 분포를 본 다음에 합의된 기준 적용. Go의 panic/OOM이 Python을 침범하지 않도록 프로세스/자원 격리. → <a href="#benchmark-plan">⑩.4 Shadow run & cutover gate</a></p>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#49</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 5</span>
+        <span class="tag cat">배포</span>
+      </div>
+      <h4>릴리스 바이너리 서명 — cosign / macOS codesign+notarize</h4>
+      <p>단일 Go 바이너리는 배포가 쉬운 반면 tampering 감지가 약해진다. <strong>GitHub Release에 cosign signature + SBOM(syft) 첨부</strong>하고, macOS는 <code>codesign</code> + <code>notarytool</code>로 Gatekeeper 통과, Linux는 <code>minisign</code> 또는 cosign keyless(OIDC). 설치 시 <code>scripts/install.sh</code>가 서명 검증 후에만 <code>~/.rune/bin/</code>에 배치. supply-chain 공격 표면이 좁아진다.</p>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#50</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 4</span>
+        <span class="tag cat">보안</span>
+      </div>
+      <h4>pprof 엔드포인트를 compile-gate (build tag)</h4>
+      <p>config flag만으로 off시키는 방식은 <strong>런타임 toggle</strong>이라 코드가 바이너리에 항상 포함된다. 공격자가 바이너리를 얻으면 config를 변조해 활성화할 수 있다. 대안:</p>
+      <div class="opts">
+        <strong>권장</strong>: <code>//go:build debug</code>로 <strong>compile-gate</strong>. prod 빌드(<code>go build -tags=""</code>)는 pprof handler 자체가 부재. dev 빌드(<code>go build -tags debug</code>)에서만 <code>net/http/pprof</code> import. 추가로 unix socket 내부에서만 노출(TCP 금지)은 유지.<br>
+        <strong>차선</strong>: config flag + 기본 off (현행 제안) — 이미 포함하지만 컴파일 자체를 막는 것이 더 robust.
+      </div>
+    </div>
+
+    <div class="decision medium">
+      <div class="decision-head">
+        <span class="tag id">#51</span>
+        <span class="tag medium">중간</span>
+        <span class="tag phase">Phase 2</span>
+        <span class="tag cat">안정성</span>
+      </div>
+      <h4>Vault 호출 circuit breaker 도입</h4>
+      <p>Vault가 플랩하면 매 request가 gRPC dial timeout을 삼키고 tail latency가 폭증할 수 있다. 현 제안은 "exponential backoff + retry"뿐. 추가로:</p>
+      <div class="opts">
+        <strong>권장</strong>: <code>github.com/sony/gobreaker</code>로 per-endpoint breaker (DecryptScores / DecryptMetadata / GetPublicKey 각각). 임계치(N회 연속 실패·open 시간·half-open probe)는 <strong>초기 conservative default 후 벤치·프로덕션 관측 기반 조정</strong> (⑩.5 부하/장애 시나리오 테스트). Open 상태에서는 <strong>recall은 partial result로 degrade</strong>, <strong>capture는 fast-fail로 큐 backpressure</strong>. MTTR 단축 + cascade 방지.
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- BENCHMARK PLAN -->
+<!-- ============================================================ -->
+<section id="benchmark-plan">
+  <h2>⑩ Benchmark & Verification Plan</h2>
+
+  <p class="lead">이 문서의 다른 모든 섹션에서 정량적 성능 수치를 <strong>의도적으로 비워둔 이유</strong>: 현재 Python baseline도 측정되지 않았고, Go 구현체도 존재하지 않는다. "X ms", "N× 이득", "RSS Y MB" 같은 주장은 근거 없이 쓰면 리뷰 중 반드시 잡힌다. 대신 이 섹션은 <strong>무엇을 어떻게 측정할지</strong>를 자세히 정의한다 — 숫자는 벤치 실행 후 <code>benchmark/results.md</code>에 기록.</p>
+
+  <div class="callout info">
+    <strong>결과 기록 컨벤션</strong>: 모든 측정 결과는 별도 문서(<code>benchmark/results-YYYY-MM-DD.md</code>)에 날짜·환경·도구 버전과 함께 남긴다. 이 문서는 <em>계획 (what/how)</em>만 담고 <em>수치</em>는 절대 하드코딩하지 않는다. 결과가 나온 뒤에는 해당 섹션에서 results 파일로 링크만 건다.
+  </div>
+
+  <h3>⑩.0 환경 표준화 (모든 벤치 공통)</h3>
+  <ul>
+    <li><strong>하드웨어</strong>: 최소 2개 — (a) 팀 표준 개발 머신 (예: M-series Mac 16GB), (b) 참조 Linux 서버 (cgroup v2 유효) · 각 결과에 CPU model / core count / RAM / OS 버전 명시</li>
+    <li><strong>Python</strong>: 현재 production pin 버전 (<code>pyproject.toml</code>), <code>embedding.mode=sbert</code>, Qwen3-0.6B 모델 hash 고정</li>
+    <li><strong>Go</strong>: <code>go 1.25.x</code>, <code>CGO_ENABLED=0 go build -trimpath -ldflags "-s -w"</code>, 동일 Qwen3 ONNX (fp32 기본)</li>
+    <li><strong>Vault / enVector</strong>: 동일 스테이징 endpoint. Vault 버전·enVector 배포 버전 기록</li>
+    <li><strong>워크로드</strong>: capture/recall 시나리오 셋 <code>benchmark/datasets/</code> — 최소 3종 (소량 ~10건 smoke · 중간 ~500건 realistic · 대량 ~5000건 stress). 각 셋은 입력 텍스트 + 기대 출력 metadata 포함</li>
+    <li><strong>반복</strong>: 모든 측정 최소 3회 iteration × warm-up 제외. p50/p95/p99과 stddev 같이 기록</li>
+    <li><strong>도구</strong>: Go 쪽은 <code>go test -bench</code> + <code>benchstat</code> (회귀 비교) · Python 쪽은 <code>pytest-benchmark</code> 또는 직접 timing + <code>pprof</code> · 부하 시나리오는 <code>k6</code> 또는 custom driver</li>
+  </ul>
+
+  <h3>⑩.1 Embedding 품질 & 런타임 벤치 (int8 채택 판단)</h3>
+  <p><strong>무엇을 확인</strong>: fp32와 int8 양자화 ONNX의 품질 차이 및 추론 속도.</p>
+  <p><strong>절차</strong>:</p>
+  <ol>
+    <li>같은 Qwen3-0.6B 모델의 fp32 / int8 ONNX 두 버전 준비</li>
+    <li>동일 코퍼스(실제 capture_log에서 샘플 N=최소 500개 선별, PII 마스킹 후)에서 각 벡터 생성</li>
+    <li><strong>Novelty 분류 일치율</strong>: 동일 (쿼리, 후보) 쌍에 대해 fp32·int8이 같은 novelty class (novel / related / near_duplicate)를 내는 비율</li>
+    <li><strong>Recall@K 순위 일치</strong>: 같은 쿼리로 top-5 recall 수행 후 두 버전의 Jaccard similarity 및 Kendall tau</li>
+    <li><strong>추론 latency</strong>: 배치 크기 1·3·8로 각각 측정</li>
+    <li><strong>RSS</strong>: 모델만 로드한 최소 데몬 기준</li>
+  </ol>
+  <p><strong>판단</strong>: 결과 보고 팀이 "recall 품질 손실이 rune 용도에 허용 가능한가"를 합의 — <em>사전에 임계치를 commit하지 않는다</em>. 결과를 보고 결정.</p>
+
+  <h3>⑩.2 메모리 벤치 (steady-state / 멀티세션)</h3>
+  <p><strong>무엇을 확인</strong>: 단일 데몬 RSS가 어디에 얼마나 소비되는지, 세션 증가에 따른 선형성 여부.</p>
+  <p><strong>시나리오</strong>:</p>
+  <ul>
+    <li><strong>Python baseline</strong>: 1 / 2 / 3 / 5 세션 동시 기동 → 각 PID의 RSS 합산. <code>ps</code>·<code>pmap</code>·<code>/proc/pid/smaps</code>로 모델/힙/키 분해</li>
+    <li><strong>Go idle</strong>: runed 단독 기동 직후 RSS + 1시간 후 RSS (leak 감지)</li>
+    <li><strong>Go under load</strong>: k6로 capture 1 req/s 1시간 지속 시 RSS 상한</li>
+    <li><strong>Go 멀티세션</strong>: shim 1 / 2 / 3 / 5 spawn + runed 1개 → 총 RSS 변화. <em>세션 수와 무관한 상수 수렴</em> 여부 검증</li>
+    <li><strong>EvalKey 로드 방식 비교</strong>: <code>ReadFile</code> vs <code>mmap</code>에서 RSS 및 FHE 연산 latency 측정 → <a href="#decisions">#37</a> 판단 근거</li>
+    <li><strong>goroutine leak</strong>: <code>go.uber.org/goleak</code> CI 게이트</li>
+  </ul>
+  <p><strong>보고 포맷</strong>: 시나리오별 RSS 그래프 + 세션 수 대비 RSS 기울기. Python 선형 vs Go 상수 수렴이 <em>정량적으로</em> 드러나야 "프로세스 모델 변경의 이득"을 commit 가능.</p>
+
+  <h3>⑩.3 Latency 벤치 (capture / recall)</h3>
+  <p><strong>무엇을 확인</strong>: capture / recall의 p50·p95·p99 latency, 그리고 각 단계(embedding · Vault · enVector · rerank · serialize)가 전체에 얼마나 기여하는지.</p>
+  <p><strong>시나리오</strong>:</p>
+  <ul>
+    <li><strong>Python baseline</strong>: 동일 워크로드 셋에 대해 capture/recall end-to-end p50/p95/p99 측정 (최소 iteration 100)</li>
+    <li><strong>Go 단계별 분해</strong>: 각 phase를 slog trace로 기록해 <em>Amdahl의 법칙 준수</em> 여부 확인 (어느 단계가 병목인지)</li>
+    <li><strong>Recall 병렬화 이득</strong>: <code>expanded[:3]</code>을 순차 처리하는 branch와 errgroup 병렬 branch를 A/B 비교. 이득이 기대보다 작으면 HOL blocking / HTTP/2 stream 한도 / Vault 서버 측 직렬화 원인 조사</li>
+    <li><strong>Embedding batch</strong>: 단일 호출 ×3 vs batch-3 ×1 비교. ONNX Runtime Go의 batch dim 처리 효율 실측</li>
+    <li><strong>Vault 단일 RTT</strong>: <code>DecryptScores</code>만 측정 → <a href="#decisions">#39 DecryptBundle</a> 우선순위 근거</li>
+    <li><strong>Cold start</strong>: 데몬 fresh 기동 → 첫 capture까지 wall-clock</li>
+  </ul>
+  <p><strong>합격 기준</strong>: <em>Python baseline 대비 회귀 없음</em>이 최소 요건. 그 이상의 개선 폭은 벤치 결과를 보고 팀이 평가.</p>
+
+  <h3>⑩.4 Shadow run / cutover gate (Scientist pattern)</h3>
+  <p><strong>무엇을 확인</strong>: Python(현행)과 Go(신규)가 동일 request에 대해 <em>실제 프로덕션 트래픽에서도</em> 일관된 결과를 내는지. 이게 통과해야 cutover 진행 (<a href="#decisions">#48</a>).</p>
+  <p><strong>절차</strong>:</p>
+  <ol>
+    <li>프로덕션 트래픽은 Python이 그대로 처리</li>
+    <li>Go 데몬을 mirror로 붙여 동일 request 비동기 복제 — Go는 insert skip (이중 write 방지)</li>
+    <li>매 mirror마다 <code>~/.rune/logs/diff.jsonl</code>에 기록:
+      <ul>
+        <li><strong>capture</strong>: embedding vector cosine similarity · AES envelope byte-identical 여부 · novelty class 일치</li>
+        <li><strong>recall</strong>: top-k id 집합 Jaccard · 순위 Kendall tau · score 차이 분포</li>
+      </ul>
+    </li>
+    <li>기간 동안 Python-Go diff 분포를 histogram으로 수집</li>
+  </ol>
+  <p><strong>cutover 게이트</strong>: 수집된 diff 분포를 보고 팀이 허용 임계치를 결정 → <em>사전에 "0.1% 미만" 같은 숫자 commit하지 않는다</em>. 실측 분포가 bimodal이면 (대부분 0에 가깝고 소수가 큰 차이) 그 outlier의 원인을 먼저 진단해야 함. Go 쪽 panic/OOM이 Python으로 번지지 않는지 shadow run 중 지속 확인.</p>
+
+  <h3>⑩.5 부하 / 장애 시나리오 테스트</h3>
+  <p><strong>무엇을 확인</strong>: 정상 상태 성능만큼이나 장애 상태에서의 동작이 예측 가능한지 (#40·#51 연관).</p>
+  <ul>
+    <li><strong>부하 테스트</strong>: k6로 1/10/50 req/s 유지 시 p99 및 RSS 추이 (멀티세션 폭주 backpressure)</li>
+    <li><strong>Vault 장애 시나리오</strong>: Vault를 일시 중단 → 2-retry 후 retryable error 반환 검증 (#40). breaker 개방 → fast-fail 전환 검증 (#51)</li>
+    <li><strong>Vault 플랩</strong>: 1초 up/down 반복 → breaker half-open probe 정상 동작 검증</li>
+    <li><strong>Sleep/wake</strong>: 실제 macOS caffeinate/pmset로 sleep 유도 → wake 후 다음 capture 성공까지 시간</li>
+    <li><strong>데몬 크래시</strong>: kill -9 → launchd/systemd 자동 재시작 + 첫 요청까지 시간</li>
+    <li><strong>Config 손상</strong>: config.json에 malformed JSON 주입 → 기존 cfg 유지 + 로그 경고 확인</li>
+    <li><strong>OOM 근접</strong>: GOMEMLIMIT 아래에 큰 부하 → GC 공격적 진입 확인, OOM kill 발생 여부</li>
+  </ul>
+
+  <h3>⑩.6 정확성 회귀 (golden fixture)</h3>
+  <p><strong>무엇을 확인</strong>: policy 수식·상수가 Python과 Go에서 bit-identical 결과를 내는지 (§8.8).</p>
+  <ul>
+    <li><code>scripts/gen_golden.py</code>가 Python으로 novelty/recency/confidence/intent/entity/record_id/PII 7종에 대해 JSON 덤프</li>
+    <li>Go 테스트가 같은 입력으로 자기 구현을 돌려 결과 비교 — 차이가 나면 CI fail</li>
+    <li>policy 코드가 바뀔 때마다 두 언어 모두 golden 갱신 필요 → PR 체크리스트</li>
+  </ul>
+
+  <h3>⑩.7 보안 / 호환성 테스트</h3>
+  <ul>
+    <li><strong>AES-MAC envelope 호환</strong> (#46): legacy envelope (m 없음) 읽기 / 신 envelope 쓰고 읽기 / pyenvector ↔ envector-go 상호 encode-decode</li>
+    <li><strong>v0.3.x 레코드 역호환</strong> (#23): 기존 pyenvector로 저장된 레코드를 Go 데몬이 recall해서 원본과 일치하는지</li>
+    <li><strong>Unix socket peer credential</strong> (#18): 의도적으로 다른 uid 프로세스로 소켓 접속 시도 → 거절 확인</li>
+    <li><strong>os.Root traversal</strong> (§7.4.8): <code>../</code> 및 symlink 바깥 경로 입력 → 에러 확인</li>
+    <li><strong>_SensitiveFilter</strong>: 알려진 secret 패턴 입력 → 로그에 원본이 남지 않는지 grep 검증</li>
+  </ul>
+
+  <h3>⑩.8 관측성 / 운영 테스트</h3>
+  <ul>
+    <li><strong>Prometheus /metrics</strong>: 모든 label cardinality 실측 (메트릭별 unique series 수) — 시간에 따라 폭발하지 않는지</li>
+    <li><strong>FlightRecorder trigger</strong>: 의도된 panic 주입 → <code>~/.rune/logs/flight-*.trace</code> 생성 확인 + <code>go tool trace</code>로 열림</li>
+    <li><strong>log rotation</strong>: lumberjack 설정한 크기/기간 초과 → 정상 rotation</li>
+    <li><strong>graceful shutdown</strong>: inflight capture 진행 중 SIGTERM → 30s 내 완료 후 exit 확인</li>
+    <li><strong>reload correctness</strong>: synctest로 debounce 결정적 검증 (§8.6a)</li>
+  </ul>
+
+  <h3>⑩.9 책임 분배 / 타이밍</h3>
+  <table>
+    <thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead>
+    <tbody>
+      <tr><td>Phase 0</td><td>Python 팀</td><td>⑩.1 · ⑩.2 Python baseline · ⑩.3 Python baseline (Go 아직 없으므로 Python만)</td></tr>
+      <tr><td>Phase 1 후반</td><td>Go 팀</td><td>⑩.2 · ⑩.3 Go 측정 (policy·embed·transport skeleton 완성 후)</td></tr>
+      <tr><td>Phase 2</td><td>Go 팀</td><td>⑩.5 · ⑩.6 · ⑩.7 · ⑩.8</td></tr>
+      <tr><td>Phase 3</td><td>Go + Python 팀</td><td>⑩.4 shadow run · cutover gate 기준 합의</td></tr>
+      <tr><td>cutover 직전</td><td>팀 전체</td><td>⑩.4 shadow 결과 리뷰 → go/no-go</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout success">
+    <strong>원칙</strong>: 벤치 결과가 나오기 전까지 이 문서 어디에도 정량 숫자(ms·MB·%·배수)를 쓰지 않는다. 숫자는 <code>benchmark/results-YYYY-MM-DD.md</code>에만 존재. 결과가 나오면 이 문서는 "⑩에 측정 완료, results 참조"로만 수정.
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- PRIORITIES -->
+<!-- ============================================================ -->
+<section id="priorities">
+  <h2>우선순위 요약</h2>
+
+  <h3>지금 당장 확정 (Phase 0, 1주 내)</h3>
+  <p><span class="tag blocking">블로킹</span> <strong>#46 AES-MAC envelope</strong> (pyenvector + envector-go 호환 설계 — <em>Vault 무관, 클라이언트 측 두 SDK만</em>)</p>
+  <p><span class="tag success" style="background: #c6f6d5; color: #22543d;">✅ 해결됨 (2026-04-17)</span> #1 ONNX 진행 확정 · #2 Qwen3 차원 1024 · #3 envector-go 프로토타입 확보 (ports 인터페이스로 독립 진행) · #4 AES 모드 CTR 확정</p>
+
+  <h3>Phase 1 진입 전</h3>
+  <p><span class="tag high">높음</span> #5 enVector persist · #14 Primary transport · #30 CLAUDE/SKILL/GEMINI 3-way 통일 · <strong>#41 Policy scheme canonical</strong> · <strong>#42 Mock 전략 확정</strong> · <span class="tag medium">중간</span> #6 metadata 섹션 · #43 golden fixture 방식 · #44 로깅 라이브러리 · <span class="tag low">낮음</span> #37 EvalKey mmap (post-MVP)</p>
+
+  <h3>Phase 2-3 진입 전</h3>
+  <p><span class="tag high">높음</span> #7 Novelty check · #13 record_builder 이관 · <strong>#40 외부 장애 대응</strong> · <span class="tag medium">중간</span> #8 phase chain · #9 multi-query · #10 deactivate · #45 에러 타입 체계 · <strong>#48 Scientist shadow</strong> · <strong>#51 circuit breaker</strong></p>
+
+  <h3>Phase 4-5</h3>
+  <p><span class="tag medium">중간</span> #16 에이전트 md · #17 OS 매트릭스 · #19 크래시 · #20 sleep/wake · #25 venv 정리 · #26 configure.md · #28 CONTRIBUTING · #38 pprof/metrics opt-in · <strong>#49 바이너리 서명</strong> · <strong>#50 pprof build-tag</strong> · <span class="tag low">낮음</span> #39 Vault DecryptBundle (post-MVP) · <strong>#47 mTLS</strong> (post-MVP) · 나머지</p>
+
+  <div class="callout danger" style="margin-top: 24px;">
+    <strong>가장 혼란을 주는 항목</strong>: <strong>#5 enVector 자격증명 persist 여부</strong>. 여기서 코드(<code>save_config</code>) / 문서(<code>configure.md:98</code>) / 테스트(<code>test_save_config_has_envector_section</code>)가 서로 다른 방향을 가리키고 있어, 먼저 합의하지 않으면 Go 쪽에서 config 스키마를 못 확정합니다.
+  </div>
+
+  <div class="callout danger">
+    <strong>남은 블로킹 (2026-04-17 15:00 기준, 사용자 확인 후 업데이트)</strong>: <strong>#46 AES-MAC</strong> 하나 — 현행 envelope은 인증 없는 CTR이라 metadata malleability 취약. Phase 1 시작 전에 A/B/C 중 하나 확정 필요. <strong>업스트림 수정 범위는 pyenvector + envector-go 두 클라이언트 SDK만</strong> (Vault는 FHE 경로라 무관).
+  </div>
+
+  <div class="callout success">
+    <strong>팀 리뷰 요청</strong>: 각 결정 카드에 코멘트 주시거나, 남은 블로킹 <strong>1건(#46 AES-MAC)</strong>부터 담당 배정해주시면 Phase 0를 1주 내 마무리 가능합니다. (#1, #3은 2026-04-17에 해제됨 — ONNX export 확보 + envector-go 프로토타입 접근 가능)
+  </div>
+</section>
+
+<footer>
+  Rune v0.4.0 마이그레이션 리뷰 문서 · 2026-04-17 작성 · 소스: docs/migration/ + docs/runed/ + 실제 코드베이스 교차검증
+</footer>
+
+</main>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'neutral',
+    themeVariables: {
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Pretendard", sans-serif',
+      fontSize: '13px',
+      primaryColor: '#e5f8fb',
+      primaryBorderColor: '#00ADD8',
+      primaryTextColor: '#0d4f5c',
+      lineColor: '#4a5568',
+      secondaryColor: '#eef5fb',
+      tertiaryColor: '#f7fafc'
+    },
+    flowchart: { htmlLabels: true, curve: 'basis' },
+    sequence: { showSequenceNumbers: true, wrap: true, width: 180 }
+  });
+</script>
+</body>
+</html>

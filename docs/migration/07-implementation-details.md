@@ -1,5 +1,10 @@
 # Rune 구현 상세: Go 포팅용 데이터 테이블
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조. 주요 교정:
+> §1 Intent regex 총 수 **31개** (33 아님). §14 AES 모드 **AES-256-CTR 확정**
+> (pyenvector/utils/aes.py:52-58 실측) — Open Question에서 확정으로 상태 전환,
+> Go `crypto/cipher.NewCTR` 포팅 스니펫 추가.
+
 이 문서는 Go 구현에 필요한 상세 데이터 테이블, 알고리즘, 패턴 목록을 담는다.
 다른 마이그레이션 문서들이 "무엇을" 설명한다면, 이 문서는 "정확히 어떻게"를 설명한다.
 
@@ -51,7 +56,9 @@
 | | | `(owner\|maintainer) of` |
 | 일반 (fallback) | `GENERAL` | (패턴 없음 -- 위 모든 패턴 불일치 시 적용) |
 
-**총 패턴 수**: 33개 (GENERAL 제외 7개 intent에 분포).
+**총 패턴 수**: **31개** (GENERAL 제외 7개 intent에 분포). 2026-04-17 실측 분포:
+DECISION_RATIONALE 6 + FEATURE_HISTORY 5 + PATTERN_LOOKUP 5 + TECHNICAL_CONTEXT 4
++ SECURITY_COMPLIANCE 4 + HISTORICAL_CONTEXT 4 + ATTRIBUTION 3 = 31.
 
 **Go 구현 참고**: `regexp.MustCompile`로 init 시 컴파일. `(?i)` 플래그 사용
 (Python은 매칭 시 `re.IGNORECASE` 적용).
@@ -643,33 +650,55 @@ Socket closed, EOF, failed to connect
 
 ---
 
-## 14. AES 암호화 모드 (Open Question)
+## 14. AES 암호화 모드 (확정: AES-256-CTR)
 
-`envector_sdk.py:232`.
+`envector_sdk.py:227-234`.
 
-### 14.1 확인된 사항
+### 14.1 코드 인용
 
 ```python
-from pyenvector.utils.aes import encrypt_metadata as aes_encrypt
-ct = aes_encrypt(metadata_str, self._agent_dek)
-return json.dumps({"a": self._agent_id, "c": ct})
+def _app_encrypt_metadata(self, metadata_str: str) -> str:
+    from pyenvector.utils.aes import encrypt_metadata as aes_encrypt
+    ct = aes_encrypt(metadata_str, self._agent_dek)
+    return json.dumps({"a": self._agent_id, "c": ct})
 ```
 
 - 앱 레이어 메타데이터 암호화에 per-agent DEK 사용
 - 봉투 포맷: `{"a": "<agent_id>", "c": "<base64_ciphertext>"}`
 - `agent_id`는 복호화 시 올바른 DEK를 찾기 위한 키
 
-### 14.2 미확인 사항
+### 14.2 확정된 사항 (2026-04-17, pyenvector 소스 실측)
 
-- `pyenvector.utils.aes.encrypt_metadata()`의 **내부 AES 모드 미확인** (CBC? GCM? CTR?)
-- IV/nonce 생성 방식 미확인
-- padding 방식 미확인 (GCM이면 불필요)
+`pyenvector/utils/aes.py:52-58`에서 확인:
+- **AES-256-CTR 모드** 사용 (docstring은 "AES-GCM" 언급이 있으나 **오래된 주석**,
+  실제 구현은 `AESHelper.encrypt_with_aes()` → CTR)
+- DEK는 32바이트 (AES-256), config.py L244-252에서 base64 디코드 후 길이 검증
+- CTR 모드이므로 padding 불필요
+- 와이어 포맷: `IV(16바이트) || ciphertext → base64`
+- 봉투는 `{"a": agent_id, "c": base64(IV || CT)}`로 JSON 직렬화
 
-### 14.3 Go 구현 시 필수 확인
+### 14.3 Go 구현
 
-1. `pyenvector` 소스에서 `encrypt_metadata` 구현 확인
-2. AES 모드, IV 길이, padding을 정확히 일치시킬 것
-3. Vault의 `DecryptMetadata` RPC가 동일 포맷을 기대하므로 비트 단위 호환 필요
+```go
+// Go 포팅: crypto/cipher.NewCTR
+import "crypto/aes"
+import "crypto/cipher"
+import "crypto/rand"
+
+func encryptMetadata(plaintext []byte, key []byte) (string, error) {
+    block, _ := aes.NewCipher(key)   // key 32 bytes = AES-256
+    iv := make([]byte, aes.BlockSize) // 16 bytes
+    rand.Read(iv)
+    stream := cipher.NewCTR(block, iv)
+    ciphertext := make([]byte, len(plaintext))
+    stream.XORKeyStream(ciphertext, plaintext)
+    // IV || CT → base64
+    return base64.StdEncoding.EncodeToString(append(iv, ciphertext...)), nil
+}
+```
+
+Vault의 `DecryptMetadata` RPC가 동일 포맷을 기대하므로 비트 단위 호환 필요.
+기존 v0.3.x로 저장된 레코드 역호환을 위해 IV 파싱 로직은 `IV(16) || CT` 순서 유지.
 
 ---
 

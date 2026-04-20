@@ -1,5 +1,10 @@
 # Rune Python → Go 마이그레이션 계획
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조. 주요 교정:
+> Phase 0 결정 #2(Qwen3 차원) **해결됨** — embedding.py:14-18 주석에서 1024 dim 확정.
+> Phase 0 결정 #4(AES 모드) **해결됨** — pyenvector/utils/aes.py:52-58에서 AES-256-CTR 확정.
+> 남은 블로킹: 임베딩 런타임 선택 #1, envector-go SDK 접근 #3.
+
 ## MVP 스코프 선언
 
 MVP는 **한 문장**이다: Claude Code, Codex, Gemini 사용자들에게 오늘과 같은
@@ -252,12 +257,13 @@ Go 데몬)으로 출시하고 Phase 2에서 제거한다.
    HTTP 클라이언트인지, CGO 래핑된 C 라이브러리인지, 아니면 정말로
    Python 전용인지 판단한다. enVector 팀에게 Go SDK에 대해 문의한다.
    위 1/3/4/5 중 선택.
-2. **임베딩 출력 차원 확정**. `Qwen/Qwen3-Embedding-0.6B`를 현재 Python
-   `SBERTSDKAdapter`에 태워서 `vec.shape`를 출력한다. 이 사실이 Go 쪽에서
-   enVector 인덱스 스키마를 commit하는 데 있어 가장 중요한 단일 사실이다.
-   ⚠️ 여러 AS-IS 서베이가 384 dim으로 보고했는데, 이건 MiniLM 클래스
-   default 인자일 뿐 — 실제로 사용되는 Qwen3 모델이 **아니다**. commit 전
-   실측 필수.
+2. **임베딩 출력 차원 확정 — 이미 측정됨: 1024 dim**.
+   `agents/common/schemas/embedding.py` L14-18의 주석이 확정:
+   > "Novelty thresholds — Calibrated for Qwen3-Embedding-0.6B (**1024dim**) via
+   > benchmark 2026-04-08"
+   또한 `NOVELTY_THRESHOLD_*` 상수(0.4/0.7/0.93)가 이 1024차원 기준으로 튜닝된
+   값이라는 맥락을 제공. enVector 인덱스 스키마도 이 값으로 이미 commit된 상태.
+   ⚠️ 일부 서베이가 인용한 384는 MiniLM 클래스 default로, 현재 production과 무관.
 3. **Go 임베딩 라이브러리 선택**. 옵션:
    - `sentence-transformers`를 Python으로 CGO wrap (추하다).
    - Go 네이티브 ONNX 런타임 (`github.com/yalue/onnxruntime_go`) 과
@@ -375,10 +381,10 @@ Exit 기준: 공지.
    `pyenvector` 패키지가 우리가 아는 유일한 public entry point다. Phase 1
    시작 전 결정 필요: 공식 Go SDK (enVector 팀에 문의), CGO wrap, HTTP
    클라이언트 재작성, 또는 Python 사이드카. 가장 큰 단일 마이그레이션
-   리스크.
-2. **임베딩 출력 차원.** `Qwen/Qwen3-Embedding-0.6B`가 end-to-end에서
-   실제로 384가 아니라 1024차원 벡터를 출력하는지 확인. enVector 인덱스
-   스키마가 이것에 의존하고, 데이터 삽입 후에는 바꾸기 어렵다.
+   리스크. **업데이트 2026-04-17**: RFC #85에 따르면 별도 `envector-go` SDK가
+   팀원(jh-lee)에 의해 개발 중이며 rune은 소비자로만 참여. 본 RFC 범위 밖.
+2. ~~**임베딩 출력 차원.**~~ **해결됨 (2026-04-17)**: embedding.py:14-18 주석에서
+   "Qwen3-Embedding-0.6B (1024dim) via benchmark 2026-04-08" 확정. 1024 dim.
 3. **enVector API 호환성.** SDK를 재작성할 때 Python 1.2.x 시리즈와 새 Go
    클라이언트 사이에서 wire protocol이 안정적인지 확인 필요. 버전 skew
    스토리는 enVector 팀과 TBD.

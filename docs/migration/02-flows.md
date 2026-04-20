@@ -1,5 +1,7 @@
 # Rune AS-IS: End-to-End 플로우
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조 완료. 주요 교정: §6 bootstrap self-heal **4단계** (3 아님, `VIRTUAL_ENV unset` 누락이었음), fastembed 4단계는 stale 방어 코드, `_init_pipelines` L1544-1547에서 **dormant 조기 리턴**, `save_config` 호출이 config.json을 3섹션→7섹션 확장시키는 사이드 이펙트.
+
 이 문서는 현재 Python 코드베이스에 존재하는 각 플로우를, Go 포팅이 중요한
 부분의 동작을 그대로 재현하고 중요하지 않은 부분은 의도적으로 건너뛸 수 있을
 만큼의 디테일로 서술한다.
@@ -366,47 +368,87 @@ scripts/bootstrap-mcp.sh
     │
     ├── 플러그인 루트 감지 (env, 알려진 캐시 경로, cwd walk-up)
     │
-    ├── .venv 생성/복구
-    │       - pip shebang 오염 수정
-    │       - Python 버전 매칭
+    ├── 4단계 self-heal (bootstrap-mcp.sh L37-136, 2026-04-17 실측):
+    │       1. VIRTUAL_ENV 환경변수 unset (L41) — 외부 venv pip shebang 오염 사전 차단
+    │       2. Python 버전 불일치 감지 (L53-67) — interpreter vs site-packages 버전 차이 시 venv 재생성
+    │       3. Pip shebang 오염 감지 (L69-96) — Claude Code 플러그인 캐시 복사로 경로 깨진 shebang 재작성 (sed BSD/GNU 분기)
+    │       4. Fastembed .incomplete 캐시 정리 (L117-136) ⚠️ **STALE 방어 코드**
+    │          - 과거 fastembed가 기본 백엔드였던 시절의 잔재
+    │          - 현재 production은 sbert + Qwen3-0.6B이라 fastembed 모델 다운로드가 발생하지 않음
+    │          - sentence-transformers/HuggingFace 캐시 쪽 incomplete 방어가 오히려 필요
     │
-    ├── pip install -r requirements.txt
-    │       - fastmcp, pyenvector, sentence-transformers, 등
-    │       - 필요 시 stale fastembed 모델 캐시 self-heal
+    ├── pip install -r requirements.txt (22 패키지, root requirements.txt 실측)
+    │       - fastmcp, pyenvector, sentence-transformers, fastembed(미사용), numpy
+    │       - fastapi, uvicorn, slack-sdk (agents/scribe/server.py 웹훅 서비스용)
+    │       - anthropic, openai, google-generativeai, langdetect
+    │       - prometheus-client, python-json-logger, psutil, httpx, pydantic, 등
     │
-    ├── SETUP_ONLY=1 → exit 0 (legacy 하위 호환 env var)
+    ├── SETUP_ONLY=1 → install-deps 모드로 진입 (backward compat, L23-25)
+    ├── --local-only 플래그 → deps 설치 skip, preflight only
+    ├── --install-deps 플래그 → deps 설치 + server 실행 안 함
     │
-    └── exec .venv/bin/python mcp/server/server.py --mode stdio
+    ├── L144-162: config fallback — ~/.rune/config.json 부재 + RUNEVAULT_* env var 존재 시
+    │             최소 config 자동 생성 (vault + state="dormant" + metadata.configVersion="1.1")
+    │
+    └── exec .venv/bin/python3 mcp/server/server.py --mode stdio
             │
             ▼
-    mcp/server/server.py::main()
+    mcp/server/server.py::main() (L1805-2001 실측)
             │
-            ├── load_config(~/.rune/config.json)
+            ├── argparse — ENVECTOR_CONFIG/ENDPOINT/KEY_* env vars 로딩
             │
-            ├── state != "active" →
-            │       vault_status/diagnostics/reload_pipelines만 노출하는
-            │       최소 MCP 서버 등록
+            ├── ENVECTOR_CONFIG가 가리키는 config.json에서 vault 블록 읽어 RUNEVAULT_* env var로 승격
             │
-            ├── state == "active":
-            │       ├── VaultClient.fetch_keys_from_vault()
-            │       │       → EncKey.json, EvalKey.json,
-            │       │         enVector endpoint/api_key,
-            │       │         index_name, key_id, agent_id, agent_dek
-            │       │
-            │       ├── 백그라운드 스레드 spawn:
-            │       │       ├── EmbeddingAdapter(mode, model) 초기화
-            │       │       ├── scribe 파이프라인 초기화 (record_builder + novelty)
-            │       │       └── retriever 파이프라인 초기화 (query_processor + searcher + synthesizer)
-            │       │
-            │       └── 8개 MCP tool 전부 등록
+            ├── VAULT_CONFIGURED면 fetch_keys_from_vault(RUNEVAULT_ENDPOINT, RUNEVAULT_TOKEN, ...)
+            │       → EncKey.json, EvalKey.json 디스크 캐시
+            │       → index_name, key_id, agent_id, agent_dek, envector_endpoint, envector_api_key 추출
             │
-            └── FastMCP.run_stdio()
+            ├── EnVectorSDKAdapter 초기화 (실패 시 degraded 모드로 경고)
+            ├── VaultClient 초기화
+            │
+            ├── **MCPServerApp(...) 생성자 — @self.mcp.tool 데코레이터로 8개 tool 모두 무조건 등록**
+            │       ⚠ 중요: 조건부 등록 아님. dormant/active와 무관하게 항상 8개 전부 등록됨.
+            │       runtime에 각 tool 본문이 state 체크로 거절 (self._ensure_pipelines + dormant 에러)
+            │
+            ├── threading.Thread(target=app._init_pipelines_background).start()
+            │       (백그라운드 파이프라인 초기화. _ensure_pipelines가 120s 대기.)
+            │
+            └── FastMCP.run_stdio() + SIGINT/SIGTERM 핸들러
+
+### _init_pipelines (L1520-1798) 내부 순서
+    1. L1541: load_rune_config() 재로드
+    2. L1544-1547: **state != "active" 즉시 return** (self._scribe = None, self._retriever = None)
+       → dormant 상태면 embedding 모델 로드도, Vault fetch도 skip
+    3. L1549-1552: EmbeddingService 초기화 (active일 때만)
+    4. L1559-1595: Vault fetch → enVector credentials 추출
+    5. L1584-1591: save_config() 호출 (envector.endpoint/api_key 캐시)
+       → 이 순간 config.json이 3섹션(vault+state+metadata) → 7섹션으로 확장됨
+    6. L1631-1642: EnVectorSDKAdapter 재초기화 (새 endpoint/api_key 반영)
+    7. L1702: RecordBuilder(llm_extractor=llm_extractor or None) — LLM key 없으면 llm_extractor=None
+    8. L1707-1726: has_llm_key면 legacy Tier1/2 pipeline (pattern_cache, detector, tier2_filter) 초기화
+    9. L1728-1735: self._scribe dict 완성
+    10. L1748-1772: retriever pipeline (QueryProcessor/Searcher/Synthesizer) 초기화
 ```
 
-파이프라인 init에 의존하는 tool 호출은 `_ensure_pipelines()` (120s)에서
-대기한다. `vault_status`, `diagnostics`, `reload_pipelines`는 대기하지
-**않는다** — 파이프라인이 끝나기 전에도 실행되어 사용자가 startup 정지를
-진단할 수 있도록 한다.
+파이프라인 init에 의존하는 tool 호출은 `_ensure_pipelines()` (L1503-1518,
+120s 타임아웃)에서 대기한다. `vault_status`, `diagnostics`, `reload_pipelines`는
+대기 로직을 별도 실행하지 **않는다** — 파이프라인이 끝나기 전에도 실행되어
+사용자가 startup 정지를 진단할 수 있도록 한다.
+
+### save_config의 사이드 이펙트 (2026-04-17 신규 확인)
+
+`_init_pipelines`가 Vault fetch 성공 시 `save_config()`를 호출(L1585-1591)하는데,
+`config.py::save_config` 구현이 **dataclass 전체 섹션을 unconditional하게 직렬화**
+한다(L311-342). 결과:
+
+- `/rune:configure`로 쓰여진 T1 상태의 3섹션 파일(`vault + state + metadata`)이
+  `/rune:activate` 후 첫 Vault fetch 시 T2 상태의 7섹션으로 확장됨
+  (envector + embedding + llm + scribe + retriever 추가)
+- `metadata` 섹션(configVersion/lastUpdated/installedFrom)은 **save_config이
+  보존하지 않아 증발**
+- `configure.md:98`의 "enVector credentials are no longer stored locally" 주석과
+  drift. git log 참고: `5e5033e`에서 EnVectorConfig 제거 → `95abbbb`에서 envector
+  캐싱을 다시 도입. 주석만 stale
 
 ## 7. 슬래시 커맨드 → MCP Tool 매핑
 

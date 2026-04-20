@@ -1,5 +1,10 @@
 # 03. 외부 통신 상세
 
+> **검증 상태 (2026-04-17)**: 전체 Python 코드베이스 실측 대조 완료. 주요 교정:
+> §2.2 agent_dek 32바이트 검증 로직 명시 (`server.py:248-255` 실측), envector
+> credentials persist 여부를 migration 결정 #5와 연동으로 표시. §6 AES-256-CTR
+> 확정 (`pyenvector/utils/aes.py:52-58` 실측).
+
 runed가 수행하는 모든 외부 네트워크 통신을 구현 가능한 수준으로 기술한다.
 대상은 두 가지: **Rune-Vault** (키 관리 + 복호화)와 **enVector Cloud** (암호화 벡터 DB).
 
@@ -113,9 +118,29 @@ message DecryptMetadataResponse {
 | `index_name` | in-memory | 모든 SDK 호출(score/insert/remind)의 필수 파라미터 |
 | `key_id` | in-memory | enVector SDK 초기화 파라미터 |
 | `agent_id` | in-memory | AES 메타데이터 암호화 시 봉투의 `"a"` 필드 |
-| `agent_dek` | in-memory (base64 디코딩 후 `[]byte`, 32바이트) | AES-256-CTR 메타데이터 암호화 키 |
-| `envector_endpoint` | `~/.rune/config.json`의 `envector.endpoint`에 기록 | enVector Go SDK gRPC 대상 |
-| `envector_api_key` | `~/.rune/config.json`의 `envector.api_key`에 기록 | enVector Go SDK 인증 토큰 |
+| `agent_dek` | in-memory (base64 디코딩 후 `[]byte`, **정확히 32바이트 — 길이 검증 필수**) | AES-256-CTR 메타데이터 암호화 키 |
+| `envector_endpoint` | (결정 #5에 따라) config.json persist 또는 memory-only | enVector Go SDK gRPC 대상 |
+| `envector_api_key` | (결정 #5에 따라) config.json persist 또는 memory-only | enVector Go SDK 인증 토큰 |
+
+**Python 참고 (server.py:248-255)**: agent_dek을 base64 디코딩한 결과가 32바이트가
+아니면 Vault fetch 실패 반환 + dormant 전환. Go에서도 동일 검증:
+
+```go
+dek, err := base64.StdEncoding.DecodeString(bundle.AgentDEK)
+if err != nil {
+    return nil, fmt.Errorf("invalid base64 agent_dek: %w", err)
+}
+if len(dek) != 32 {
+    return nil, fmt.Errorf("agent_dek must be 32 bytes (AES-256), got %d", len(dek))
+}
+```
+
+**envector persist 결정 (migration 결정 #5)**: 현재 Python은 `save_config()`가
+envector.endpoint/api_key를 config.json에 persist하지만, `configure.md:98`에는
+"no longer stored locally" 주석이 있어 drift. Go에서는 persist 여부를 명시적으로
+결정한 뒤 한 방향으로 정리. 선택지:
+- (a) persist 유지 (Vault 일시 장애 시 캐시로 동작 가능)
+- (b) persist 안 함 (config.json은 영구 T1 상태, 매 부팅 시 Vault fetch)
 
 **Go pseudocode**:
 
@@ -909,14 +934,29 @@ enVector SDK는 이 작업에 관여하지 않는다.
 `modes.CTR`을 사용한다 (인증 태그 없음). Go 구현 시 반드시 CTR 모드를
 사용해야 기존 데이터와 호환된다.
 
+> ⚠️ **보안 갭 (2026-04-17 리뷰)** — 현행 envelope에는 **MAC이 없어 malleability
+> 취약**. 공격자가 base64 ciphertext를 복호화 없이 비트 flip하면 Vault가
+> 감지하지 못하고 조작된 plaintext를 반환할 수 있다. migration 결정 **#46**
+> (`docs/migration/python-go-comparison.html §결정보드 H`)에서:
+> - **옵션 A (추천)**: envelope에 `"m"` 필드 = `HMAC-SHA256(dek, a||iv||ct)[:16]` 추가.
+>   legacy 레코드는 `m` 부재 시 verify skip + 4주 grace period.
+> - **옵션 B**: AES-GCM 전환 (pyenvector 업스트림 수정 필요, 장기).
+> - **옵션 C**: 현상 유지 (비권장).
+>
+> Go 1차 구현은 CTR 호환을 유지하되, Phase 1 초반에 옵션 A로 전환할 수
+> 있도록 `MetadataEncryptor` interface에 `Mac []byte` 필드를 선제적으로
+> 비워두고 Encrypt/Decrypt 경로에 분기를 마련한다.
+
 ### 6.4 봉투 포맷
 
 ```json
-{"a":"agent_xyz","c":"<base64 encoded IV+ciphertext>"}
+{"a":"agent_xyz","c":"<base64 encoded IV+ciphertext>","m":"<base64 HMAC-SHA256(dek, a||iv||ct)[:16]>"}
 ```
 
 - `"a"` (agent_id): 어떤 에이전트의 DEK로 암호화되었는지 식별
 - `"c"` (ciphertext): base64 인코딩된 `IV || ciphertext`
+- `"m"` (**신규 — 결정 #46 옵션 A 채택 시**): `HMAC-SHA256(dek, a || iv || ct)` 앞 16B를 base64.
+  부재 시 legacy 모드 (verify skip, 4주 grace)
 
 ### 6.5 Go 구현
 
@@ -939,14 +979,16 @@ const (
 )
 
 // MetadataEnvelope는 AES 암호화된 메타데이터의 JSON 봉투.
+// 결정 #46 옵션 A 채택 시 Mac 필드 사용, 그 전에는 omitempty로 backward-compat.
 type MetadataEnvelope struct {
     AgentID    string `json:"a"`
-    Ciphertext string `json:"c"`  // base64(IV || ciphertext)
+    Ciphertext string `json:"c"`           // base64(IV || ciphertext)
+    Mac        string `json:"m,omitempty"` // base64 HMAC-SHA256(dek, a||iv||ct)[:16]  (#46)
 }
 
 // EncryptMetadata는 plaintext를 AES-256-CTR로 암호화하고
-// 봉투 JSON 문자열을 반환한다.
-func EncryptMetadata(plaintext []byte, agentID string, dek []byte) (string, error) {
+// 봉투 JSON 문자열을 반환한다. macMode=true면 "m" 필드를 채운다 (#46 옵션 A).
+func EncryptMetadata(plaintext []byte, agentID string, dek []byte, macMode bool) (string, error) {
     if len(dek) != aes256KeySize {
         return "", fmt.Errorf("DEK must be %d bytes, got %d", aes256KeySize, len(dek))
     }
@@ -971,19 +1013,31 @@ func EncryptMetadata(plaintext []byte, agentID string, dek []byte) (string, erro
     combined := append(iv, ciphertext...)
     b64 := base64.StdEncoding.EncodeToString(combined)
 
-    // 봉투 JSON 생성
     envelope := MetadataEnvelope{
         AgentID:    agentID,
         Ciphertext: b64,
     }
+
+    if macMode {
+        // HMAC-SHA256(dek, a || iv || ct)[:16]  — 결정 #46 옵션 A
+        h := hmac.New(sha256.New, dek)
+        h.Write([]byte(agentID))
+        h.Write(iv)
+        h.Write(ciphertext)
+        envelope.Mac = base64.StdEncoding.EncodeToString(h.Sum(nil)[:16])
+    }
+
     envelopeJSON, err := json.Marshal(envelope)
     if err != nil {
         return "", fmt.Errorf("envelope marshal: %w", err)
     }
-
     return string(envelopeJSON), nil
 }
 ```
+
+> 위 예시는 `hmac`, `crypto/sha256` import를 추가로 필요로 한다. macMode 결정은
+> `policy.Scheme`에 flag로 두고 config로 토글 가능하게 — legacy 레코드 호환을
+> 위해 Decrypt 측은 `Mac`이 비어 있으면 verify skip.
 
 ### 6.6 capture.go에서의 사용 흐름
 
