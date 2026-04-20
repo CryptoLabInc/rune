@@ -436,6 +436,7 @@
     <li><a href="#structure">⑧ 구조 & 테스트 전략</a></li>
     <li><a href="#decisions">⑨ 결정 보드</a></li>
     <li><a href="#benchmark-plan">⑩ Benchmark & Verification Plan</a></li>
+    <li><a href="#envector-sdk-research">⑪ envector-go SDK 채택 심층 조사</a></li>
     <li><a href="#priorities">우선순위 요약</a></li>
   </ul>
   <h2 style="margin-top: 28px;">범례</h2>
@@ -1858,24 +1859,120 @@ flowchart LR
     </ul>
   </div>
 
-  <h3>Go에서 결정해야 할 2가지</h3>
+  <h3>Go에서 확정된 방향 (2026-04-20)</h3>
+
+  <div class="callout success">
+    <strong>결정 <a href="#decisions">#5</a>: (b) 메모리만 + 부팅 retry 채택</strong>. envector 자격증명은 config.json에 쓰지 않고 매 runed 기동 시 Vault로부터 재획득. <strong>사용자 재configure 불필요</strong> — vault endpoint/token은 영구 저장돼 있으므로 runed가 자체적으로 Vault에 재접속해서 envector creds를 메모리에 채움.
+  </div>
+
+  <h3>⑥.Go 세 주체 아키텍처 (Vault · runed · envector)</h3>
+
+  <p>(b) 방식이 왜 작동하는지 이해하려면 <strong>세 주체의 역할 구분</strong>이 중요하다:</p>
+
+  <div class="mermaid">
+flowchart TB
+  subgraph User["rune 사용자 머신"]
+    direction TB
+    Cfg[("~/.rune/config.json<br/>vault.endpoint · vault.token<br/>state · metadata<br/>(디스크, 영구)")]
+    Runed["runed 상주 데몬<br/><br/>메모리:<br/>· envector_endpoint + api_key<br/>· EncKey · EvalKey · agent_dek<br/>(재기동 시 날아감)"]
+    Cfg -- "부팅 시 읽음" --> Runed
+  end
+
+  Vault["Vault gRPC<br/>(키 브로커 + FHE 복호화)"]
+  Env["envector Cloud<br/>(벡터 DB)"]
+
+  Runed -- "vault.token<br/>GetPublicKey · DecryptScores · DecryptMetadata" --> Vault
+  Runed -- "envector.api_key<br/>Insert · Score · GetMetadata" --> Env
+
+  classDef disk fill:#fff5e6,stroke:#d69e2e,color:#744210
+  classDef go fill:#e5f8fb,stroke:#00ADD8,color:#0d4f5c
+  classDef ext fill:#fef5e7,stroke:#d69e2e,color:#744210
+  class Cfg disk
+  class Runed go
+  class Vault,Env ext
+  </div>
+
+  <p><strong>runed는 두 서비스와 별도 gRPC 채널로 직접 통신</strong>:</p>
+  <ul>
+    <li><strong>Vault</strong>: 키 브로커 + FHE 복호화 담당. RPC: <code>GetPublicKey</code>, <code>DecryptScores</code>, <code>DecryptMetadata</code>. auth는 <code>vault.token</code> (config.json에 영구 저장)</li>
+    <li><strong>envector</strong>: 벡터 DB 저장·검색. RPC: <code>Insert</code>, <code>Score</code>, <code>GetMetadata</code>. auth는 <code>envector.api_key</code> (<strong>Vault 번들에서 받은 값, 메모리에만</strong>)</li>
+  </ul>
+
+  <p><strong>envector는 Vault를 경유하지 않는다</strong> — runed가 envector와 직접 연결. 하지만 envector에 접속하려면 <strong>Vault가 먼저 공급한 api_key</strong>가 필요. 즉 Vault는 "envector 접속 허가권을 발급"하는 역할.</p>
+
+  <h3>⑥.Go 부팅 시 credentials 획득 흐름</h3>
+
+  <pre><code>runed 부팅 (launchd/systemd 자동 기동)
+  │
+  ├─ state = starting
+  │
+  ├─ config.json 로드
+  │    ├─ vault.endpoint ✓ (디스크에서)
+  │    └─ vault.token    ✓ (디스크에서)
+  │
+  ├─ 메모리에 envector_api_key 있나?
+  │    └─ 없음 (방금 부팅, 메모리 초기 상태)
+  │
+  ├─ Vault.GetPublicKey(vault_token) 호출
+  │    │
+  │    ├─ 성공:
+  │    │    Vault 번들 반환:
+  │    │      {
+  │    │        EncKey, EvalKey,
+  │    │        envector_endpoint, envector_api_key,  ← 여기서 받음
+  │    │        agent_id, agent_dek
+  │    │      }
+  │    │    → 메모리 세팅 (+ EncKey/EvalKey는 ~/.rune/keys/에 디스크)
+  │    │    → state = active
+  │    │    → envector 직접 호출 가능
+  │    │
+  │    └─ 실패 (network / Vault 재시작 / sleep-wake 등):
+  │         → state = waiting_for_vault
+  │         → 백그라운드 retry (exp backoff 1s → 60s cap, 무한)
+  │         → capture/recall 요청 오면 503 VAULT_PENDING 즉시 반환
+  │         → Vault 복구되는 순간 → active 자동 전환
+  │         → (사용자 개입 0)
+  │
+  └─ 이제부터 일상 사용
+       ├─ envector.Insert(vec, metadata, auth=envector_api_key)
+       ├─ envector.Score(query, auth=envector_api_key)
+       └─ Vault.DecryptScores(blob, auth=vault.token)</code></pre>
+
+  <h3>⑥.Go "또 configure 해야 하나?" Q&amp;A</h3>
+
   <table>
     <thead>
-      <tr><th>이슈</th><th>선택지</th><th>영향</th></tr>
+      <tr><th>시나리오</th><th>사용자 개입 필요?</th><th>이유</th></tr>
     </thead>
     <tbody>
-      <tr>
-        <td><strong>enVector 자격증명 persist?</strong></td>
-        <td>(a) Python 방식 유지 (config.json에 캐시)<br/>(b) persist 안 함, 매 부팅 GetPublicKey 재호출</td>
-        <td>(b) 선택 시 config.json 영구 3섹션 유지. 단순. 단 Vault 일시 장애 시 캐시 이점 상실</td>
-      </tr>
-      <tr>
-        <td><strong>T1의 metadata 섹션</strong></td>
-        <td>(a) 유지 (Go 로더가 라운드트립)<br/>(b) 폐기 (현재 Python 방식)<br/>(c) lastUpdated만 갱신</td>
-        <td>(a)(c) 선택 시 <code>configVersion</code>/<code>installedFrom</code> 디버깅 정보 보존</td>
-      </tr>
+      <tr><td>최초 configure</td><td>✅ 필요</td><td><code>/rune:configure</code>로 vault endpoint + token 입력 (1회성)</td></tr>
+      <tr><td>랩탑 닫았다 다음날 열기</td><td>❌ 불필요</td><td>launchd가 runed 자동 재기동. config.json 읽어 Vault에 재접속</td></tr>
+      <tr><td>runed 크래시 후 launchd 재시작</td><td>❌ 불필요</td><td>config.json의 vault 정보 영구 → 자동 복구</td></tr>
+      <tr><td>Vault 일시 다운</td><td>❌ 불필요</td><td><code>waiting_for_vault</code> 상태로 backoff retry. Vault 복구 시 자동 <code>active</code></td></tr>
+      <tr><td>Vault 주소 오타/영구 실패</td><td>✅ 필요</td><td>로그·<code>/health</code> 경고 확인 후 <code>/rune:configure</code>로 재입력</td></tr>
+      <tr><td>사용자가 <code>/rune:deactivate</code>함</td><td>✅ 재활성화 필요</td><td><code>state=dormant</code>는 사용자 명시 상태 — <code>/rune:activate</code>로 전환</td></tr>
+      <tr><td>rune reset (~/.rune 삭제)</td><td>✅ 재configure 필요</td><td>vault 정보도 지워졌으므로 처음부터 다시</td></tr>
     </tbody>
   </table>
+
+  <h3>⑥.Go config.json 영구 스키마 (3-섹션 고정)</h3>
+
+  <pre><code>{
+  "vault": {
+    "endpoint":    "tcp://vault-TEAM.oci.envector.io:50051",
+    "token":       "&lt;user-provided vault auth token&gt;",
+    "ca_cert":     "&lt;path to CA PEM or empty&gt;",
+    "tls_disable": false
+  },
+  "state":    "active" | "dormant",
+  "metadata": { "configVersion": "2.0", "lastUpdated": "...", "installedFrom": "..." }
+}</code></pre>
+
+  <p><strong>스키마는 T0 · T1 · T2 내내 변화 없음</strong>. envector / embedding / llm / scribe / retriever 섹션은 config.json에 쓰지 않음 — Vault 번들 또는 dataclass default에서 매번 로드. Python의 "T1 후 7-섹션으로 확장"은 Go에서 폐기.</p>
+
+  <p class="callout info" style="margin-top:10px;">
+    <strong>metadata 섹션 처리</strong>: 결정 <a href="#decisions">#6</a>에서 <strong>(a) 라운드트립 보존 채택</strong> (2026-04-20). Go loader가 metadata를 <code>map[string]any</code>로 읽어 그대로 다시 씀. configure.md가 쓴 <code>configVersion</code>/<code>lastUpdated</code>/<code>installedFrom</code> 디버깅 정보 보존.
+  </p>
 </section>
 
 <!-- ============================================================ -->
@@ -3053,53 +3150,410 @@ envelope := map[string]string{
     <div class="decision high">
       <div class="decision-head">
         <span class="tag id">#5</span>
-        <span class="tag high">높음</span>
+        <span class="tag success" style="background:#c6f6d5; color:#22543d;">✅ 결정됨</span>
         <span class="tag phase">Phase 1</span>
-        <span class="tag cat">Config</span>
+        <span class="tag cat">Config / Lifecycle</span>
       </div>
-      <h4>enVector 자격증명 persist 여부</h4>
-      <p>코드/문서/테스트가 서로 다른 방향 가리키는 <strong>가장 혼란스러운 항목</strong>.</p>
+      <h4>enVector 자격증명 persist 여부 — (b) 메모리만 + 부팅 retry</h4>
+      <p><strong>최종 (2026-04-20)</strong>: (b) 채택. <code>envector.endpoint</code>/<code>envector.api_key</code>는 <strong>디스크에 쓰지 않음</strong>. 매 runed 기동 시 Vault로부터 재획득해서 메모리에만 보관. Vault 호출 실패 시 exponential backoff로 무한 retry (<code>waiting_for_vault</code> 상태). 사용자 재configure 불필요 (vault endpoint/token은 여전히 config.json에 영구).</p>
       <div class="opts">
-        <strong>선택지</strong>:
+        <strong>구체 결정</strong>:
         <ul>
-          <li>(a) Python 방식 유지 — config.json에 캐시</li>
-          <li>(b) 데몬 메모리만 — 매 부팅 GetPublicKey 재호출</li>
+          <li><strong>5a config.json 스키마</strong>: <code>vault</code> + <code>state</code> + <code>metadata</code> 3-섹션 <strong>영구 고정</strong>. <code>envector</code> 섹션은 아예 없음. <code>embedding</code>/<code>llm</code>/<code>scribe</code>/<code>retriever</code> 섹션도 config.json에 쓰지 않음 (결정 <a href="#decisions">#6</a>·향후 카드에서 dataclass default 사용 여부 별도 결정)</li>
+          <li><strong>5b 부팅 retry</strong>: exponential backoff <code>1s → 2s → 5s → 15s → 30s → 60s</code> (cap), 무한 반복. runed 프로세스는 절대 죽지 않음</li>
+          <li><strong>5c 상태 모델 확장</strong>: 기존 <code>dormant ↔ active</code> 이분법에서 <code>starting → waiting_for_vault → active ↔ dormant</code> 4-state로. <code>waiting_for_vault</code>는 일시 상태 (사용자 개입 없이 자동 복구), <code>dormant</code>는 사용자 명시 deactivate 상태</li>
+          <li><strong>5d 요청 처리</strong>: <code>waiting_for_vault</code> 중 capture/recall 들어오면 <strong>503 <code>VAULT_PENDING</code> 즉시 반환</strong> (block/queue 안 함). 응답에 <code>retry_after</code>/<code>last_error</code> 힌트 포함. MCP/CLI 쪽이 다음 호출에 재시도</li>
+          <li><strong>5e 지속 장애 감지</strong>: 20회 또는 10분 이상 실패 지속 시 경고 로그 + <code>/health</code>에 <code>persistent_failure: true</code> 표시. 단 retry는 계속 (사용자가 로그 보고 vault endpoint 오타 수정 등 조치 유도)</li>
+          <li><strong>5f drift 정리</strong>: <code>commands/claude/configure.md:98</code>의 "no longer stored" 주석이 Go 구현과 비로소 일치. Python 측 <code>save_config()</code>의 envector 섹션 쓰기와 <code>test_save_config_has_envector_section</code> 테스트는 Python 유지 기간 동안만 유효, Go에서는 제거 (결정 #26과 연동)</li>
         </ul>
       </div>
-      <div class="status">drift: configure.md("no longer stored") vs save_config(L318-321) vs test_save_config_has_envector_section</div>
+      <div class="status">상태: ✅ 결정됨 (2026-04-20). Python drift(코드 쓰기 vs 주석 "안 씀")는 Go에서 주석 쪽으로 통일. Phase 1 구현 대상: <code>internal/daemon/lifecycle/startup.go</code>에 retry 루프 + state machine</div>
+
+      <details class="decision-log">
+        <summary>📋 결정 로그 · 문제 상황 · 자료 조사 · 옵션 비교 (클릭 펼치기)</summary>
+        <div class="log-body">
+          <h5>문제 상황</h5>
+          <p>Python 코드베이스에서 enVector 자격증명(<code>endpoint</code> + <code>api_key</code>)을 어떻게 다루는지가 <strong>코드·테스트·문서 세 곳에서 서로 다른 방향을 가리키는 drift</strong> 상태. Go 포팅 시 이 세 입장을 하나로 못박아야 함. 또한 이 결정이 <strong>config.json 스키마</strong>·<strong>부팅 시 Vault 호출 정책</strong>·<strong>state machine</strong>에 연쇄적으로 영향.</p>
+
+          <h5>자료 조사 / 사실 확인 (2026-04-20, 소스 실측)</h5>
+          <ul>
+            <li><strong>Python 실제 런타임 동작</strong>: <code>agents/common/config.py:311-321</code>의 <code>save_config()</code>가 <code>envector</code> 섹션(<code>endpoint</code> + <code>api_key</code>)을 config.json에 <strong>무조건 씀</strong>. 트리거는 <code>server.py:1585</code>에서 첫 <code>/rune:activate</code> 직후</li>
+            <li><strong>Python 문서</strong>: <code>commands/claude/configure.md:98</code> 주석 "enVector credentials are no longer stored locally — they are delivered automatically via the Vault bundle at session start" → 코드와 <strong>drift</strong></li>
+            <li><strong>Python 테스트</strong>: <code>mcp/tests/test_config.py:175</code>의 <code>test_save_config_has_envector_section</code>가 "써야 함"을 스펙으로 <strong>pin</strong>. 즉 코드·테스트는 일치(a), 주석만 (b) 주장</li>
+            <li><strong>git 히스토리</strong>: 커밋 <code>5e5033e</code>에서 <code>EnVectorConfig</code> 제거 → <code>95abbbb</code>에서 "cache enVector credentials"로 되돌림. "빼자 → 되돌림"의 반쯤 된 결정</li>
+            <li><strong>Python 런타임 fallback 로직</strong>: <code>server.py:1598-1601</code>이 Vault 번들에서 envector 값을 못 받으면 config.json cache로 fallback. 즉 (a)는 "fallback용 cache" 역할</li>
+            <li><strong>아키텍처 사실 확인</strong>: runed는 두 서비스와 별도 gRPC 채널로 직접 통신 — Vault(auth=<code>vault.token</code>)와 envector(auth=<code>envector.api_key</code>). envector는 Vault를 경유하지 않음. envector.api_key는 Vault 번들 <code>GetPublicKey</code> 응답에 포함되어 오는 값 (사용자 직접 입력 아님)</li>
+            <li><strong>config.json에 항상 영구 저장되는 것</strong>: <code>vault.endpoint</code>, <code>vault.token</code>, <code>vault.ca_cert</code>, <code>vault.tls_disable</code>, <code>state</code>, <code>metadata</code>. 이건 (a)/(b) 무관하게 동일 — 사용자는 한 번 <code>/rune:configure</code>하면 재configure 불필요</li>
+            <li><strong>결정 #23 역호환 영향</strong>: envector endpoint·api_key가 cached가 있다 없다는 저장된 레코드 자체에는 영향 없음 (레코드는 envector 서버에 저장됨, 접속 정보는 클라이언트 설정일 뿐)</li>
+            <li><strong>기타 관련 결정</strong>:
+              <ul>
+                <li>#40 외부 장애 대응(retry vs immediate dormant) — runtime 실패용. 부팅 실패(이 카드)와는 축이 다르지만 정책 일관성 유지</li>
+                <li>#52 FHE 복호화 주체 (Vault-delegated 유지) — rune이 Vault에 의존하는 게 이미 확정됐으므로 envector만 offline fallback으로 살리는 이득이 0</li>
+              </ul>
+            </li>
+          </ul>
+
+          <h5>검토한 선택지</h5>
+          <ul>
+            <li><strong>(a) Python 런타임 방식 유지 — config.json에 캐시</strong>:
+              <ul>
+                <li>T0 후 3-섹션, T1 후 7-섹션으로 스키마 동적 확장</li>
+                <li>Vault 일시 장애에도 cache로 envector 연결 시도 가능</li>
+                <li>api_key 평문이 디스크에 저장됨 (0600 퍼미션이지만 plaintext)</li>
+                <li>Vault가 api_key 로테이션 시 cache가 stale 위험</li>
+              </ul>
+            </li>
+            <li><strong>(b) 메모리만 — 매 부팅 Vault 재획득 (채택)</strong>:
+              <ul>
+                <li>config.json은 영구히 3-섹션 (vault + state + metadata). 스키마 정적</li>
+                <li>api_key 디스크에 저장 0. 보안 위생</li>
+                <li>Vault 실패 시 envector도 사용 불가. 부팅 retry로 회복</li>
+                <li>rune reset 후 Vault 호출 1회로 전부 재획득</li>
+              </ul>
+            </li>
+          </ul>
+
+          <h5>대조표 (핵심 5축)</h5>
+          <table style="font-size:12px; width:100%;">
+            <thead style="background:#edf2f7;"><tr><th style="padding:4px 6px;">축</th><th style="padding:4px 6px;">(a) Cache</th><th style="padding:4px 6px;">(b) Memory only</th></tr></thead>
+            <tbody>
+              <tr><td style="padding:3px 6px;">config.json 스키마</td><td style="padding:3px 6px;">T0/T1에 따라 변화 (3→7 섹션)</td><td style="padding:3px 6px;">영구 3-섹션. 정적</td></tr>
+              <tr><td style="padding:3px 6px;">api_key 디스크</td><td style="padding:3px 6px;">있음 (0600 plaintext)</td><td style="padding:3px 6px;">없음</td></tr>
+              <tr><td style="padding:3px 6px;">Vault 일시 장애</td><td style="padding:3px 6px;">envector fallback 가능</td><td style="padding:3px 6px;">waiting_for_vault로 retry</td></tr>
+              <tr><td style="padding:3px 6px;">rune reset 후</td><td style="padding:3px 6px;">envector 정보도 날아감 → 재configure</td><td style="padding:3px 6px;">원래 디스크에 없어 상관없음</td></tr>
+              <tr><td style="padding:3px 6px;">stale credential</td><td style="padding:3px 6px;">로테이션 시 인증 실패 가능</td><td style="padding:3px 6px;">매번 fresh</td></tr>
+            </tbody>
+          </table>
+
+          <h5>(a)를 기각한 이유</h5>
+          <ul>
+            <li><strong>"Vault 실패 시 envector라도 살리자"가 성립 안 함</strong>: rune의 recall 경로가 <code>DecryptScores</code>·<code>DecryptMetadata</code>로 Vault 필수(<a href="#decisions">결정 #52</a>에서 Vault-delegated 복호화 확정). Vault 없으면 어차피 capture/recall 다 불가 → envector endpoint만 캐시해봤자 이득 0</li>
+            <li><strong>보안 위생</strong>: api_key 평문 디스크 저장은 피할 수 있으면 피함. 개발자 머신의 dotfiles 백업·git 실수 업로드·디스크 이미지 유출 등 부차 위험 다수</li>
+            <li><strong>스키마 동적 변화 = 인지부하</strong>: "T0에는 3섹션, activate 후 7섹션, 다시 deactivate하면?" 같은 질문이 config loader·fsnotify reload·검증 테스트에 다 파생. 영구 3-섹션이 훨씬 깨끗</li>
+            <li><strong>Python drift의 원인 진단</strong>: "일단 쓰자" → "빼자" → "되돌리자"의 불완전한 결정. Go에서 (b)로 확정하면 configure.md 주석이 비로소 진실과 일치</li>
+          </ul>
+
+          <h5>부팅 retry 정책 상세</h5>
+          <p>(b)의 약점(Vault 실패 시 즉시 마비)을 <strong>무한 retry + 상태 구분</strong>으로 보완:</p>
+          <pre style="font-size:11.5px; padding:10px; margin:6px 0;"><code>func (s *Startup) Run(ctx context.Context) error {
+    s.state.Store(StateStarting)
+    backoff := []time.Duration{
+        1*time.Second, 2*time.Second, 5*time.Second,
+        15*time.Second, 30*time.Second, 60*time.Second,
+    }
+    attempt := 0
+    for {
+        bundle, err := s.vault.GetPublicKey(ctx, s.token)
+        if err == nil {
+            s.bundleStore.Store(bundle)   // 메모리에만
+            s.state.Store(StateActive)
+            return nil
+        }
+
+        s.state.Store(StateWaitingForVault)
+        slog.WarnContext(ctx, "vault unreachable, will retry",
+            "attempt", attempt, "err", err)
+
+        if attempt == 20 {
+            slog.ErrorContext(ctx, "vault persistent failure — check config",
+                "elapsed", time.Since(start))
+            s.metrics.VaultPersistentFailure.Inc()
+        }
+
+        wait := backoff[min(attempt, len(backoff)-1)]  // cap 60s
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        case <-time.After(wait):
+            attempt++
+        }
+    }
+}</code></pre>
+
+          <h5>State machine · 요청 처리 정책</h5>
+          <table style="font-size:12px; width:100%;">
+            <thead style="background:#edf2f7;"><tr><th style="padding:4px 6px;">state</th><th style="padding:4px 6px;">의미</th><th style="padding:4px 6px;">capture/recall 응답</th></tr></thead>
+            <tbody>
+              <tr><td style="padding:3px 6px;"><code>starting</code></td><td style="padding:3px 6px;">기동 직후, Vault 첫 호출 진행 중</td><td style="padding:3px 6px;">503 <code>{"status":"starting","retry_after":2}</code></td></tr>
+              <tr><td style="padding:3px 6px;"><code>waiting_for_vault</code></td><td style="padding:3px 6px;">Vault 연속 실패, 백그라운드 retry 중</td><td style="padding:3px 6px;">503 <code>{"code":"VAULT_PENDING","hint":"...","last_error":"..."}</code></td></tr>
+              <tr><td style="padding:3px 6px;"><code>active</code></td><td style="padding:3px 6px;">정상 운영</td><td style="padding:3px 6px;">정상 처리</td></tr>
+              <tr><td style="padding:3px 6px;"><code>dormant</code></td><td style="padding:3px 6px;">사용자 <code>/rune:deactivate</code> 명시</td><td style="padding:3px 6px;">503 <code>{"code":"DORMANT","hint":"run /rune:activate"}</code></td></tr>
+            </tbody>
+          </table>
+
+          <p><strong>핵심 구분</strong>: <code>waiting_for_vault</code>는 일시 상태라 사용자 개입 불필요 — Vault 복구 시 자동 <code>active</code> 전환. <code>dormant</code>는 사용자 명시 상태라 재활성화에 <code>/rune:activate</code> 필요. Python의 "즉시 dormant"는 이 두 개념을 섞어서 매번 사용자가 재활성화하게 만든 문제를 가졌음.</p>
+
+          <h5>사용자 관점 시나리오</h5>
+          <ul>
+            <li><strong>최초 configure</strong>: 사용자가 vault endpoint + token 입력 → config.json에 씀 (디스크, 영구). <strong>단 1회</strong></li>
+            <li><strong>최초 activate</strong>: runed가 Vault 호출해서 envector creds + FHE keys 번들 받음. 메모리에 보관 + keys는 디스크(EncKey/EvalKey만)</li>
+            <li><strong>일상 사용</strong>: runed 메모리의 envector creds로 envector 직접 호출</li>
+            <li><strong>랩탑 닫았다 다음날 열기</strong>: launchd가 runed 자동 재기동 → config.json 읽어 vault 정보 획득 → Vault에 GetPublicKey 재호출 → envector creds 메모리 재세팅. <strong>사용자 개입 0</strong></li>
+            <li><strong>Vault 일시 다운 시 부팅</strong>: runed가 <code>waiting_for_vault</code> 상태로 backoff retry. 사용자가 capture 시도하면 503 VAULT_PENDING. Vault 복구되면 자동 <code>active</code>. <strong>사용자 개입 0</strong></li>
+            <li><strong>Vault 주소 오타 등 영구 실패</strong>: runed가 계속 retry하지만 20회 후 경고 로그. <code>/health</code>에 <code>persistent_failure</code> 노출. 사용자가 로그·health 보고 <code>/rune:configure</code>로 수정</li>
+          </ul>
+
+          <h5>관련 결정 / 구현 위치</h5>
+          <p>
+            <strong>영향 받는 결정</strong>:
+            <a href="#decisions">#6 config.json metadata 섹션</a> (3-섹션 중 metadata를 어떻게 할지) ·
+            <a href="#decisions">#26 configure.md drift 정리</a> (주석을 Go 구현과 일치시킴) ·
+            <a href="#decisions">#40 외부 장애 retry</a> (runtime 실패 정책, 이 카드는 부팅 실패 정책) ·
+            <a href="#decisions">#52 Vault-delegated 복호화</a> (Vault가 critical dependency임을 확정 → a의 offline fallback 이득 상쇄)
+          </p>
+          <p>
+            <strong>구현 위치 (Phase 1)</strong>:
+            <code>internal/daemon/lifecycle/startup.go</code> (retry 루프 + state transition) ·
+            <code>internal/daemon/state.go</code> (4-state atomic store) ·
+            <code>internal/transport/http/middleware.go</code> (state check middleware → VAULT_PENDING 자동 반환) ·
+            <code>internal/adapters/config/loader.go</code> (3-섹션만 파싱하고 그 외 섹션 ignore 또는 warn)
+          </p>
+        </div>
+      </details>
     </div>
 
     <div class="decision medium">
       <div class="decision-head">
         <span class="tag id">#6</span>
-        <span class="tag medium">중간</span>
+        <span class="tag success" style="background:#c6f6d5; color:#22543d;">✅ 결정됨</span>
         <span class="tag phase">Phase 1</span>
         <span class="tag cat">Config</span>
       </div>
-      <h4>config.json metadata 섹션 처리</h4>
-      <p>configure.md가 쓰는 <code>metadata.{configVersion,lastUpdated,installedFrom}</code>을 Go가 존중할지.</p>
+      <h4>config.json metadata 섹션 — (a) 라운드트립 보존</h4>
+      <p><strong>최종 (2026-04-20)</strong>: (a) 채택. Go config loader가 <code>metadata</code> 섹션을 <strong>파싱 시 들고 있다가 save 시 그대로 다시 씀</strong>. <code>configVersion</code>/<code>lastUpdated</code>/<code>installedFrom</code> 디버깅 정보 보존. Python에서 <code>save_config</code>가 섹션을 증발시키는 기존 동작은 버그 성격 — Go에서 수정.</p>
       <div class="opts">
-        <strong>선택지</strong>: (a) 라운드트립 보존 / (b) 폐기 (현재 Python) / (c) lastUpdated만 갱신
+        <strong>구현</strong>:
+        <pre style="margin:6px 0; padding:10px; font-size:12px;"><code>type Config struct {
+    Vault    VaultConfig    `json:"vault"`
+    State    string         `json:"state"`
+    Metadata map[string]any `json:"metadata,omitempty"`  // 라운드트립
+}</code></pre>
+        <strong>영구 스키마</strong>: <code>vault</code> + <code>state</code> + <code>metadata</code> 3-섹션. configure.md가 쓴 값은 그대로 보존, runed는 metadata를 읽지 않음(의미 해석 안 함) — 단순 패스스루.
       </div>
+      <div class="status">상태: ✅ 결정됨. Phase 1에서 <code>internal/adapters/config/loader.go</code>에 라운드트립 로직 구현</div>
+
+      <details class="decision-log">
+        <summary>📋 결정 로그 · 문제 상황 · 자료 조사 · 근거 (클릭 펼치기)</summary>
+        <div class="log-body">
+          <h5>문제 상황</h5>
+          <p>Python에서 <code>commands/claude/configure.md</code>가 T1(configure 직후) <code>metadata.{configVersion,lastUpdated,installedFrom}</code> 섹션을 config.json에 씀. 그러나 T2(첫 <code>/rune:activate</code> 이후) <code>save_config()</code>가 <code>RuneConfig</code> dataclass 필드만 직렬화하는데 그 dataclass에 <code>metadata</code>가 없음 → <strong>activate 한 번 돌리면 섹션이 통째로 사라짐</strong>. 디버깅 정보 소실. Go 포팅 시 이 동작을 유지할지 고칠지 결정 필요.</p>
+
+          <h5>자료 조사 / 사실 확인</h5>
+          <ul>
+            <li><code>commands/claude/configure.md:90-95</code>가 하드코딩 JSON으로 metadata 섹션 작성</li>
+            <li><code>agents/common/config.py:311-349</code> <code>save_config()</code>는 <code>RuneConfig</code> dataclass 필드 direct serialize. <code>metadata</code> 필드 없음 → save 시 섹션 누락</li>
+            <li>metadata 필드 용도:
+              <ul>
+                <li><code>configVersion</code> — 스키마 버전. 향후 breaking change 시 마이그레이션 분기용</li>
+                <li><code>lastUpdated</code> — 마지막 configure 시각 (언제 설정했는지)</li>
+                <li><code>installedFrom</code> — 플러그인 원본 경로 (여러 머신/설치 구분)</li>
+              </ul>
+            </li>
+            <li>결정 #5 (envector persist 비저장, 3-섹션 영구 스키마)와 연동 — <code>metadata</code>가 보존되면 Go의 영구 스키마는 <code>vault + state + metadata</code> 3섹션으로 고정</li>
+          </ul>
+
+          <h5>검토한 선택지</h5>
+          <ul>
+            <li><strong>(a) 라운드트립 보존 (채택)</strong>: Go loader가 <code>metadata</code>를 읽어 들고 있다가 save 시 그대로 다시 씀. 해석·검증 안 함 (패스스루)</li>
+            <li><strong>(b) 폐기</strong>: 현재 Python 동작 그대로. metadata 무시하고 save 시 안 씀. 영구 스키마가 <code>vault + state</code> 2-섹션으로 더 단순</li>
+            <li><strong>(c) lastUpdated만 갱신</strong>: runed가 save할 때마다 <code>lastUpdated</code>를 현재 시각으로 덮어씀. <code>configVersion</code>/<code>installedFrom</code>은 라운드트립. (a)의 하위집합</li>
+          </ul>
+
+          <h5>최종 결정: (a)</h5>
+          <p><strong>왜 (a)</strong>:</p>
+          <ul>
+            <li><strong>비용 0에 가까움</strong>: Go struct에 <code>json:"metadata,omitempty"</code> + <code>map[string]any</code> 선언만. 약 5줄 코드</li>
+            <li><strong>디버깅 가치 존재</strong>: <code>installedFrom</code>은 멀티 머신 지원 시, <code>configVersion</code>은 향후 스키마 마이그레이션 시, <code>lastUpdated</code>는 버그 리포트 처리 시 실제로 쓸모 있음</li>
+            <li><strong>(b) 폐기의 문제</strong>: Python의 "섹션 증발"은 save_config dataclass 설계 실수에 가까움 — 버그를 기능으로 승격하는 선택이 됨. Go에서 수정하는 게 맞음</li>
+            <li><strong>(c)의 잉여</strong>: runed가 save_config를 호출하는 경우 자체가 드물음 (결정 #5에 따라 state 전환 정도만). <code>lastUpdated</code>를 런타임에 갱신할 필요 거의 없음. (a) 단순 라운드트립으로 충분</li>
+          </ul>
+
+          <h5>Go 구현 스펙</h5>
+          <pre style="font-size:11.5px; padding:10px; margin:6px 0;"><code>// internal/domain/config.go
+type Config struct {
+    Vault    VaultConfig           `json:"vault"`
+    State    string                `json:"state"`
+    Metadata map[string]any        `json:"metadata,omitempty"`
+    // envector / embedding / llm / scribe / retriever 섹션은 없음 (결정 #5)
+}
+
+// internal/adapters/config/loader.go
+func Load(path string) (*Config, error) {
+    b, err := os.ReadFile(path)
+    if err != nil { return nil, err }
+    var c Config
+    if err := json.Unmarshal(b, &amp;c); err != nil { return nil, err }
+    return &amp;c, nil
+}
+
+// 저장 시 (state 전환 등)
+func Save(path string, c *Config) error {
+    b, err := json.MarshalIndent(c, "", "  ")  // Metadata는 있으면 그대로 직렬화
+    if err != nil { return err }
+    return os.WriteFile(path, b, 0600)
+}</code></pre>
+
+          <h5>주의 사항</h5>
+          <ul>
+            <li><strong>runed는 metadata 내용을 해석하지 않음</strong>. 단순 패스스루. 내부 key 추가·제거·수정 안 함</li>
+            <li>configure.md가 T0에 처음 쓴 metadata는 runed lifecycle 내내 보존. 다음 <code>/rune:configure</code> 실행 시 configure.md가 덮어쓸 수 있음 (configure.md 자체 로직)</li>
+            <li>unknown 필드 일반 처리는 별개 이슈 — 결정 #22 <code>json.Unmarshal</code>이 unknown 필드 무시(Go 기본 동작)으로 자연스럽게 호환. metadata는 "알려진 옵셔널 필드"로 대우</li>
+          </ul>
+
+          <h5>관련 결정 · 구현 위치</h5>
+          <p>
+            <strong>연동 결정</strong>:
+            <a href="#decisions">#5 envector persist (b)</a> — 영구 3-섹션 스키마의 일부 ·
+            <a href="#decisions">#22 v0.3.x config.json 호환</a> — unknown 필드 무시 정책 ·
+            <a href="#decisions">#26 configure.md drift 정리</a> — configure.md가 쓴 metadata가 Go에서도 유지되면 문서 스펙과 코드 일치
+          </p>
+          <p>
+            <strong>구현 위치</strong>:
+            <code>internal/domain/config.go</code> (Config struct 정의) ·
+            <code>internal/adapters/config/loader.go</code> (Load/Save 라운드트립)
+          </p>
+        </div>
+      </details>
     </div>
 
     <div class="decision high">
       <div class="decision-head">
         <span class="tag id">#7</span>
-        <span class="tag high">높음</span>
+        <span class="tag success" style="background:#c6f6d5; color:#22543d;">✅ 결정됨 (MVP)</span>
         <span class="tag phase">Phase 2</span>
         <span class="tag cat">Capture</span>
       </div>
-      <h4>Novelty check 유지 여부</h4>
-      <p>capture 시 ≥0.95 similarity면 near_duplicate로 블록하는 로직. RFC는 드롭, MASTER 문서는 유지 제안.</p>
+      <h4>Novelty check — (a) KEEP (Python 동일 동작 유지)</h4>
+      <p><strong>최종 (2026-04-20, MVP)</strong>: (a) KEEP. capture 경로에 <code>≥0.95 → near_duplicate</code> 블록 로직 그대로 포팅. Python과 계약 동일 유지 + 크로스-세션 dedup 이득 보존. <strong>Post-MVP에 (c) advisory로 진화</strong> 고려 (결정 #13 scribe.md 재작성과 함께).</p>
       <div class="opts">
-        <strong>선택지</strong>:
+        <strong>구체 스펙</strong> (Go 포팅 대상):
         <ul>
-          <li>(a) KEEP — cross-session/team dedup, 에이전트가 못 하는 일</li>
-          <li>(b) DROP — 에이전트 md 책임으로 (같은 세션 내 dedup은 이미 에이전트가 함)</li>
+          <li><strong>7a novelty 분류 임계</strong>: <code>novel &lt; 0.3 / related 0.3-0.7 / evolution 0.7-0.95 / near_duplicate ≥ 0.95</code>. 상수는 <code>internal/policy/novelty.go</code> (결정 <a href="#decisions">#41</a> DefaultScheme)</li>
+          <li><strong>7b 블록 동작</strong>: similarity ≥0.95면 <code>Insert</code> 호출 <strong>skip</strong>하고 응답에 <code>{"ok": false, "reason": "near_duplicate", "similar_to": "&lt;record_id&gt;"}</code></li>
+          <li><strong>7c 구현 경로</strong>: <code>internal/daemon/capture/service.go</code>에서 embed 후 <code>svc.vault.DecryptScores</code>로 top-1 similarity 조회 (결정 #52 Vault-delegated). novelty class 분류는 <code>policy.ClassifyNovelty</code> 순수 함수</li>
+          <li><strong>7d 계약 동일성</strong>: Python의 <code>ExtractionResult → DecisionRecord → capture</code> 응답 shape와 bit-identical. Python으로 저장된 레코드와 Go로 저장된 레코드가 서로 호환 (결정 #23)</li>
+          <li><strong>7e Post-MVP 진화 경로</strong>: (c) advisory로 전환 시 — 응답에 novelty class + similar_to 항상 포함하고 블록 안 함. scribe.md가 "이미 유사한 것 있음, update할까요?"로 사용자에게 위임. 단 이건 <strong>에이전트 md 동시 변경 필요</strong>라 MVP scope 밖</li>
         </ul>
       </div>
-      <div class="status">차이: cross-session dedup 품질 vs 데몬 단순성</div>
+      <div class="status">상태: ✅ MVP는 (a) KEEP 확정. Phase 2 capture 구현 시 Python 로직 1:1 포팅. (c) advisory는 post-MVP 로드맵</div>
+
+      <details class="decision-log">
+        <summary>📋 결정 로그 · 문제 상황 · 자료 조사 · 3-옵션 비교 (클릭 펼치기)</summary>
+        <div class="log-body">
+          <h5>문제 상황</h5>
+          <p>Python rune은 capture 시 신규 record를 저장하기 전에 <strong>기존 저장된 record와의 유사도를 검사</strong>해서 <code>≥0.95</code>이면 "near_duplicate"로 판정하고 <strong>저장을 거부</strong>한다. 이 로직을 Go 포팅에서 유지할지 드롭할지 결정 필요. 초기 RFC는 드롭 제안, MASTER 문서는 유지 제안으로 drift 상태.</p>
+
+          <h5>자료 조사 / 사실 확인</h5>
+          <ul>
+            <li><strong>Python 현재 구현</strong>: <code>mcp/server/server.py</code>의 <code>_classify_novelty</code> (L100-108). 임계값 default <code>novel=0.3</code>, <code>related=0.7</code>, <code>near_duplicate=0.95</code></li>
+            <li><strong>벤치 튜닝된 상수</strong>: <code>agents/common/schemas/embedding.py:16-18</code>에 <code>0.4/0.7/0.93</code> (Qwen3-0.6B benchmark 2026-04-08). 런타임은 server.py 기본값을 쓰고 있음 → 결정 <a href="#decisions">#41</a>에서 MVP는 DefaultScheme (0.3/0.7/0.95) 유지 확정</li>
+            <li><strong>capture flow 내 위치</strong>: embed → Vault.Score → DecryptScores → top-1 similarity 확보 → classify → (if near_duplicate) skip Insert</li>
+            <li><strong>용도 분석</strong>: 에이전트 md의 scribe는 자기 세션의 context만 보고 dedup 가능. <strong>크로스-세션·크로스-사용자 중복은 runed를 거쳐야만 감지 가능</strong> — 이것이 rune 서버가 에이전트 대비 제공하는 본질적 가치 중 하나</li>
+            <li><strong>관련 결정</strong>:
+              <ul>
+                <li>#13 record_builder 이관 (어디서 어떻게 record 조립할지) — 자연스럽게 novelty 판단 위치도 결정</li>
+                <li>#23 역호환 (기존 레코드와 계약 동일성) — 응답 shape 변경은 리스크</li>
+                <li>#52 Vault-delegated 복호화 — Score 결과 blob을 Vault로 보내 decrypt (MVP 구조 그대로)</li>
+              </ul>
+            </li>
+          </ul>
+
+          <h5>검토한 선택지</h5>
+          <ul>
+            <li><strong>(a) KEEP — 블록 유지 (채택)</strong>: 현행 Python 그대로. ≥0.95면 capture 거부. 에이전트 변경 없음</li>
+            <li><strong>(b) DROP — 완전 제거</strong>: runed가 novelty 계산 안 함. 에이전트가 필요하면 recall 선행. 에이전트 md 대폭 수정 필요</li>
+            <li><strong>(c) ADVISORY — 계산하되 블록 안 함</strong>: novelty class + similar_to를 응답에 포함해 에이전트에 알려주고, 저장은 무조건 진행. 에이전트가 "update할까요?" UX 판단. 응답 shape 확장 + 에이전트 md 수정</li>
+          </ul>
+
+          <h5>옵션별 trade-off</h5>
+          <table style="font-size:12px; width:100%;">
+            <thead style="background:#edf2f7;"><tr><th style="padding:4px 6px;">기준</th><th style="padding:4px 6px;">(a) KEEP</th><th style="padding:4px 6px;">(b) DROP</th><th style="padding:4px 6px;">(c) ADVISORY</th></tr></thead>
+            <tbody>
+              <tr><td style="padding:3px 6px;">Python 계약 호환</td><td style="padding:3px 6px;">✅ 동일</td><td style="padding:3px 6px;">❌ 응답 shape 다름</td><td style="padding:3px 6px;">❌ shape 확장</td></tr>
+              <tr><td style="padding:3px 6px;">에이전트 md 수정</td><td style="padding:3px 6px;">0줄</td><td style="padding:3px 6px;">대폭 (capture 전 recall 선행 로직)</td><td style="padding:3px 6px;">중간 (novelty 응답 해석)</td></tr>
+              <tr><td style="padding:3px 6px;">크로스-세션 dedup</td><td style="padding:3px 6px;">✅ 자동 (runed가 강제)</td><td style="padding:3px 6px;">❌ 에이전트 규율 의존</td><td style="padding:3px 6px;">△ 에이전트 판단에 위임</td></tr>
+              <tr><td style="padding:3px 6px;">capture latency</td><td style="padding:3px 6px;">embed + Vault Score RTT</td><td style="padding:3px 6px;">embed만 (Vault skip)</td><td style="padding:3px 6px;">(a)와 동일</td></tr>
+              <tr><td style="padding:3px 6px;">"0.97 진짜 update" UX</td><td style="padding:3px 6px;">❌ 차단됨 (사용자 좌절)</td><td style="padding:3px 6px;">✅ 문제 없음</td><td style="padding:3px 6px;">✅ 에이전트가 "update할까요?"</td></tr>
+              <tr><td style="padding:3px 6px;">팀 메모리 품질</td><td style="padding:3px 6px;">✅ 중복 차단</td><td style="padding:3px 6px;">❌ 중복 쌓임</td><td style="padding:3px 6px;">△ 에이전트 구현에 달림</td></tr>
+              <tr><td style="padding:3px 6px;">MVP 착수 속도</td><td style="padding:3px 6px;">빠름 (1:1 포팅)</td><td style="padding:3px 6px;">느림 (에이전트 md 재작성)</td><td style="padding:3px 6px;">느림 (shape + md)</td></tr>
+            </tbody>
+          </table>
+
+          <h5>최종 결정: (a) KEEP for MVP</h5>
+          <p><strong>왜 (a)</strong>:</p>
+          <ul>
+            <li><strong>Python 단일 cutover 방향</strong>(결정 #48 shadow run과 일관)에서 계약 변경은 risk. (a)는 bit-identical 동작 보장 → shadow run diff 계산이 단순</li>
+            <li><strong>크로스-세션 dedup은 runed의 본질적 가치</strong>. "에이전트가 못 하는 걸 runed가 한다"의 핵심 사례. 이걸 빼면 rune 서버가 "그냥 벡터 DB proxy"로 격하</li>
+            <li><strong>MVP scope 보호</strong>: (b)/(c)는 에이전트 md 동시 변경 필요 → 스코프 폭증. #13 record_builder 이관 결정과 맞물려야 안정적인데 그건 별도 판단</li>
+            <li><strong>"0.97 좌절" 문제는 실측 후 판단</strong>: 현재 Python 사용자가 이 문제로 실제 불편을 겪는지 데이터 없음. Post-MVP에 피드백 축적 후 (c) 전환 판단</li>
+          </ul>
+
+          <h5>Go 구현 스펙 (Phase 2)</h5>
+          <pre style="font-size:11.5px; padding:10px; margin:6px 0;"><code>// internal/policy/novelty.go — 순수 함수
+type NoveltyThresholds struct {
+    Novel   float64 // 0.3
+    Related float64 // 0.7
+    NearDup float64 // 0.95
+}
+
+type NoveltyResult struct {
+    Class      string  // "novel" | "related" | "evolution" | "near_duplicate"
+    Similarity float64
+}
+
+func ClassifyNovelty(sim float64, t NoveltyThresholds) NoveltyResult {
+    switch {
+    case sim &gt;= t.NearDup:  return NoveltyResult{"near_duplicate", sim}
+    case sim &gt;= t.Related:  return NoveltyResult{"evolution", sim}
+    case sim &gt;= t.Novel:    return NoveltyResult{"related", sim}
+    default:                return NoveltyResult{"novel", sim}
+    }
+}
+
+// internal/daemon/capture/service.go
+func (s *Service) Handle(ctx context.Context, req Request) (*Response, error) {
+    vec, _ := s.embedder.Embed(ctx, req.TextToEmbed)
+    blobs, _ := s.envector.Score(ctx, vec)
+    scores, _, _ := s.vault.DecryptScores(ctx, blobs[0])  // 결정 #52
+    topSim := 0.0
+    var topID string
+    if len(scores) &gt; 0 {
+        topSim = scores[0]
+        topID = ...  // get metadata for top match
+    }
+    novelty := policy.ClassifyNovelty(topSim, s.scheme.Novelty)
+    if novelty.Class == "near_duplicate" {
+        return &amp;Response{OK: false, Reason: "near_duplicate", SimilarTo: topID, Novelty: novelty}, nil
+    }
+    // ... embed, AES envelope, envector.Insert
+    return &amp;Response{OK: true, RecordID: ..., Novelty: novelty}, nil
+}</code></pre>
+
+          <h5>Post-MVP 진화 경로 (참고)</h5>
+          <p>(c) ADVISORY로의 전환은 <strong>결정 <a href="#decisions">#13</a> scribe.md 재작성 시점에 합류</strong>:</p>
+          <ul>
+            <li>scribe.md가 capture 응답의 <code>novelty</code> 필드를 해석</li>
+            <li>near_duplicate인데 사용자가 진짜 update를 원하면 "이미 <code>dec_xyz</code>와 97% 유사 — 기존 레코드 업데이트할까요?" UX</li>
+            <li>runed는 계산만 하고 저장 결정은 에이전트·사용자에게 위임</li>
+            <li>이 전환은 <strong>Python 운영 중 "near_duplicate 좌절" 피드백 데이터가 쌓인 뒤</strong> 진행</li>
+          </ul>
+
+          <h5>관련 결정 / 구현 위치</h5>
+          <p>
+            <strong>연동 결정</strong>:
+            <a href="#decisions">#13 record_builder 이관</a> (에이전트 md 수정 시 #7 (c) 전환 합류) ·
+            <a href="#decisions">#23 v0.3.x 레코드 역호환</a> (계약 동일성 보장 근거) ·
+            <a href="#decisions">#41 Policy scheme canonical</a> (0.3/0.7/0.95 MVP canonical) ·
+            <a href="#decisions">#48 Scientist shadow</a> (MVP 계약 동일성이 diff 검증을 단순화) ·
+            <a href="#decisions">#52 Vault-delegated 복호화</a> (Score blob → Vault 복호화 경로)
+          </p>
+          <p>
+            <strong>구현 위치 (Phase 2)</strong>:
+            <code>internal/policy/novelty.go</code> (순수 함수 + 임계값) ·
+            <code>internal/daemon/capture/service.go</code> (embed → Score → Decrypt → classify → skip-or-insert)
+          </p>
+        </div>
+      </details>
     </div>
 
     <div class="decision medium">
@@ -3745,6 +4199,127 @@ var (
       </div>
     </div>
 
+    <div class="decision high">
+      <div class="decision-head">
+        <span class="tag id">#52</span>
+        <span class="tag success" style="background:#c6f6d5; color:#22543d;">✅ 결정됨</span>
+        <span class="tag phase">Phase 0→1</span>
+        <span class="tag cat">암호화 / SDK</span>
+      </div>
+      <h4>FHE 복호화 주체 — Vault-delegated 유지 (SDK <code>OpenKeysFromFile</code> 조건 완화 PR)</h4>
+      <p><strong>최종</strong>: rune은 Python 현재와 동일한 <strong>Vault-delegated 보안 모델</strong> 유지. SecKey는 Vault만 보유, rune은 EncKey + EvalKey만 로컬에 둠. FHE 복호화는 envector에서 받은 ciphertext blob을 Vault로 전달해서 수행. SDK에 <strong>SecKey.json 없어도 <code>OpenKeysFromFile</code>이 통과</strong>하도록 조건 완화 PR 제출 (약 10줄 변경 + typed error 1개 신규).</p>
+      <div class="opts">
+        <strong>범위</strong>:
+        <ul>
+          <li>SDK PR: <code>keys.go</code>의 <code>OpenKeysFromFile</code>에서 SecKey 읽기를 <code>os.Stat</code> 조건부로 변경. SecKey 부재 시 <code>Keys.dec = nil</code>. <code>Keys.Decrypt</code>는 <code>nil</code> 확인 후 <code>ErrDecryptorUnavailable</code> 반환</li>
+          <li>SDK errors.go: <code>ErrDecryptorUnavailable</code> typed error 신규</li>
+          <li>기존 사용자 영향 없음 (SecKey 있는 경우 기존 동작 그대로). non-breaking change</li>
+        </ul>
+        <strong>rune 측 변경</strong>: <code>OpenKeysFromFile</code> 그대로 호출. <code>keys.Decrypt</code>는 절대 호출 안 함. Score 결과 blob을 <code>vaultClient.DecryptScores</code>로 전달 (Python 현재 구조 동일).
+      </div>
+      <div class="status">상태: ✅ 방법 1 (SDK 패치) 확정. PR 제출 → 머지 예상 2-5일 → rune 통합. 방법 2(fake SecKey.json)는 SDK PR 1주+ 지연 시 emergency fallback으로만 한정 사용</div>
+
+      <details class="decision-log">
+        <summary>📋 결정 로그 · 문제 상황 · 자료 조사 · 방법 1/2 비교 (클릭 펼치기)</summary>
+        <div class="log-body">
+          <h5>문제 상황</h5>
+          <p>rune은 Vault-delegated 보안 모델(SecKey는 Vault에만, rune은 EncKey+EvalKey만 로컬)을 유지하고 싶음 — 현 Python rune과 동일 아키텍처 + 결정 <a href="#decisions">#23</a> 역호환 요구. 그러나 envector-go SDK의 <code>OpenKeysFromFile</code>이 <code>SecKey.json</code> 파일 존재를 필수로 요구하므로, 파일 없이 진행할 수 없음.</p>
+
+          <h5>자료 조사 / 사실 확인 (2026-04-20)</h5>
+          <ul>
+            <li><strong>Python rune 실제 동작</strong>: <code>mcp/server/server.py:257-266</code>의 <code>save_keys_from_vault</code>가 Vault 번들(<code>EncKey.json</code>, <code>EvalKey.json</code>만 포함)을 디스크에 저장. <strong>SecKey.json은 아예 디스크에 쓰지 않음</strong>. pyenvector가 이 상태를 크래시 없이 수용하는 이유는 rune의 monkey-patch (§11.11)</li>
+            <li><strong>pyenvector의 원래 설계</strong>: <code>KeyParameter</code>가 EncKey/SecKey/MetadataKey 3파일 필수. 파일 없으면 <code>ast.literal_eval</code> fall-through로 <code>SyntaxError</code> 크래시. Go SDK의 제약과 완전 동일</li>
+            <li><strong>rune Python의 monkey-patch</strong> (<code>envector_sdk.py</code> L21-86): <code>KeyParameter.sec_key / sec_key_path / metadata_key / metadata_key_path / metadata_encryption</code> 5개 property를 import time에 런타임 교체. "파일 없으면 None 반환"으로 덮어써서 Cipher가 encrypt-only 모드로 초기화되게 함</li>
+            <li><strong>Go SDK 관련 파일 읽음</strong>: <code>keys.go</code>의 <code>KeysExist</code>는 세 파일 모두 <code>os.Stat</code>, <code>OpenKeysFromFile</code>은 <code>os.ReadFile(secKeyFile)</code> 무조건 호출 후 <code>NewDecryptor(ckks, secBytes)</code>까지 필수</li>
+            <li><strong>Go 언어 제약</strong>: Go는 정적 타입이라 외부 패키지의 메서드/속성을 런타임에 덮어쓸 수 없음 (Python monkey-patch 불가). SDK 자체를 고치거나 디스크에 가짜 파일을 두는 우회만 가능</li>
+            <li><strong>SDK 변경 범위 실측</strong>: <code>OpenKeysFromFile</code> 내부 약 5줄 + <code>Decrypt</code> 방어 2줄 + <code>errors.go</code>에 <code>ErrDecryptorUnavailable</code> 1줄 = <strong>약 10줄 비접수 변경</strong>. 기존 SecKey 존재 사용자는 정확히 동일 동작 (non-breaking)</li>
+            <li><strong>SDK 팀 위치</strong>: CryptoLab 내부 팀 (같은 회사). rune이 주요 사용자. pyenvector에서 이미 같은 이슈를 겪어온 관계라 coordination 비용 낮음</li>
+          </ul>
+
+          <h5>검토한 선택지</h5>
+          <ul>
+            <li><strong>방법 1 — SDK 패치 (채택)</strong>: <code>OpenKeysFromFile</code>에서 SecKey를 <code>os.Stat</code> 조건부로. 없으면 <code>dec == nil</code>. <code>Decrypt</code>는 <code>ErrDecryptorUnavailable</code> 반환</li>
+            <li><strong>방법 2 — fake SecKey.json</strong>: rune이 설치 시 <code>{}</code> 내용의 빈 SecKey.json 작성. mock backend는 아무 바이트나 수용해서 통과. libevi 연결 시 깨질 가능성 높음</li>
+            <li><strong>방법 3 — SDK Keys 우회</strong>: <code>internal/crypto</code>를 직접 쓰기. <code>internal</code> 패키지라 외부에서 import 불가 → 차단</li>
+          </ul>
+
+          <h5>방법 1 vs 방법 2 비교 (최종 선택 근거)</h5>
+          <table style="font-size:12px; width:100%;">
+            <thead style="background:#edf2f7;"><tr><th style="padding:4px 6px;">기준</th><th style="padding:4px 6px;">방법 1</th><th style="padding:4px 6px;">방법 2</th></tr></thead>
+            <tbody>
+              <tr><td style="padding:3px 6px;">코드 가독성</td><td style="padding:3px 6px;">의도 명시적</td><td style="padding:3px 6px;">가짜 파일, 반복 설명 필요</td></tr>
+              <tr><td style="padding:3px 6px;">보안 감사</td><td style="padding:3px 6px;">깨끗함</td><td style="padding:3px 6px;">"빈 SecKey.json?" 플래그 유발</td></tr>
+              <tr><td style="padding:3px 6px;">libevi 연결 시</td><td style="padding:3px 6px;">무변경 동작</td><td style="padding:3px 6px;">실 CGO 거부 가능성 높음</td></tr>
+              <tr><td style="padding:3px 6px;">실수 방어</td><td style="padding:3px 6px;"><code>ErrDecryptorUnavailable</code> 명시</td><td style="padding:3px 6px;">garbage 반환 (silent failure)</td></tr>
+              <tr><td style="padding:3px 6px;">기술 부채</td><td style="padding:3px 6px;">없음</td><td style="padding:3px 6px;"><code>TODO(#52)</code> 잔존 위험</td></tr>
+              <tr><td style="padding:3px 6px;">pyenvector 파리티</td><td style="padding:3px 6px;">정식</td><td style="padding:3px 6px;">없음</td></tr>
+              <tr><td style="padding:3px 6px;">착수 속도</td><td style="padding:3px 6px;">2-5일 (PR)</td><td style="padding:3px 6px;">오늘 바로</td></tr>
+            </tbody>
+          </table>
+
+          <h5>최종 결정: 방법 1 채택 (2026-04-20)</h5>
+          <p><strong>왜 방법 1</strong>:</p>
+          <ul>
+            <li>9개 비교 측면 중 8개에서 방법 1 우위. 방법 2는 착수 속도만 빠름</li>
+            <li>SDK 변경이 trivial (약 10줄). 기존 사용자에게 breaking 없음</li>
+            <li>SDK 팀이 같은 회사라 coordination 비용 낮음. pyenvector에서 이미 같은 유스케이스를 해결해본 팀이라 "왜 필요한지" 설명 부담 없음</li>
+            <li>rune Phase 0이 현재 #46 외 블로킹 없어 PR 머지 대기(2-5일) 감당 가능</li>
+            <li>"임시"라 표기된 우회는 실제로는 Phase 2까지 살아남는 경향 — 처음부터 깨끗한 경로가 장기적으로 안전</li>
+          </ul>
+
+          <h5>SDK 패치 구체 명세 (PR 본문에 그대로 사용 가능)</h5>
+          <p><strong>변경 1</strong>: <code>keys.go</code> <code>OpenKeysFromFile</code> 본문에서 SecKey 처리를 <code>os.Stat</code> 조건부로:</p>
+          <pre style="margin:6px 0; padding:10px; font-size:11.5px;"><code>var dec crypto.Decryptor
+secPath := filepath.Join(o.Path, secKeyFile)
+if _, err := os.Stat(secPath); err == nil {
+    secBytes, err := os.ReadFile(secPath)
+    if err != nil { _ = enc.Close(); _ = ckks.Close(); return nil, err }
+    dec, err = p.NewDecryptor(ckks, secBytes)
+    if err != nil { _ = enc.Close(); _ = ckks.Close(); return nil, err }
+}
+// SecKey.json 부재 → dec == nil → Vault-delegated 모드</code></pre>
+          <p><strong>변경 2</strong>: <code>keys.go</code> <code>Decrypt</code> 방어:</p>
+          <pre style="margin:6px 0; padding:10px; font-size:11.5px;"><code>func (k *Keys) Decrypt(blob []byte) (scores [][]float64, shardIdx []int32, err error) {
+    if k == nil || k.closed { return nil, nil, ErrKeysClosed }
+    if k.dec == nil { return nil, nil, ErrDecryptorUnavailable }
+    return k.dec.DecryptScore(blob)
+}</code></pre>
+          <p><strong>변경 3</strong>: <code>errors.go</code>에 typed error:</p>
+          <pre style="margin:6px 0; padding:10px; font-size:11.5px;"><code>var ErrDecryptorUnavailable = errors.New(
+    "envector: decryptor unavailable (Keys opened without SecKey; use vault-delegated decrypt path)",
+)</code></pre>
+          <p><strong>테스트 추가</strong>: SecKey 없는 디렉토리로 <code>OpenKeysFromFile</code> 호출 → 성공 + <code>Decrypt</code>는 <code>ErrDecryptorUnavailable</code> 반환 검증</p>
+
+          <h5>rune 측 실행 순서</h5>
+          <ol>
+            <li>SDK 팀에 PR 제출 (패치 명세 그대로 + pyenvector monkey-patch 5개를 정당성 근거로)</li>
+            <li>PR 머지 대기 중 rune <code>internal/ports/envector.go</code> + adapter skeleton 작성. <code>keys.Decrypt</code> 호출 금지 lint 규칙 추가</li>
+            <li>PR 머지 → <code>go.mod</code>에서 SDK를 새 태그로 pin → rune에서 <code>OpenKeysFromFile</code> 그대로 호출</li>
+            <li>integration test (mock backend): capture/recall E2E</li>
+          </ol>
+
+          <h5>방법 2 사용 조건 (엄격히 제한)</h5>
+          <ul>
+            <li>SDK PR 머지가 <strong>1주 이상 지연되고</strong> Phase 1 시작이 실제로 블로킹될 때만</li>
+            <li>rune 설치 스크립트에 fake SecKey.json 생성 한 줄 + 주석에 SDK PR 링크 필수</li>
+            <li><code>FAKE_SECKEY_CLEANUP</code> 레이블 이슈 생성해 Phase 2 전 제거 추적</li>
+            <li>README 운영 섹션에 해당 파일 존재와 이유 기록</li>
+            <li>SDK PR 머지 즉시 제거 + <code>go.mod</code> pin 교체 + CI 재실행</li>
+          </ul>
+
+          <h5>관련 결정 / 섹션</h5>
+          <p>
+            <a href="#decisions">#3 SDK 채택</a> (libevi 바이너리 부재 + 이 PR 대기 두 가지를 "SDK 업스트림 조율"로 묶음) ·
+            <a href="#decisions">#5 enVector persist</a> (GenerateKeys 경로와 얽힘) ·
+            <a href="#decisions">#23 역호환</a> (Vault-delegated 유지의 핵심 근거) ·
+            <a href="#envector-sdk-research">§11 전체 심층 조사</a> ·
+            <a href="#envector-sdk-research">§11.5 방법 1 패치 명세</a> ·
+            <a href="#envector-sdk-research">§11.11 Python monkey-patch 매핑</a>
+          </p>
+        </div>
+      </details>
+    </div>
+
   </div>
 </section>
 
@@ -3882,6 +4457,409 @@ var (
 </section>
 
 <!-- ============================================================ -->
+<!-- ENVECTOR-GO SDK RESEARCH -->
+<!-- ============================================================ -->
+<section id="envector-sdk-research">
+  <h2>⑪ envector-go SDK 채택 심층 조사 (2026-04-20)</h2>
+
+  <p class="lead">결정 <a href="#decisions">#3</a>에서 팀 프로토타입 SDK 채택이 확정된 뒤, 실제 로컬 체크아웃(<code>~/envector-go-sdk/</code>, <code>github.com/CryptoLabInc/envector-go-sdk</code>)을 샅샅이 읽어본 조사. Phase 1 착수 전에 알아둬야 할 <strong>통합 위험·아키텍처 영향·운영 이슈</strong>를 정리한다.</p>
+
+  <h3>11.1 SDK 현황 스냅샷</h3>
+  <table>
+    <thead><tr><th>항목</th><th>상태</th></tr></thead>
+    <tbody>
+      <tr><td>모듈 경로</td><td><code>github.com/CryptoLabInc/envector-go-sdk</code></td></tr>
+      <tr><td>Go 버전 요구</td><td><code>go 1.25.9</code> → rune 목표(<code>go 1.25</code>)와 일치 ✅</td></tr>
+      <tr><td>런타임 의존성</td><td><code>google.golang.org/grpc v1.80</code>, <code>protobuf v1.36</code> — 표준 gRPC 스택만</td></tr>
+      <tr><td>빌드 태그</td><td>default(mock, 순수 Go) / <code>-tags=libevi</code>(CGO 실 FHE)</td></tr>
+      <tr><td>OS/arch 매트릭스</td><td>darwin amd64·arm64, linux amd64·arm64. <strong>Windows 미지원</strong></td></tr>
+      <tr><td>테스트 커버</td><td>client / index / insert / score / keys / client_keys 각 <code>_test.go</code>. <code>make cover</code>는 <code>-race -coverprofile</code></td></tr>
+      <tr><td>Proto 정의</td><td><code>proto/es2</code> · <code>proto/es2e</code>. <code>buf generate</code>로 stub 생성. rune은 stub 재생성 불필요 — SDK 임포트만</td></tr>
+    </tbody>
+  </table>
+
+  <h3>11.2 ⚠ 중요 발견 — libevi 실제 바인딩이 아직 없음</h3>
+  <div class="callout danger">
+    <ul style="margin:4px 0;">
+      <li><code>internal/crypto/crypto_cgo.go</code>의 libevi 태그 구현체가 <strong>모든 메서드에서 <code>ErrCryptoUnavailable</code> 반환</strong> — <code>"libevi_crypto binding not built (rebuild with -tags=libevi)"</code>... 그런데 태그를 켜도 stub:
+        <pre style="margin:6px 0; padding:10px; font-size:12px;"><code>var errCGOStub = errors.New("envector/crypto: libevi CGO provider not yet implemented")
+func (stubCGO) NewCKKSContext(CKKSParams) (CKKSContext, error) { return nil, errCGOStub }</code></pre>
+      </li>
+      <li><code>third_party/evi/darwin_arm64/</code>, <code>darwin_amd64/</code>, <code>linux_amd64/</code>, <code>linux_arm64/</code> <strong>네 디렉토리 모두 비어 있음</strong>. PROVENANCE 파일만 존재:
+        <pre style="margin:6px 0; padding:10px; font-size:12px;"><code>Source of truth: github.com/CryptoLabInc/evi-crypto (public)
+Pinned commit : TBD — fill in when first binary set is committed</code></pre>
+      </li>
+      <li><strong>의미</strong>: 현 시점 libevi 태그로 빌드해도 실 FHE 연산 불가. 사용 가능한 건 <code>crypto_mock.go</code> 기반 deterministic mock뿐</li>
+    </ul>
+    <p style="margin:10px 0 0;"><strong>영향</strong>: rune Phase 1 skeleton은 SDK mock backend로 진행 가능. 그러나 <strong>Phase 2 integration test · 실 모델 정확도 벤치(⑩.1)는 libevi 릴리스 대기</strong>. SDK 팀과 일정 조율이 critical path에 들어감.</p>
+  </div>
+
+  <h3>11.3 rune 통합 시 코드 형태 (실증)</h3>
+
+  <h4>Startup (데몬 기동)</h4>
+  <pre><code>client, _ := envector.NewClient(ctx,
+    envector.WithAddress(cfg.Envector.Address),
+    envector.WithAccessToken(cfg.Envector.Token),
+)
+defer client.Close()
+
+keysOpts := []envector.KeysOption{
+    envector.WithKeyPath("~/.rune/keys/" + cfg.KeyID),
+    envector.WithKeyID(cfg.KeyID),
+    envector.WithKeyPreset("FGb"),
+    envector.WithKeyEvalMode("ip"),
+    envector.WithKeyDim(1024),
+}
+if !envector.KeysExist(keysOpts...) {
+    _ = envector.GenerateKeys(keysOpts...)  // 또는 Vault에서 번들 받아 디스크에 배치
+}
+keys, _ := envector.OpenKeysFromFile(keysOpts...)
+defer keys.Close()
+
+// 서버에 resident 시킴 (4-RPC auto-setup)
+_ = client.ActivateKeys(ctx, keys)
+
+idx, _ := client.Index(ctx,
+    envector.WithIndexName("team-decisions"),
+    envector.WithIndexKeys(keys),
+    envector.WithIndexDim(1024),
+)</code></pre>
+
+  <h4>Capture 경로</h4>
+  <pre><code>// rune이 AES envelope 생성 — SDK는 metadata를 opaque string으로 취급
+envelope, _ := aesctr.Seal(dek, agentID, metadataJSON)  // {"a","c","m"} JSON
+
+result, err := idx.Insert(ctx, envector.InsertRequest{
+    Vectors:  [][]float32{embeddingVec},
+    Metadata: []string{string(envelope)},
+})
+// result.ItemIDs[0] = 서버 할당 int64</code></pre>
+
+  <h4>Recall 경로</h4>
+  <pre><code>blobs, _ := idx.Score(ctx, queryVec)              // [][]byte CiphertextScore protos
+
+// ⚠ 아래 한 줄이 §11.5 아키텍처 이슈의 핵심
+scores, shardIdx, _ := keys.Decrypt(blobs[0])     // LOCAL 복호화 (SDK가 SecKey 사용)
+
+refs := buildRefs(shardIdx, scores)                // top-k 선별
+metas, _ := idx.GetMetadata(ctx, refs, []string{"metadata"})</code></pre>
+
+  <h3>11.4 Startup 4-RPC 시퀀스 (<code>ActivateKeys</code>)</h3>
+  <ol>
+    <li><strong><code>GetKeysList</code></strong> — 서버 등록된 키 목록 조회</li>
+    <li>내 <code>keys.id</code> 없으면 <strong><code>RegisterKeys</code></strong> — EvalKey 업로드 (1MiB 청크 streaming, SHA256 checksum 포함)</li>
+    <li>모든 다른 키 <strong><code>UnloadKeys</code></strong> — 서버가 "한 번에 한 키만 resident" 제약을 강제</li>
+    <li>내 키 <strong><code>LoadKeys</code></strong> — 서버 메모리에 올림</li>
+  </ol>
+  <p>SDK에 <code>var activationMu sync.Mutex</code>가 있어 <strong>한 Client 안에서는 serial 보장</strong>. 그러나 <strong>서로 다른 Client(다른 rune 인스턴스)는 상호 보호 안 됨</strong> — 같은 사용자가 여러 머신에서 rune을 동시에 쓰면 각 머신이 <code>UnloadKeys</code>를 서로에게 발사해 ping-pong 유발 가능.</p>
+  <p>또한 <strong>동일 <code>Keys</code> 핸들을 두 Client에 activate 시도</strong>하면 <code>ErrKeysAlreadyActivated</code> 반환 (<code>keys.activated</code> 포인터로 추적). re-activate는 같은 Client면 idempotent.</p>
+
+  <h3>11.5 SDK의 "Keys" 모델 vs rune의 Vault-delegated 보안 요구</h3>
+
+  <p>초기 조사에서 "SDK가 local 복호화만 지원한다 → rune의 Vault 모델과 충돌"로 보였지만, <strong>§11.11에서 Python 실측 확인 결과 이건 기존에도 동일한 이슈</strong>였다. pyenvector도 Go SDK와 똑같은 "local keys" 설계고, rune(Python)은 <strong>런타임 monkey-patch로 우회</strong> 중이다. Go에서는 monkey-patch가 불가능해서 SDK에 정식 지원 요청이 필요할 뿐, <em>아키텍처 근본 충돌이 아니라 "pyenvector와 동등한 지원을 Go SDK에 얹는" 문제</em>다.</p>
+
+  <div class="callout info">
+    <p><strong>rune이 원하는 보안 모델 (Python 현재와 동일)</strong>: rune은 <strong>EncKey + EvalKey만</strong> 로컬 보유 (FHE 암호화 + 서버 등록용). <strong>SecKey는 Vault에만</strong>. FHE 복호화는 rune이 envector로부터 ciphertext blob을 받은 뒤 <strong>Vault로 RPC 전달</strong>해서 수행. rune은 평문 점수만 받음.</p>
+    <p><strong>이 모델을 유지하는 이유</strong>: (1) 기존 Python rune과 아키텍처 동등 → 운영 일관성, (2) rune 프로세스가 손상되어도 SecKey 노출 없음 → 보안 경계 명확, (3) 결정 <a href="#decisions">#23</a> 역호환 (기존 레코드를 Vault로 복호화하는 경로가 그대로 동작).</p>
+  </div>
+
+  <table>
+    <thead><tr><th></th><th>Python 현재 (원하는 모델)</th><th>SDK 기본 API (as-is)</th></tr></thead>
+    <tbody>
+      <tr><td>SecKey 위치</td><td>Vault만 (rune 디스크에 없음)</td><td>rune 디스크 필수 — <code>SecKey.json</code> 없으면 <code>OpenKeysFromFile</code> 실패</td></tr>
+      <tr><td>FHE 복호화 주체</td><td>Vault (RPC 경유)</td><td>rune 로컬 (<code>keys.Decrypt</code>)</td></tr>
+      <tr><td>rune의 Keys 객체 용도</td><td>Encrypt만 (Insert 전)</td><td>Encrypt + Decrypt 쌍</td></tr>
+      <tr><td>우회 가능성</td><td>Python: <strong>monkey-patch ✅</strong><br>(<code>KeyParameter.sec_key</code>를 런타임 property로 덮어씀)</td><td>Go: <strong>언어적으로 불가 ❌</strong><br>(정적 타입, 런타임 외부 패키지 속성 override 불가)</td></tr>
+    </tbody>
+  </table>
+
+  <h4>필요한 SDK 업스트림 변경 — 방법 1 (채택)</h4>
+  <p><strong>새 API 추가가 아니라 기존 <code>OpenKeysFromFile</code> 1곳의 조건 완화</strong>. pyenvector가 rune 때문에 묵인해온 "SecKey 없이도 Encrypt 가능" 모드를 Go SDK에 내장 동작으로 승격.</p>
+
+  <p><strong>SDK 패치 범위</strong> (약 10줄 + 테스트 1):</p>
+
+  <pre><code>// keys.go — KeysExist는 선택적 강화 (현행 그대로 둬도 됨)
+// OpenKeysFromFile 내부 SecKey 처리만 조건부로
+
+func OpenKeysFromFile(opts ...KeysOption) (*Keys, error) {
+    o := buildKeysOptions(opts)
+    if o.Path == "" { return nil, fmt.Errorf("envector: WithKeyPath required") }
+
+    encBytes, err := os.ReadFile(filepath.Join(o.Path, encKeyFile))
+    if err != nil { return nil, fmt.Errorf("envector: read %s: %w", encKeyFile, err) }
+    evalBytes, err := os.ReadFile(filepath.Join(o.Path, evalKeyFile))
+    if err != nil { return nil, fmt.Errorf("envector: read %s: %w", evalKeyFile, err) }
+
+    p := crypto.Default()
+    ckks, err := p.NewCKKSContext(crypto.CKKSParams{...})
+    if err != nil { ... }
+    enc, err := p.NewEncryptor(ckks, encBytes)
+    if err != nil { _ = ckks.Close(); return nil, ... }
+
+    // ===== 신규: SecKey는 optional =====
+    var dec crypto.Decryptor
+    secPath := filepath.Join(o.Path, secKeyFile)
+    if _, err := os.Stat(secPath); err == nil {
+        secBytes, err := os.ReadFile(secPath)
+        if err != nil { _ = enc.Close(); _ = ckks.Close(); return nil, err }
+        dec, err = p.NewDecryptor(ckks, secBytes)
+        if err != nil { _ = enc.Close(); _ = ckks.Close(); return nil, err }
+    }
+    // SecKey.json 부재 → dec == nil → Vault-delegated 모드
+
+    return &amp;Keys{
+        id: o.KeyID, ckks: ckks, enc: enc, dec: dec,
+        evalKeyBytes: evalBytes,
+    }, nil
+}</code></pre>
+
+  <pre><code>// keys.go — Decrypt 방어
+func (k *Keys) Decrypt(blob []byte) (scores [][]float64, shardIdx []int32, err error) {
+    if k == nil || k.closed { return nil, nil, ErrKeysClosed }
+    if k.dec == nil { return nil, nil, ErrDecryptorUnavailable }
+    return k.dec.DecryptScore(blob)
+}
+
+// errors.go — 신규 typed error 1개
+var ErrDecryptorUnavailable = errors.New(
+    "envector: decryptor unavailable (Keys opened without SecKey; use vault-delegated decrypt path)",
+)</code></pre>
+
+  <p><strong>breaking change 없음</strong>: SecKey.json이 있던 기존 사용자는 정확히 동일 동작. 없는 사용자(=rune)만 새 경로로 진입. <code>KeysExist</code>는 그대로 둬도 되지만, 의도 명시 위해 <code>KeysExist(opts, WithAllowMissingSecKey())</code> option도 같이 추가하면 깨끗함.</p>
+
+  <h4>rune 코드 변경 — SDK 패치 머지 후</h4>
+  <pre><code>// Phase 1 목표 형태 (rune 측 추가 작업 거의 없음)
+keys, _ := envector.OpenKeysFromFile(keysOpts...)    // EncKey + EvalKey만 있는 디렉토리
+_ = client.ActivateKeys(ctx, keys)                    // 서버에 EvalKey 등록
+
+idx, _ := client.Index(ctx, envector.WithIndexName("team-decisions"), envector.WithIndexKeys(keys), envector.WithIndexDim(1024))
+
+// Capture
+_, _ = idx.Insert(ctx, envector.InsertRequest{Vectors: ..., Metadata: ...})
+
+// Recall
+blobs, _ := idx.Score(ctx, queryVec)                  // [][]byte CiphertextScore protos
+scores, shards, _ := vaultClient.DecryptScores(ctx, blobs[0])  // ← Vault RPC (keys.Decrypt 대신)
+metas, _ := idx.GetMetadata(ctx, refs, []string{"metadata"})
+// GetMetadata 결과의 AES envelope 복호화는 rune 자체(agent_dek)</code></pre>
+
+  <h4>방법 2 — fake SecKey.json (safety net 전용)</h4>
+  <p>SDK 패치 머지가 1주 이상 지연될 <strong>긴급 상황에 한해</strong>:</p>
+  <pre><code>// rune 설치 시 임시
+_ = os.WriteFile(filepath.Join(keyDir, "SecKey.json"), []byte("{}"), 0600)
+// mock backend가 아무 바이트나 수용 → OpenKeysFromFile 통과
+// TODO(#52): SDK PR #??? 머지 후 이 줄 삭제</code></pre>
+  <p><strong>방법 2 사용 조건</strong> (엄격):</p>
+  <ul>
+    <li>SDK PR 1주 내 머지 불가 확정 + Phase 1 시작이 당일로 블로킹될 때만</li>
+    <li>코드 주석과 커밋 메시지에 SDK PR 링크 필수</li>
+    <li>Phase 2 integration test 전까지 반드시 제거 (libevi가 fake SecKey 거부)</li>
+    <li>rune의 README 운영 섹션에 "fake SecKey.json" 존재와 그 이유 기록</li>
+  </ul>
+
+  <h4>방법 1 vs 방법 2 비교</h4>
+  <table>
+    <thead><tr><th>기준</th><th>방법 1 (SDK 패치)</th><th>방법 2 (fake SecKey)</th></tr></thead>
+    <tbody>
+      <tr><td>코드 가독성</td><td>의도 명시적</td><td>디스크에 가짜 파일, 반복 설명 필요</td></tr>
+      <tr><td>보안 감사</td><td>깨끗함</td><td>"이 빈 SecKey.json은 뭔가요?" 반복</td></tr>
+      <tr><td>libevi 연결 시</td><td>무변경 동작</td><td>실 CGO가 가짜 바이트 거부 가능성 높음</td></tr>
+      <tr><td>mock backend 변경 시</td><td>영향 없음</td><td>mock에 유효성 검사 추가되면 깨짐</td></tr>
+      <tr><td>실수 방어</td><td><code>keys.Decrypt</code> 호출 시 <code>ErrDecryptorUnavailable</code></td><td>가짜 Decryptor가 garbage 반환 (silent failure)</td></tr>
+      <tr><td>기술 부채</td><td>없음</td><td><code>TODO(#52)</code> 잔존 위험</td></tr>
+      <tr><td>pyenvector 파리티</td><td>정식으로 맞음</td><td>없음</td></tr>
+      <tr><td>의존성</td><td>SDK PR 머지 대기</td><td>없음</td></tr>
+      <tr><td>착수 속도</td><td>2-5일</td><td>오늘 바로</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout success" style="margin-top:10px;">
+    <strong>결정</strong>: <strong>방법 1 채택</strong>. 2026-04-20. SDK PR 제출 → 머지 → rune 통합 순서. 방법 2는 SDK PR이 1주 이상 지연될 때만 Phase 1 skeleton 기간 한정으로 사용하고 Phase 2 전에 반드시 제거. 상세 근거·대안·실행 순서는 <strong>결정 #52</strong> 카드 참조.
+  </div>
+
+  <h3>11.6 Metadata는 opaque — AES envelope은 runed 책임</h3>
+  <p>SDK doc 명시: <em>"Metadata is stored verbatim — the SDK never interprets it"</em>. 즉:</p>
+  <ul>
+    <li>결정 <a href="#decisions">#4</a> (AES-CTR 바이너리 포맷) · <a href="#decisions">#46</a> (MAC 추가)는 <strong>100% rune 측 구현 책임</strong></li>
+    <li>SDK 변경 없이 MAC envelope만 rune에서 생성/검증 가능 — 업스트림 조율 부담 없음</li>
+    <li>Go <code>crypto/aes</code> + <code>crypto/hmac</code>으로 50 LoC 내</li>
+    <li><code>internal/adapters/envector/aes_ctr.go</code>가 envelope 생성, <code>internal/adapters/envector/sdk.go</code>가 SDK 호출. 깔끔히 분리</li>
+  </ul>
+
+  <h3>11.7 빌드 / 배포 영향</h3>
+
+  <h4>mock 태그 (default)</h4>
+  <ul>
+    <li>순수 Go + gRPC deps만 → 정적 컴파일 OK</li>
+    <li><code>GOOS=linux GOARCH=amd64 go build</code> 등 크로스 컴파일 쉬움</li>
+    <li>rune 개발·unit test·CI 대부분 이걸로 진행</li>
+    <li>deterministic mock → wire-fidelity 테스트에 유용 (request/response 구조만 검증)</li>
+  </ul>
+
+  <h4>libevi 태그 (prod)</h4>
+  <ul>
+    <li>CGO 필수. <strong>C++ 컴파일러는 불필요</strong> — prebuilt <code>libevi_crypto.{a,dylib,so}</code> 사용</li>
+    <li><code>third_party/evi/{os_arch}/lib/libevi_crypto.{dylib,so}</code> 동적 링크 → <strong>배포 bundle에 포함 필요</strong></li>
+    <li>Windows 없음 → rune도 Windows 미지원 방향 유지 (결정 <a href="#decisions">#17</a>과 일관)</li>
+    <li><strong>현재 상태</strong>: 빈 디렉토리 → 사용 불가 (§11.2 참조)</li>
+  </ul>
+
+  <h3>11.8 테스트 전략에 미치는 영향</h3>
+  <ul>
+    <li>기본 mock이 deterministic → rune의 <code>internal/adapters/envector/sdk_test.go</code> 같은 unit test가 실 FHE 없이도 의미 있음</li>
+    <li>그러나 mock 출력 숫자가 실 libevi와 다름 → <strong>실 모델 정확도 테스트(⑩.1)는 libevi 필수</strong>. Phase 2 integration 일정 리스크</li>
+    <li>rune의 <code>//go:build integration</code> 태그 테스트는 SDK도 <code>-tags=libevi</code> 요구 → CI 러너에 prebuilt 바이너리 마운트 필요</li>
+    <li>nightly CI로 libevi 빌드 시도 (바이너리 준비되면 자동 활성화)</li>
+  </ul>
+
+  <h3>11.9 위험도 / 미결 항목</h3>
+  <table>
+    <thead><tr><th>항목</th><th>설명</th><th>영향</th></tr></thead>
+    <tbody>
+      <tr><td>libevi 바이너리 부재</td><td><code>third_party/evi/*/lib/</code> 비어있음</td><td>Phase 2까지 real FHE 테스트 불가</td></tr>
+      <tr><td>SDK 버전 정책 미정</td><td>semver? internal tag? commit pin?</td><td><code>go.mod require</code> 핀 방식 결정 필요</td></tr>
+      <tr><td><strong>Public-only Keys API 부재 (§11.5, §11.11)</strong></td><td>현재 <code>OpenKeysFromFile</code>이 SecKey.json 필수 요구. rune(Vault-delegated 모델)는 SecKey 로컬 보유 안 함</td><td><strong>SDK 업스트림 변경 필요 (신규 결정 #52)</strong>. pyenvector는 rune이 monkey-patch로 우회 중이나 Go는 불가능</td></tr>
+      <tr><td>키 single-resident 제약 (§11.4)</td><td>멀티 유저/머신 공존 시 unload 경쟁</td><td>운영 시나리오 문서화 필요</td></tr>
+      <tr><td><code>GenerateKeys</code> 경로</td><td>rune이 직접 생성? Vault가 분배?</td><td>결정 <a href="#decisions">#5</a> enVector persist + <a href="#decisions">#23</a> 역호환과 얽힘. rune은 Vault에서 EncKey+EvalKey만 받고 <code>GenerateKeys</code>는 호출 안 함이 기본 방침</td></tr>
+      <tr><td>Windows 미지원</td><td>Native 바이너리 매트릭스 제한</td><td>결정 #17과 일관. 재확인만</td></tr>
+      <tr><td>EvalKey 업로드 트래픽</td><td>RegisterKeys는 1MiB 청크 streaming, 수십 MB</td><td>첫 부팅 + 서버 재시작 후마다 재등록</td></tr>
+      <tr><td>SDK 에러 surface 확장</td><td>현재 8개 typed error. 실 CGO 붙으면 확장 가능성</td><td>rune <code>internal/ports/envector.go</code>에 error mapping layer 필요</td></tr>
+      <tr><td>Python monkey-patch 5개 항목</td><td><code>sec_key / sec_key_path / metadata_key / metadata_key_path / metadata_encryption</code> (§11.11)</td><td>Go SDK에 정식 API로 대응 필요. "Public-only Keys" 하나로 해결 가능</td></tr>
+    </tbody>
+  </table>
+
+  <h3>11.10 권장 행동 — 방법 1 확정 후 실행 순서</h3>
+
+  <h4>즉시 (이번 주, 결정 보드 업데이트)</h4>
+  <ol>
+    <li><strong>신규 카드 #52 "FHE 복호화 주체 — Vault-delegated 유지 + SDK <code>OpenKeysFromFile</code> 조건 완화 PR"</strong> 결정 보드에 등록 (방법 1 채택 확정)</li>
+    <li><strong>SDK 팀에 PR 제출</strong> — <code>keys.go</code>의 SecKey 처리 조건부화 + <code>Decrypt</code> 방어 + <code>ErrDecryptorUnavailable</code> 신규 typed error (§11.5 패치 명세 그대로, 약 10줄 + 테스트 1). rune의 pyenvector monkey-patch 5개(§11.11)를 정당성 근거로 첨부</li>
+    <li><strong>#3 envector-go SDK 카드 업데이트</strong> — "SDK PR 대기 항목 1건(#52)" + "libevi 바이너리 부재(§11.2)" 두 리스크 명시</li>
+    <li><code>scripts/refresh-evi.sh</code> 실행 책임자 + commit pin 정책 SDK 팀과 정의</li>
+  </ol>
+
+  <h4>PR 머지 대기 중 (2-5일 예상)</h4>
+  <ol start="5">
+    <li>rune <code>internal/ports/envector.go</code> interface 설계 — <strong>encrypt-only 경로 기준</strong>으로 (<code>Keys.Decrypt</code> 의존 없음). interface가 SDK 내부 구조에 결합되지 않게 얇게</li>
+    <li><code>internal/adapters/envector/sdk.go</code> skeleton 작성. SDK 호출 + AES envelope 생성. <code>keys.Decrypt</code>는 <strong>호출 금지</strong> (lint rule 추가 권장 — <code>grep -r "\.Decrypt(" internal/adapters/envector/</code> CI 체크)</li>
+    <li>SDK 버전 pin: PR 머지되는 commit SHA로 <code>go.mod replace</code> 준비</li>
+    <li>CI: mock tag로 default run, nightly에 libevi tag 시도 (바이너리 준비되면 자동 활성화)</li>
+  </ol>
+
+  <h4>SDK PR 머지 후 (Phase 1 본격 착수)</h4>
+  <ol start="9">
+    <li><code>go.mod</code>에서 <code>github.com/CryptoLabInc/envector-go-sdk</code>를 새 태그로 pin</li>
+    <li>rune adapter에서 <code>envector.OpenKeysFromFile</code> 그대로 호출 (SecKey 없는 디렉토리 대응이 SDK 내장으로 바뀐 상태)</li>
+    <li>integration test (mock backend): capture/recall E2E 동작 확인</li>
+  </ol>
+
+  <h4>긴급 fallback 조건 (방법 2 일시 적용)</h4>
+  <p>SDK PR 머지가 <strong>1주 이상 지연</strong>되고 Phase 1 시작이 블로킹될 때만:</p>
+  <ol>
+    <li>rune 설치 스크립트에 fake <code>SecKey.json</code> 생성 한 줄 추가. 주석에 SDK PR 링크 필수</li>
+    <li>rune repo에 <code>FAKE_SECKEY_CLEANUP</code> 레이블 이슈 생성해 Phase 2 전 제거 추적</li>
+    <li>README 운영 섹션에 해당 파일 존재 이유 명시</li>
+    <li>SDK PR 머지되는 즉시 제거 + <code>go.mod</code> pin 교체 + CI 재실행</li>
+  </ol>
+
+  <h4>Phase 2</h4>
+  <ol start="7">
+    <li>libevi 바이너리 준비 완료 후 integration test 작성</li>
+    <li>rune 바이너리 릴리스 bundle에 <code>libevi_crypto.{dylib,so}</code> 포함</li>
+    <li>멀티 머신 시나리오에서 <code>ActivateKeys</code> 충돌 동작 실측 (§11.4)</li>
+  </ol>
+
+  <!-- ============================================================ -->
+  <h3>11.11 Python은 같은 문제를 어떻게 해결했나 (실측)</h3>
+
+  <p>Go SDK의 "SecKey 필수" 설계가 rune의 Vault-delegated 보안 모델과 충돌한다고 했지만 — <strong>Python pyenvector도 원래는 동일한 설계</strong>다. rune(Python)이 런타임 monkey-patch로 우회 중일 뿐. 이 사실은 두 가지 의미를 갖는다: (1) Go에서의 정식 API 요청은 <em>pyenvector 설계와의 파리티 맞추기</em>라는 정당한 명분이 있고, (2) 우회가 필요했던 지점이 정확히 어디인지 Python 코드에 이미 매핑되어 있어서 SDK 팀과의 대화가 구체적일 수 있다.</p>
+
+  <h4>pyenvector의 원래 설계 제약</h4>
+  <p>pyenvector의 <code>KeyParameter</code>는 EncKey/SecKey/MetadataKey 세 파일을 모두 로컬에 요구한다. 파일이 없으면 내부 <code>utils.get_key_stream(path)</code>가 <code>ast.literal_eval(path_string)</code>까지 fall-through해서 <strong><code>SyntaxError</code> 크래시</strong>. 즉 Go SDK의 "<code>OpenKeysFromFile</code>이 <code>SecKey.json</code> 필수"와 완전 동일한 제약.</p>
+
+  <h4>rune Python이 한 우회 — monkey-patch 5개 (<code>mcp/adapter/envector_sdk.py</code> L21-86)</h4>
+  <pre><code>_original_sec_key_fget = KeyParameter.sec_key.fget
+_original_sec_key_path_fget = KeyParameter.sec_key_path.fget
+
+def _safe_sec_key_getter(self):
+    """Return None when SecKey.json is absent instead of crashing."""
+    if getattr(self, 'sec_key_stream', None):
+        return _original_sec_key_fget(self)
+    path = _original_sec_key_path_fget(self)
+    if path and not os.path.exists(path):
+        return None               # ← 크래시 대신 None
+    return _original_sec_key_fget(self)
+
+# ... 유사 구조의 helper 4개 더 ...
+
+KeyParameter.sec_key           = property(_safe_sec_key_getter, KeyParameter.sec_key.fset)
+KeyParameter.sec_key_path      = property(_safe_sec_key_path_getter)
+KeyParameter.metadata_key      = property(_safe_metadata_key_getter, KeyParameter.metadata_key.fset)
+KeyParameter.metadata_key_path = property(_safe_metadata_key_path_getter)
+KeyParameter.metadata_encryption = property(_safe_metadata_encryption_getter,
+                                            KeyParameter.metadata_encryption.fset)</code></pre>
+
+  <p>즉 rune은 import 타이밍에 <strong>pyenvector의 5개 property descriptor를 대체 함수로 덮어쓴다</strong>. 이후 pyenvector 내부가 <code>self.sec_key</code>를 참조하면 rune이 설치한 wrapper가 실행되어 "파일 없으면 None 반환". 결과: <code>Cipher</code>가 <strong>"encrypt-only 모드"로 초기화</strong> — Insert 가능, 로컬 Decrypt 불가.</p>
+
+  <h4>Vault로 복호화 경유는 어떻게 성사됐나 (<code>envector_sdk.py</code> L262-291)</h4>
+  <pre><code>def _do_score():
+    index = ev.Index(index_name)
+    scores = index.scoring(query)           # List[CipherBlock] with is_score=True
+    encoded_blobs = []
+    for cb in scores:
+        serialized = cb.data.SerializeToString()
+        encoded_blob = base64.b64encode(serialized).decode('utf-8')
+        encoded_blobs.append(encoded_blob)  # ← 복호화 전 원시 ciphertext
+    return {"ok": True, "encrypted_blobs": encoded_blobs}</code></pre>
+
+  <p>rune은 pyenvector에게 <em>복호화를 시키지 않고</em> <code>CipherBlock</code>을 직접 뽑아 base64 인코딩 후 반환. 이 blob은 상위 레이어(<code>vault_client.DecryptScores</code> RPC)로 보내져 Vault에서 복호화된다. <strong>Go에서 원하는 흐름과 완전히 동일</strong>.</p>
+
+  <h4>Python ↔ Go SDK 파리티 매핑</h4>
+  <table>
+    <thead><tr><th>Python monkey-patch 대상</th><th>의도</th><th>Go SDK에서의 대응</th></tr></thead>
+    <tbody>
+      <tr><td><code>KeyParameter.sec_key</code></td><td>SecKey.json 없으면 None</td><td>신규 <code>OpenKeysPublicOnly</code> 또는 <code>WithKeyPublicOnly</code> option</td></tr>
+      <tr><td><code>KeyParameter.sec_key_path</code></td><td>경로 없으면 None 반환 (Cipher가 decryptor init 건너뛰게)</td><td>동일 플래그로 통합 가능</td></tr>
+      <tr><td><code>KeyParameter.metadata_key</code></td><td>MetadataKey 없으면 None</td><td>rune은 자체 AES envelope 사용 (결정 <a href="#decisions">#4</a>/<a href="#decisions">#46</a>) → SDK에 metadata key 요구 자체 없앰</td></tr>
+      <tr><td><code>KeyParameter.metadata_key_path</code></td><td>동일</td><td>동일 (metadata_encryption=false 내장)</td></tr>
+      <tr><td><code>KeyParameter.metadata_encryption</code></td><td>key 없으면 False로 override → app-layer가 담당</td><td>SDK는 metadata를 opaque string으로 취급 (이미 SDK 설계에 반영됨, <code>doc.go</code> 명시)</td></tr>
+    </tbody>
+  </table>
+
+  <h4>추가로 드러난 Python 운영 관행</h4>
+  <ul>
+    <li><strong>AES envelope JSON 조립은 rune</strong> (<code>envector_sdk.py</code> L227-234):
+      <pre style="font-size:12px; margin:6px 0;"><code>def _app_encrypt_metadata(self, metadata_str: str) -> str:
+    from pyenvector.utils.aes import encrypt_metadata as aes_encrypt
+    ct = aes_encrypt(metadata_str, self._agent_dek)
+    return json.dumps({"a": self._agent_id, "c": ct})</code></pre>
+      pyenvector의 <code>encrypt_metadata</code>만 호출하고 <code>{"a","c"}</code> JSON은 rune이 직접 구성. Go에서도 동일 분리 ✅ — 결정 <a href="#decisions">#4</a>/<a href="#decisions">#46</a>이 모두 rune 책임이 맞다는 것을 재확인
+    </li>
+    <li><strong><code>_with_reconnect</code> 래퍼</strong> (L185-196): gRPC 연결 끊김 감지 시 <code>ev.init(**self._init_params)</code> 재호출로 SDK 전체 재생성. 매우 공격적. Go SDK는 <code>grpc.ClientConn</code> 내장 keepalive + 자동 reconnect가 있으므로 <strong>rune 측 별도 reconnect 래퍼는 아마 불필요</strong> — 실측 필요 (Part 7.5 부하/장애 시나리오)</li>
+    <li><strong>Index 객체를 매 호출마다 재생성</strong> (<code>invoke_insert</code> L256): <code>ev.Index(index_name)</code>을 매 capture마다 호출. pyenvector가 cheap해서 가능한 패턴. Go SDK는 <code>client.Index()</code>를 startup에 한 번만 얻고 <strong>재사용 권장</strong> — gRPC 연결·Index 객체 초기화 비용 절약</li>
+    <li><strong>Connection error patterns 상수 10개</strong> (L89-101): UNAVAILABLE / DEADLINE_EXCEEDED / Connection refused / Stream removed 등. 연결 끊김 분류용. Go에선 gRPC status code로 바로 매칭 가능 (<code>codes.Unavailable</code> 등)</li>
+  </ul>
+
+  <div class="callout success" style="margin-top:14px;">
+    <strong>핵심 결론</strong>: Go SDK의 현 제약은 rune 요구사항의 <em>새로운 충돌</em>이 아니라 <strong>pyenvector에서 이미 rune이 monkey-patch로 해결해온 기존 이슈의 Go 재현</strong>이다. SDK 팀에게 요청할 내용이 명확하고(public-only Keys API), 정당성도 분명하다(pyenvector와의 기능 파리티). 신규 결정 #52는 방향 선택이라기보단 <strong>SDK 업스트림 조율 work item</strong>에 가깝다.
+  </div>
+
+  <div class="callout info" style="margin-top:18px;">
+    <strong>관련 결정 · 섹션</strong>:
+    <a href="#decisions">#3 SDK 채택</a> ·
+    <a href="#decisions">#4 AES-CTR 포맷</a> ·
+    <a href="#decisions">#5 enVector persist</a> ·
+    <a href="#decisions">#17 OS 매트릭스</a> ·
+    <a href="#decisions">#23 역호환</a> ·
+    <a href="#decisions">#46 AES-MAC</a> ·
+    <strong>신규 #52 FHE 복호화 주체 (Vault-delegated 유지 + SDK public-only 요청)</strong> ·
+    <a href="#benchmark-plan">⑩.1 정확도 벤치</a> ·
+    <a href="#benchmark-plan">⑩.3 latency 벤치</a> ·
+    <a href="#benchmark-plan">⑩.5 장애 시나리오</a>
+  </div>
+</section>
+
+<!-- ============================================================ -->
 <!-- PRIORITIES -->
 <!-- ============================================================ -->
 <section id="priorities">
@@ -3889,13 +4867,13 @@ var (
 
   <h3>지금 당장 확정 (Phase 0, 1주 내)</h3>
   <p><span class="tag blocking">블로킹</span> <strong>#46 AES-MAC envelope</strong> (pyenvector + envector-go 호환 설계 — <em>Vault 무관, 클라이언트 측 두 SDK만</em>)</p>
-  <p><span class="tag success" style="background: #c6f6d5; color: #22543d;">✅ 해결됨 (2026-04-17)</span> #1 ONNX 진행 확정 · #2 Qwen3 차원 1024 · #3 envector-go 프로토타입 확보 (ports 인터페이스로 독립 진행) · #4 AES 모드 CTR 확정</p>
+  <p><span class="tag success" style="background: #c6f6d5; color: #22543d;">✅ 해결됨 (2026-04-17~04-20)</span> #1 ONNX + wrapper re-export · #2 Qwen3 차원 1024 · #3 envector-go SDK 채택 · #4 AES-CTR 포맷 확정 · <strong>#5 envector persist (b) + 부팅 retry</strong> · <strong>#6 metadata 라운드트립 (a)</strong> · <strong>#7 Novelty check KEEP (MVP)</strong> · <strong>#52 FHE 복호화 주체 — Vault-delegated 유지 + SDK 조건 완화 PR (방법 1)</strong></p>
 
   <h3>Phase 1 진입 전</h3>
-  <p><span class="tag high">높음</span> #5 enVector persist · #14 Primary transport · #30 CLAUDE/SKILL/GEMINI 3-way 통일 · <strong>#41 Policy scheme canonical</strong> · <strong>#42 Mock 전략 확정</strong> · <span class="tag medium">중간</span> #6 metadata 섹션 · #43 golden fixture 방식 · #44 로깅 라이브러리 · <span class="tag low">낮음</span> #37 EvalKey mmap (post-MVP)</p>
+  <p><span class="tag high">높음</span> #14 Primary transport · #30 CLAUDE/SKILL/GEMINI 3-way 통일 · <strong>#41 Policy scheme canonical</strong> · <strong>#42 Mock 전략 확정</strong> · <span class="tag medium">중간</span> #43 golden fixture 방식 · #44 로깅 라이브러리 · <span class="tag low">낮음</span> #37 EvalKey mmap (post-MVP)</p>
 
   <h3>Phase 2-3 진입 전</h3>
-  <p><span class="tag high">높음</span> #7 Novelty check · #13 record_builder 이관 · <strong>#40 외부 장애 대응</strong> · <span class="tag medium">중간</span> #8 phase chain · #9 multi-query · #10 deactivate · #45 에러 타입 체계 · <strong>#48 Scientist shadow</strong> · <strong>#51 circuit breaker</strong></p>
+  <p><span class="tag high">높음</span> #13 record_builder 이관 · <strong>#40 외부 장애 대응</strong> · <span class="tag medium">중간</span> #8 phase chain · #9 multi-query · #10 deactivate · #45 에러 타입 체계 · <strong>#48 Scientist shadow</strong> · <strong>#51 circuit breaker</strong></p>
 
   <h3>Phase 4-5</h3>
   <p><span class="tag medium">중간</span> #16 에이전트 md · #17 OS 매트릭스 · #19 크래시 · #20 sleep/wake · #25 venv 정리 · #26 configure.md · #28 CONTRIBUTING · #38 pprof/metrics opt-in · <strong>#49 바이너리 서명</strong> · <strong>#50 pprof build-tag</strong> · <span class="tag low">낮음</span> #39 Vault DecryptBundle (post-MVP) · <strong>#47 mTLS</strong> (post-MVP) · 나머지</p>

@@ -1,0 +1,72 @@
+# Rune v0.4.0 — Go 전환 아키텍처 문서
+
+2026-04 기준 Go 포팅 설계 문서. 현재 Python 코드베이스(`mcp/`, `agents/`, `commands/`, `scripts/`)를 기반으로 새 아키텍처를 설계한다.
+
+이 디렉토리는 **새로 쓰는 권위 있는 설계 문서**다. 이전 `docs/migration/` · `docs/runed/` 문서들은 레퍼런스·연구 자료로만 참조하고, 이 디렉토리가 향후 단일 진실 소스.
+
+## 핵심 아키텍처 요약
+
+Python의 "세션당 MCP 프로세스에 embedding model까지 포함" 구조가 갖는 **모델 메모리 중복 문제**만 제거하고, 나머지는 Python 구조에 가깝게 유지한다:
+
+- **`rune-mcp`**: 세션당 1개. stdio JSON-RPC. Claude Code가 spawn. Python MCP를 Go로 대체
+- **`rune-embedder`**: 상주 1개. ONNX 또는 llama-server 기반. HTTP+JSON over unix socket으로 임베딩 요청 처리
+- **Vault · envector**: 각 MCP가 독립적으로 gRPC 연결
+
+이득: 모델이 세션별로 복제되지 않아 메모리 N× 증가 제거. 동시에 세션 격리·Python 구조 유사성을 유지해 마이그레이션 cost 최소화.
+
+## 디렉토리 구조
+
+```
+docs/v04/
+├── README.md                       # 이 파일 (index)
+├── architecture.md                  # 3-프로세스 아키텍처 · 전체 그림
+├── components/                      # 컴포넌트별 설계
+│   ├── rune-mcp.md                 # 세션별 MCP (Go)
+│   ├── rune-embedder.md            # 공유 embedder 데몬
+│   ├── vault-integration.md        # Vault gRPC 연동
+│   └── envector-integration.md     # envector-go SDK 연동
+├── open-questions.md                # 미결 항목 · 블로킹
+└── research/                        # 조사 · 근거 자료
+    └── python-codebase-map.md      # 현재 Python 코드 → 새 구조 매핑
+```
+
+## 읽는 순서
+
+처음 보는 사람:
+1. 이 README → 전체 요약
+2. `architecture.md` → 왜·무엇을·어떻게
+3. `components/*.md` → 구현 수준 상세
+4. `open-questions.md` → 아직 결정 안 된 것들
+
+기존 Python 코드 아는 사람:
+1. `research/python-codebase-map.md` → 뭐가 어디로 옮겨지는가
+2. `components/*.md` → 구체 설계
+
+## 상태 (2026-04-20)
+
+| 영역 | 상태 |
+|---|---|
+| 아키텍처 방향 | ✅ 결정됨 (세션별 MCP + 공유 embedder) |
+| rune-mcp 설계 | 🟡 초안 |
+| rune-embedder 설계 | 🟡 초안 · 런타임(ONNX vs llama-server) 미정 |
+| Vault 연동 | ✅ 기존 Python 구조 유지 |
+| envector 연동 | 🟡 SDK 조건 완화 PR 대기 |
+| AES-MAC envelope | 🔴 블로킹 |
+| 벤치마크 계획 | 🟡 초안 |
+
+## 이전 문서와의 관계
+
+기존 `docs/migration/python-go-comparison.html`은 **이전 방향(단일 데몬) 기준**으로 작성된 것. 2026-04-20 아키텍처 전환(세션별 MCP + embedder 분리)과 일부 충돌한다. 다음 처리:
+
+- 이 `docs/v04/`가 **권위 있는 설계 문서**. 앞으로의 논의·구현은 여기를 기준
+- 기존 HTML·노트는 **과거 의사결정 히스토리 · 배경 자료**로 보존. 삭제 안 함
+- 충돌하는 내용은 여기서 재서술. 일치하는 부분(정책 상수·Python 코드 실측 등)은 그대로 원용
+
+## 용어
+
+- **rune-mcp**: Go로 다시 쓴 세션별 MCP 바이너리. Python MCP의 대체
+- **rune-embedder**: 임베딩 모델만 담당하는 공유 상주 데몬
+- **Vault**: `rune-Vault` gRPC 서비스. FHE 키 관리 + 복호화 (`DecryptScores`/`DecryptMetadata`)
+- **envector**: enVector Cloud. FHE 벡터 저장·검색 (`Insert`/`Score`/`GetMetadata`)
+- **agent_dek**: 에이전트별 AES-256 DEK. metadata envelope 암호화용. Vault가 배포, rune 메모리에만
+- **Vault-delegated 보안 모델**: SecKey를 Vault가 보유, rune은 EncKey + EvalKey만 로컬. 복호화는 Vault RPC 경유
