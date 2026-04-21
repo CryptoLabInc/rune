@@ -22,7 +22,8 @@ docs/v04/
 ├── architecture.md                  # 3-프로세스 아키텍처 · 전체 그림
 ├── decisions.md                     # ⭐ 결정 트래커 (모든 결정 — 가벼운 것부터 중대한 것까지)
 ├── flows/                           # end-to-end flow 설계
-│   └── capture.md                  # Capture 7-phase 전체 flow (결정 D1~D20 포함)
+│   ├── capture.md                  # Capture 7-phase 전체 flow (D1~D20)
+│   └── recall.md                   # Recall 7-phase 전체 flow (D21~D28)
 ├── components/                      # 컴포넌트별 설계
 │   ├── rune-mcp.md                 # 세션별 MCP (Go)
 │   ├── rune-embedder.md            # 공유 embedder 데몬
@@ -63,7 +64,7 @@ docs/v04/
 | envector 연동 | 🟡 SDK 조건 완화 PR 대기 |
 | AES-MAC envelope | 🔵 Deferred (post-MVP) |
 | Capture flow | ✅ 완료 (D1~D20) |
-| Recall flow | 🟡 미작성 |
+| Recall flow | ✅ 완료 (D21~D28) |
 | 벤치마크 계획 | 🟡 초안 |
 
 ## 이전 문서와의 관계
