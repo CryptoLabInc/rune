@@ -91,7 +91,7 @@ HTTP/1.1 200 OK
   "ok": true,
   "model": "qwen3-embedding-0.6b",
   "dim": 1024,
-  "backend": "onnx" | "llama-server",
+  "backend": "llama-server",
   "uptime_seconds": 12345,
   "version": "0.4.0"
 }
@@ -149,36 +149,36 @@ HTTP/1.1 503 Service Unavailable
 - per-request timeout: 30초
 - 동시 요청: 최대 4개 (모델 inference가 CPU-heavy라 큐잉)
 
-## 실행 엔진 (아직 미정, Q2)
+## 실행 엔진 (D29로 확정 — llama-server)
 
-두 후보:
+**결정**: llama.cpp의 `llama-server`를 공식 백엔드로 채택. 상세 근거는 `decisions.md` D29 참조.
 
-### Option A — ONNX Runtime Go
+### 구조
 
-- `github.com/yalue/onnxruntime_go` CGO 바인딩
-- 모델: `qwen3-embedding-0.6b-wrapped.onnx` (PyTorch wrapper로 last-token pool + L2 norm + position_ids + no-KV-cache 재-export한 것)
-- Tokenizer: `github.com/daulet/tokenizers` (HuggingFace Rust tokenizers CGO)
-- rune-embedder 내부에서 tokenize → session.Run → 결과 반환
-- 배포: `libonnxruntime.{dylib,so}` 동적 라이브러리 번들 + `.onnx` 파일
-- 예상 Go 코드: ~300 LoC (HTTP 서버 + tokenize + session 관리)
+- `llama-server` 바이너리를 별도 프로세스로 supervise (rune-embedder의 자식)
+- 모델: `qwen3-embedding-0.6b.gguf` (공식 GGUF export 존재, 필요 시 Q8 quant)
+- llama-server가 OpenAI 호환 HTTP `/v1/embeddings` endpoint 제공
+- rune-embedder는 **thin proxy**: unix socket 수신 → llama-server HTTP → 응답 변환 → rune 규격 응답
+- 예상 Go 코드: ~150 LoC (process supervise + HTTP proxy + healthcheck)
 
-### Option B — llama-server
+### 배포
 
-- llama.cpp의 `llama-server` 바이너리를 supervise
-- 모델: `qwen3-embedding-0.6b.gguf` (공식 GGUF export 존재)
-- llama-server가 자체 HTTP `/embedding` endpoint 제공 → rune-embedder는 thin proxy
-- rune-embedder의 역할: llama-server spawn/monitor · unix socket bridge · rune 규격 API로 변환
-- 배포: `llama-server` 바이너리 + `.gguf`
-- 예상 Go 코드: ~50 LoC (process supervise + proxy)
+- `llama-server` 바이너리: `/opt/homebrew/bin/llama-server` (macOS) · 사용자가 `brew install llama.cpp` 또는 `apt install` 등으로 제공
+- 모델 파일: `~/.rune/models/qwen3-embedding-0.6b.gguf`
+- rune-embedder는 시작 시 바이너리 경로 + 모델 경로 검증. 미존재 시 명확한 에러 후 종료
 
-### 선택 기준
+### 폐기된 후보 — ONNX Runtime Go
+
+다음 이유로 탈락 (D29 참조):
+- CGO 의존성 → cross-build 복잡, 바이너리 배포 무거움
+- Go 바인딩 성숙도가 Python 대비 낮음
+- rune 전용 구현 → 다른 프로젝트에서 재사용 어려움
+
+### 품질 기준 (구현 후 검증)
 
 - Python sentence-transformers와 **cosine similarity ≥0.999** 달성
-- 런타임 안정성 (크래시 빈도)
-- 유지보수 부담 (우리가 짤 코드 양 + 업스트림 대응)
-- 배포 용이성
-
-POC 계획: `research/onnx-vs-llama-server-poc.md`에 작성 예정. 결정 후 이 섹션을 해당 backend로 확정.
+- 런타임 안정성: llama-server 크래시 시 rune-embedder가 자동 재기동 (throttle 10s)
+- 레이턴시: localhost HTTP RTT 수 ms + forward pass 수십~수백 ms
 
 ## 모델 · 디스크
 
@@ -295,13 +295,9 @@ internal/
   │   └── types.go             # EmbedRequest · EmbedResponse
   ├── backend/
   │   ├── interface.go         # type Backend { Embed(ctx, []string) ([][]float32, error) }
-  │   ├── onnx.go              # ONNX Runtime Go (option A)
-  │   └── llama.go             # llama-server supervisor (option B)
-  ├── tokenizer/               # (option A만. option B는 llama-server 내장)
-  │   └── hf.go                # daulet/tokenizers wrapper
+  │   └── llama.go             # llama-server supervisor (D29)
   ├── model/
-  │   ├── download.go          # GitHub Release · SHA256 검증
-  │   └── loader.go            # 파일 경로 → backend.Load
+  │   └── loader.go            # 모델 경로 검증 (llama-server가 로드 담당)
   └── obs/
       ├── slog.go
       └── metrics.go

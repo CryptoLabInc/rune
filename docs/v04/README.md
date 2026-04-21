@@ -23,7 +23,8 @@ docs/v04/
 ├── decisions.md                     # ⭐ 결정 트래커 (모든 결정 — 가벼운 것부터 중대한 것까지)
 ├── flows/                           # end-to-end flow 설계
 │   ├── capture.md                  # Capture 7-phase 전체 flow (D1~D20)
-│   └── recall.md                   # Recall 7-phase 전체 flow (D21~D28)
+│   ├── recall.md                   # Recall 7-phase 전체 flow (D21~D28)
+│   └── lifecycle.md                # 나머지 6개 MCP tool 설계 (D29)
 ├── components/                      # 컴포넌트별 설계
 │   ├── rune-mcp.md                 # 세션별 MCP (Go)
 │   ├── rune-embedder.md            # 공유 embedder 데몬
@@ -59,12 +60,13 @@ docs/v04/
 |---|---|
 | 아키텍처 방향 | ✅ 결정됨 (세션별 MCP + 공유 embedder) |
 | rune-mcp 설계 | 🟢 Phase 1-7 결정 완료 (`flows/capture.md`) |
-| rune-embedder 설계 | 🟡 초안 · 런타임(ONNX vs llama-server) 미정 |
+| rune-embedder 설계 | ✅ 확정 (llama-server, D29) |
 | Vault 연동 | ✅ 기존 Python 구조 유지 |
 | envector 연동 | 🟡 SDK 조건 완화 PR 대기 |
 | AES-MAC envelope | 🔵 Deferred (post-MVP) |
 | Capture flow | ✅ 완료 (D1~D20) |
 | Recall flow | ✅ 완료 (D21~D28) |
+| Lifecycle flow | ✅ 완료 (6 tool bit-identical 포팅) |
 | 벤치마크 계획 | 🟡 초안 |
 
 ## 이전 문서와의 관계
