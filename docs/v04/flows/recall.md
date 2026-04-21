@@ -10,7 +10,7 @@ rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 
 
 1. rune-mcp가 stdio로 MCP tool call 수신 (query, topk, domain, status, since)
 2. Query 파싱 — intent · time scope · entity · keyword · expansion 생성 (English regex)
-3. rune-embedder에 expansion 전체 batch 임베딩 요청
+3. `runed` (외부 gRPC 데몬)에 expansion 전체 batch 임베딩 요청
 4. envector `Score` N회 (expansion 수만큼) 병렬 + Vault `DecryptScores` 병렬
 5. 중복 제거 → top-k × 2 후보에 대해 `GetMetadata` → AES envelope 복호화
 6. Rerank — `(0.7 × raw + 0.3 × decay) × status_mul` 후 filter 적용 → top-k
@@ -19,7 +19,7 @@ rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 
 **핵심 원칙**:
 - Python `mcp/server/server.py` + `agents/retriever/*.py` 동작과 bit-identical
 - **agent-delegated**: query translation은 agent 담당 (D21), synthesis도 agent 담당 (raw results 반환)
-- 모델 연산은 rune-embedder 위임 · FHE 복호화는 Vault 위임 · AES envelope 복호화는 rune-mcp 직접
+- 모델 연산은 `runed` 위임 (gRPC, D30) · FHE 복호화는 Vault 위임 · AES envelope 복호화는 rune-mcp 직접
 
 ## 전체 시퀀스
 
@@ -27,7 +27,7 @@ rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 
 sequenceDiagram
     participant Agent as retriever 에이전트
     participant MCP as rune-mcp
-    participant Embedder as rune-embedder
+    participant Embedder as runed (gRPC)
     participant Envector as envector
     participant Vault as Vault
 
@@ -35,7 +35,7 @@ sequenceDiagram
     Note over MCP: Phase 1: state 검사 · 인자 검증 (topk <= 10)
     Note over MCP: Phase 2: query 파싱 (intent/time/entity/keyword/expansion)
 
-    MCP->>Embedder: POST /v1/embed (expansion N개 batch)
+    MCP->>Embedder: EmbedBatch(expansions)
     Embedder-->>MCP: N × vector[1024]
     Note over MCP: Phase 3 완료
 
@@ -472,12 +472,12 @@ Phase 2는 **에러 반환 없음**. 빈 쿼리도 `Parsed{}` 구조체로 downs
 
 ---
 
-## Phase 3 — Batch embedding
+## Phase 3 — Batch embedding (runed EmbedBatch)
 
 ### 책임
-- Phase 2 `ExpandedQueries` 중 **상위 3개**를 rune-embedder로 batch 임베딩 (D22, D23)
+- Phase 2 `ExpandedQueries` 중 **상위 3개**를 외부 `runed` 데몬에 batch 임베딩 요청 (D22, D23, D30)
 - 3 (혹은 그 이하) × `[1024]float32` 벡터 수신
-- Capture Phase 6의 embedder API 재사용 (D16)
+- Capture Phase 3/6의 embedder 클라이언트와 동일 (`RunedService.EmbedBatch`)
 
 ### Python 대비
 
@@ -487,7 +487,7 @@ for expanded_query in query.expanded_queries[:3]:
     query_vector = self._embedding.embed_single(query_text)  # 3× round-trip
 ```
 
-Go는 **batch 1회**로 변경 (D23). 3× HTTP RTT → 1× RTT. 품질 동일.
+Go는 **batch 1회**로 변경 (D23). 3× RTT → 1× RTT. 품질 동일.
 
 ### 구현 형태
 
@@ -498,54 +498,58 @@ if len(exps) > 3 {
     exps = exps[:3]  // D22 cap
 }
 
-// Embedder 호출 (Capture Phase 6과 동일 API)
-req := embedder.EmbedRequest{Texts: exps}
-resp, err := deps.embedder.Embed(ctx, req)
+// runed EmbedBatch 호출 (capture와 공용 클라이언트)
+vectors, err := deps.embedder.EmbedBatch(ctx, exps)
 if err != nil {
-    // D7 retry policy backoff [0, 500ms, 2s] 이미 adapter에 내장
+    // D7 retry [0, 500ms, 2s]는 adapter 내부에서 처리
     return nil, wrapEmbedError(err)
 }
-// resp.Vectors: [][]float32, len == len(exps)
+// vectors: [][]float32, len == len(exps), 각 len == InfoSnapshot.VectorDim
 ```
 
-### Embedder 요청/응답 계약
+### 요청/응답 계약 (proto)
 
-Capture Phase 6에서 이미 정의된 API 그대로 사용:
+`components/runed-integration.md` 참조. 요약:
 
-```http
-POST /v1/embed  (unix socket: ~/.rune/embedder.sock — D6)
-Content-Type: application/json
+```
+rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
 
-{"texts": ["why did we choose postgresql?", "decision why did we ...", "rationale why did we ..."]}
+message EmbedBatchRequest { repeated string texts = 1; }
+message EmbedBatchResponse { repeated EmbedResponse embeddings = 1; }
+message EmbedResponse      { repeated float vector = 1 [packed = true]; }
 ```
 
-응답:
-```json
-{"vectors": [[...1024 floats...], [...], [...]], "model": "bge-large-en-v1.5", "dim": 1024}
-```
+- L2-normalize는 runed가 자동 수행 (opt-out 없음)
+- `len(embeddings) == len(texts)` 보장 (runed 계약)
+- 각 `vector`의 길이는 `Info.vector_dim` (1024)
 
 ### 관련 결정
-- **D6**: embedder socket 경로 빌드 고정 `~/.rune/embedder.sock`
 - **D7**: embedder 호출 retry backoff `[0, 500ms, 2s]`
 - **D16**: capture multi-record batch embedding → recall expansion에도 동일 적용
 - **D22**: expansion search cap `[:3]` 유지 (Python 동일)
 - **D23**: recall embedding = batch 1회 (per-query 아님)
+- **D30**: runed gRPC 프로토콜 채택 (RunedService)
 
-### 에러
-- Embedder 연결 실패 (3회 retry 후에도) → `EmbedderUnavailableError`
-- Embedder가 500/400 반환 → `EmbedError(upstream message)`
-- 벡터 dim 불일치 (1024 아님) → `EmbedError("unexpected dim")` — D6 쪽 빌드 고정값과 교차 검증
-- 반환 벡터 개수 불일치 (`len(vectors) != len(texts)`) → `EmbedError("vector count mismatch")`
+### 에러 (runed gRPC status → 도메인 에러)
+| gRPC | 도메인 | retry |
+|---|---|---|
+| `UNAVAILABLE` (3회 retry 후) | `EmbedderUnavailableError` | 끝 |
+| `DEADLINE_EXCEEDED` | `EmbedderTimeoutError` | ✓ |
+| `RESOURCE_EXHAUSTED` | `EmbedderBusyError` | ✓ |
+| `INVALID_ARGUMENT` (text 길이 초과 등) | `EmbedderInvalidInputError` | ✗ |
 
-> Note: Phase 1에서 이미 `TrimSpace(query) == ""`를 차단 (D24)하므로 Phase 3 시점의 `texts`는 최소 1개 이상 보장. `""` expansion이 섞여 들어오진 않음 (Phase 2 `generateExpansions`가 cleaned를 base로 쓰므로, cleaned가 non-empty면 expansions도 non-empty).
+검증: `len(vectors) != len(exps)` → `EmbedderError("vector count mismatch")`. 각 vector 길이 `!= InfoSnapshot.VectorDim` → 모델 mismatch 에러.
+
+> Note: Phase 1에서 이미 `TrimSpace(query) == ""`를 차단 (D24)하므로 Phase 3 시점의 `texts`는 최소 1개 이상 보장. cleaned가 non-empty면 expansions도 non-empty.
 
 ### 구현 위치
-- `internal/adapters/embedder/client.go` — HTTP client (capture와 공용)
+- `internal/adapters/embedder/client.go` — gRPC 래퍼 (capture와 공용)
 - `internal/service/recall.go` — Phase 3 dispatch
+- 상세: `components/runed-integration.md`
 
 ### 테스트 전략
-- Unit: embedder mock으로 batch 요청 body 검증 (`texts=[3]` 들어가는지)
-- Integration: 실제 embedder 기동 후 3-query batch가 1 RTT로 처리되는지 timing 측정
+- Unit: `runedv1.RunedServiceClient` mock으로 `EmbedBatch` 요청 `texts` 검증
+- Integration: 실 runed에 3-query batch → 1 RTT timing 측정
 - 벡터 개수·dim 실측 assertion
 
 ---
@@ -1305,7 +1309,7 @@ Phase 7 자체는 **에러 반환 없음**. Results가 비어도 `{ok: true, fou
 |---|---|
 | Phase 1 | D2 (MCP SDK), D24 (빈 쿼리 early reject) |
 | Phase 2 | D21 (multilingual 처리) |
-| Phase 3 | D6, D7, D16, D22 (cap `[:3]`), D23 (batch 1회) |
+| Phase 3 | D7, D16, D22 (cap `[:3]`), D23 (batch 1회), D30 (gRPC) — D6 Archived |
 | Phase 4 | D25 (순차 실행, MVP) |
 | Phase 5 | D26 (AES decrypt Vault 위임 + legacy format + per-entry fallback) |
 | Phase 6 | D25, D27 (phase_chain expansion 유지) + 상수 Python 동일 |

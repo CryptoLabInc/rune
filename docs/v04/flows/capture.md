@@ -10,7 +10,7 @@ rune-mcp가 scribe 에이전트의 `rune_capture` tool 호출을 처리하는 en
 
 1. rune-mcp가 stdio로 MCP tool call 수신
 2. 입력 검증 + 임베딩 대상 텍스트 선택
-3. rune-embedder에 임베딩 요청 (novelty 검사용 1회)
+3. `runed` (외부 데몬)에 gRPC로 임베딩 요청 (novelty 검사용 1회)
 4. envector + Vault로 기존 레코드 대비 유사도 계산 → 분류
 5. `near_duplicate` 면 거부 · 아니면 record_builder로 DecisionRecord 조립
 6. (필요 시 multi-record 추가 임베딩 batch) AES envelope 생성 + envector.Insert
@@ -19,7 +19,7 @@ rune-mcp가 scribe 에이전트의 `rune_capture` tool 호출을 처리하는 en
 **핵심 원칙**:
 - Python `mcp/server/server.py` + `agents/scribe/record_builder.py` 동작과 bit-identical
 - agent-delegated 전제 (LLM fallback 제거, `pre_extraction` 필수)
-- 모델 연산은 rune-embedder 위임 · FHE 복호화는 Vault 위임 · AES envelope은 rune-mcp 직접
+- 모델 연산은 `runed` 위임 (gRPC, D30) · FHE 복호화는 Vault 위임 · AES envelope은 rune-mcp 직접
 
 ## 전체 시퀀스
 
@@ -27,7 +27,7 @@ rune-mcp가 scribe 에이전트의 `rune_capture` tool 호출을 처리하는 en
 sequenceDiagram
     participant Agent as scribe 에이전트
     participant MCP as rune-mcp
-    participant Embedder as rune-embedder
+    participant Embedder as runed (gRPC)
     participant Envector as envector
     participant Vault as Vault
 
@@ -35,7 +35,7 @@ sequenceDiagram
     Note over MCP: Phase 1: state 검사 · JSON 파싱
     Note over MCP: Phase 2: 검증 + text_to_embed 선택
 
-    MCP->>Embedder: POST /v1/embed (1 text)
+    MCP->>Embedder: Embed(text)
     Embedder-->>MCP: vector[1024]
     Note over MCP: Phase 3 완료
 
@@ -53,7 +53,7 @@ sequenceDiagram
     else novel/related/evolution
         Note over MCP: Phase 5a: record_builder → N records<br/>(PII 마스킹 · domain 매핑 · certainty 규칙)
 
-        MCP->>Embedder: POST /v1/embed (N texts batch)
+        MCP->>Embedder: EmbedBatch(texts)
         Embedder-->>MCP: N vectors
 
         Note over MCP: Phase 5b: AES envelope × N
@@ -141,48 +141,56 @@ func PickTextToEmbed(extracted map[string]any) string {
 
 ---
 
-## Phase 3 — rune-embedder HTTP 호출
+## Phase 3 — runed Embed/EmbedBatch gRPC 호출
 
 ### 책임
-- unix socket 기반 HTTP client로 `/v1/embed` 호출
-- 단일 텍스트 또는 batch 지원
+- 외부 `runed` 데몬에 gRPC로 임베딩 요청 (D30)
+- 단일 텍스트는 `Embed`, 다수는 `EmbedBatch`
 - retry + dim 검증 + 에러 매핑
 
 ### 구현 형태
 ```go
-// internal/adapters/embedder/client.go
-type Client struct { http *http.Client; baseURL string }
-
-func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-    // POST /v1/embed {"texts": [...]}
-    // 응답 dim 검증 · 개수 검증
-}
-func (c *Client) EmbedOne(ctx context.Context, text string) ([]float32, error) {
-    vs, err := c.Embed(ctx, []string{text})
-    if err != nil { return nil, err }
-    return vs[0], nil
+// internal/adapters/embedder/client.go (gRPC 래퍼)
+// 상세는 components/runed-integration.md 참조
+type Client interface {
+    EmbedSingle(ctx context.Context, text string) ([]float32, error)
+    EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
+    Info(ctx context.Context) (InfoSnapshot, error)
 }
 
-// retry: [0, 500ms, 2s] 3회
+// capture novelty check (1 text)
+vec, err := s.embedder.EmbedSingle(ctx, embedText)
 ```
 
-### 관련 결정
-- **D6**: socket 경로 빌드 고정 `~/.rune/embedder.sock` (`RUNE_EMBEDDER_SOCKET` env override for test)
-- **D7**: retry backoff `[0, 500ms, 2s]`
-- **D8**: 부팅 시 embedder 폴링 안 함 (launchd 선기동 전제)
-- **D9**: 모델 always loaded (idle eviction 미도입. configurable option은 미래 선택지)
+Dial:
+```go
+conn, _ := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
+svc := runedv1.NewRunedServiceClient(conn)
+```
 
-### 에러
-| 상황 | 처리 |
-|---|---|
-| socket 파일 없음 / connection refused | `EMBEDDER_UNAVAILABLE` (retryable) |
-| 503 "starting" | `EMBEDDER_NOT_READY` (retryable) |
-| timeout | `EMBEDDER_TIMEOUT` (retryable) |
-| dim != 1024 | 비-retryable 에러 (모델 mismatch 방어) |
+Retry `[0, 500ms, 2s]` × 3 (D7): `UNAVAILABLE` · `DEADLINE_EXCEEDED` · `RESOURCE_EXHAUSTED`에 대해.
+
+### 관련 결정
+- **D7**: retry backoff `[0, 500ms, 2s]`
+- **D8**: 부팅 시 Health 폴링 안 함. 첫 embed 실패 시 Health로 분류
+- **D30**: 통신 프로토콜 = gRPC (`RunedService`). Socket 경로는 env/config로 받음 (runed 팀 convention 따름)
+
+### 에러 (runed gRPC status → 도메인 매핑)
+| gRPC | 도메인 에러 | retry |
+|---|---|---|
+| `UNAVAILABLE` | `EmbedderUnavailableError` | ✓ |
+| `DEADLINE_EXCEEDED` | `EmbedderTimeoutError` | ✓ |
+| `RESOURCE_EXHAUSTED` | `EmbedderBusyError` | ✓ |
+| `INVALID_ARGUMENT` | `EmbedderInvalidInputError` | ✗ |
+| 기타 | `EmbedderError(wrap)` | ✗ |
+
+dim 검증: `Info.vector_dim`(1024 예상)과 실제 응답 `vector` 길이 불일치 시 비-retryable 에러 (모델 mismatch 방어).
 
 ### 구현 위치
-- `internal/adapters/embedder/client.go`
-- `internal/policy/embedder.go` (retry backoff 상수)
+- `internal/adapters/embedder/client.go` (gRPC 래퍼)
+- `internal/adapters/embedder/info_cache.go` (Info `sync.Once` 캐시)
+- `internal/adapters/embedder/retry.go` (D7 backoff)
+- 상세: `components/runed-integration.md`
 
 ---
 
@@ -260,7 +268,7 @@ embedTexts := make([]string, len(records))
 for i, r := range records {
     embedTexts[i] = selectEmbedTextForRecord(r)  // reusable_insight > payload.text
 }
-vectors, err := s.embedder.Embed(ctx, embedTexts)  // 1회 batch 호출
+vectors, err := s.embedder.EmbedBatch(ctx, embedTexts)  // runed EmbedBatch 1회
 
 // Phase 5c: AES envelope
 envelopes := make([]string, len(records))
@@ -451,7 +459,7 @@ return &domain.CaptureResponse{
 |---|---|
 | 1 (MCP 진입점) | D2 |
 | 2 (검증 + text 선택) | D3, D4, D5 |
-| 3 (rune-embedder 호출) | D6, D7, D8, D9 |
+| 3 (runed 호출) | D7, D8, D30 (D6, D9 Archived — runed 책임) |
 | 4 (Novelty check) | D10, D11, D12 |
 | 5 (record_builder + AES) | D13, D14, D15, D16 |
 | 6 (envector.Insert) | D17, D18 |
@@ -485,7 +493,9 @@ internal/policy/
 └── payload_text.go                            # templates 이식
 
 internal/adapters/
-├── embedder/client.go                         # Phase 3 HTTP client
+├── embedder/client.go                         # Phase 3 gRPC client (runed)
+├── embedder/info_cache.go                      # Info sync.Once 캐시
+├── embedder/retry.go                           # D7 backoff
 ├── envector/client.go                         # Phase 4·6 SDK 래퍼
 ├── envector/aes_ctr.go                        # Phase 5 Seal / Open
 ├── vault/client.go                            # Phase 4 DecryptScores
@@ -506,7 +516,7 @@ internal/domain/
 - **Unit (policy/)**: pure function · golden fixture Python ↔ Go 비교
 - **Unit (validate, adapters)**: mock 기반
 - **Concurrency (synctest)**: retry backoff · state 전환 결정적 테스트 (Go 1.25 `testing/synctest`)
-- **Integration (`//go:build integration`)**: 실 rune-embedder + 실 envector + 실 Vault 왕복
+- **Integration (`//go:build integration`)**: 실 runed + 실 envector + 실 Vault 왕복
 - **E2E**: rune-mcp 프로세스 spawn + stdio JSON-RPC + 에이전트 시뮬레이션
 
 ## 추후 작업 (capture flow 이후)
