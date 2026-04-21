@@ -110,6 +110,50 @@ func runBootLoop(cfg *Config) {
 - boot loop는 **데몬 수명 내내** 백그라운드 유지 (Vault 장애 복구 반응)
 - capture/recall 요청은 `state.Load()` 확인 후 상태에 따라 분기
 
+## MCP 서버 구현 — 공식 SDK 채택
+
+`github.com/modelcontextprotocol/go-sdk` (v1.5.0+, stable) 사용. 이유·비교는 `decisions.md` D2 참조.
+
+```go
+import "github.com/modelcontextprotocol/go-sdk/mcp"
+
+func setupServer(deps *Deps) *mcp.Server {
+    srv := mcp.NewServer(&mcp.Implementation{Name: "rune-mcp", Version: "0.4.0"}, nil)
+
+    mcp.AddTool(srv, &mcp.Tool{
+        Name: "rune_capture", Description: "Capture a decision record",
+    }, makeCaptureHandler(deps))
+
+    mcp.AddTool(srv, &mcp.Tool{Name: "rune_recall", /* ... */}, makeRecallHandler(deps))
+    // ... 8 tools 총 등록
+
+    return srv
+}
+
+func main() {
+    cfg := lifecycle.LoadConfig()
+    deps := lifecycle.NewDeps(ctx, cfg)
+    go lifecycle.RunBootLoop(ctx, deps)
+
+    srv := setupServer(deps)
+    if err := srv.Run(ctx, &mcp.StdioTransport{}); err != nil {
+        slog.Error("serve", "err", err)
+        os.Exit(1)
+    }
+}
+```
+
+SDK가 자동 처리:
+- stdio JSON-RPC 파싱·직렬화
+- `initialize` handshake · capabilities negotiation
+- `tools/list`에 tool schema 자동 노출 (Go struct + `jsonschema:` tag)
+- `tools/call` dispatch + input 검증
+- notification · cancellation 전파
+
+rune-mcp가 책임지는 것:
+- 각 tool handler의 비즈니스 로직 (state check → service call → response 포맷)
+- `Deps` 주입 구조 (envector client · vault client · embedder client · state machine · logger)
+
 ## MCP Tools (8개)
 
 Python `mcp/server/server.py`가 노출하는 8개 tool을 그대로 유지. 이름·파라미터·응답 shape bit-identical.

@@ -20,38 +20,50 @@ Python의 "세션당 MCP 프로세스에 embedding model까지 포함" 구조가
 docs/v04/
 ├── README.md                       # 이 파일 (index)
 ├── architecture.md                  # 3-프로세스 아키텍처 · 전체 그림
+├── decisions.md                     # ⭐ 결정 트래커 (모든 결정 — 가벼운 것부터 중대한 것까지)
+├── flows/                           # end-to-end flow 설계
+│   └── capture.md                  # Capture 7-phase 전체 flow (결정 D1~D20 포함)
 ├── components/                      # 컴포넌트별 설계
 │   ├── rune-mcp.md                 # 세션별 MCP (Go)
 │   ├── rune-embedder.md            # 공유 embedder 데몬
 │   ├── vault-integration.md        # Vault gRPC 연동
 │   └── envector-integration.md     # envector-go SDK 연동
-├── open-questions.md                # 미결 항목 · 블로킹
+├── open-questions.md                # 미결 항목 · 설계 디테일 TBD
 └── research/                        # 조사 · 근거 자료
     └── python-codebase-map.md      # 현재 Python 코드 → 새 구조 매핑
 ```
+
+**`decisions.md` vs `open-questions.md` 구분**:
+- `decisions.md` — **모든 결정** 트래커. 가벼운 구현 선택(에러 코드 명명 등)부터 중대 결정(SDK 선택·보안 모델)까지 전부. 상태 마커 (Blocking/Pending/Deferred/Decided)로 무게 구분
+- `open-questions.md` — 아직 "결정 후보"로 정리 안 된 조사 중 항목
 
 ## 읽는 순서
 
 처음 보는 사람:
 1. 이 README → 전체 요약
 2. `architecture.md` → 왜·무엇을·어떻게
-3. `components/*.md` → 구현 수준 상세
-4. `open-questions.md` → 아직 결정 안 된 것들
+3. `flows/capture.md` → 실제 end-to-end 흐름 (가장 구체적)
+4. `components/*.md` → 컴포넌트별 책임·API
+5. `decisions.md` → 결정 근거·대안
+6. `open-questions.md` → 아직 결정 안 된 것들
 
 기존 Python 코드 아는 사람:
 1. `research/python-codebase-map.md` → 뭐가 어디로 옮겨지는가
-2. `components/*.md` → 구체 설계
+2. `flows/capture.md` → Phase 단위 Python ↔ Go 매핑
+3. `components/*.md` → 구체 설계
 
 ## 상태 (2026-04-20)
 
 | 영역 | 상태 |
 |---|---|
 | 아키텍처 방향 | ✅ 결정됨 (세션별 MCP + 공유 embedder) |
-| rune-mcp 설계 | 🟡 초안 |
+| rune-mcp 설계 | 🟢 Phase 1-7 결정 완료 (`flows/capture.md`) |
 | rune-embedder 설계 | 🟡 초안 · 런타임(ONNX vs llama-server) 미정 |
 | Vault 연동 | ✅ 기존 Python 구조 유지 |
 | envector 연동 | 🟡 SDK 조건 완화 PR 대기 |
-| AES-MAC envelope | 🔴 블로킹 |
+| AES-MAC envelope | 🔵 Deferred (post-MVP) |
+| Capture flow | ✅ 완료 (D1~D20) |
+| Recall flow | 🟡 미작성 |
 | 벤치마크 계획 | 🟡 초안 |
 
 ## 이전 문서와의 관계
