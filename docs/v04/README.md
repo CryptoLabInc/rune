@@ -8,11 +8,13 @@
 
 Python의 "세션당 MCP 프로세스에 embedding model까지 포함" 구조가 갖는 **모델 메모리 중복 문제**만 제거하고, 나머지는 Python 구조에 가깝게 유지한다:
 
-- **`rune-mcp`** (이 프로젝트): 세션당 1개. stdio JSON-RPC. Claude Code가 spawn. Python MCP를 Go로 대체
-- **`runed`** (외부 데몬, 별도 팀 관리): 머신당 1개 상주. 임베딩 모델 전담. gRPC over unix socket (`RunedService`)
+- **`rune-mcp`** (이 프로젝트): 세션당 1개. stdio JSON-RPC. Claude Code가 spawn. **Python MCP를 Go로 포팅** (임베딩 제외)
+- **`embedder`** (별도 프로세스, 가칭): 머신당 1개 상주. 임베딩 모델 전담. gRPC over unix socket
 - **Vault · envector**: 각 MCP가 독립적으로 gRPC 연결
 
-이득: 모델이 세션별로 복제되지 않아 메모리 N× 증가 제거. 동시에 세션 격리·Python 구조 유사성을 유지해 마이그레이션 cost 최소화. `runed`는 외부 컴포넌트이므로 본 프로젝트는 **gRPC 클라이언트로만 사용**하며 모델·런타임 관리는 하지 않는다.
+이득: 모델이 세션별로 복제되지 않아 메모리 N× 증가 제거. 동시에 세션 격리·Python 구조 유사성을 유지해 마이그레이션 cost 최소화. `embedder`는 외부 컴포넌트이므로 본 프로젝트는 **gRPC 클라이언트로만 사용**하며 모델·런타임 관리는 하지 않는다.
+
+> **네이밍 히스토리**: 초기 설계에서 "runed"라는 이름으로 중앙화 통합 데몬(Python MCP 대체 + 임베딩 내장)을 구상했으나 폐기. 대신 **rune-mcp (Python MCP의 Go 포팅)** + **embedder (임베딩 전담 별도 프로세스)** 구조로 진행.
 
 ## 디렉토리 구조
 
@@ -27,7 +29,7 @@ docs/v04/
 │   └── lifecycle.md                # 나머지 6개 MCP tool 설계
 ├── components/                      # 컴포넌트별 설계
 │   ├── rune-mcp.md                 # 세션별 MCP (Go)
-│   ├── runed-integration.md        # runed 외부 gRPC 데몬 클라이언트 가이드 (D30)
+│   ├── embedder-integration.md     # embedder 외부 gRPC 데몬 클라이언트 가이드 (D30)
 │   ├── vault-integration.md        # Vault gRPC 연동
 │   └── envector-integration.md     # envector-go SDK 연동
 ├── open-questions.md                # 미결 항목 · 설계 디테일 TBD
@@ -58,9 +60,9 @@ docs/v04/
 
 | 영역 | 상태 |
 |---|---|
-| 아키텍처 방향 | ✅ 결정됨 (세션별 MCP + 외부 runed) |
+| 아키텍처 방향 | ✅ 결정됨 (세션별 rune-mcp + 외부 embedder) |
 | rune-mcp 설계 | 🟢 Phase 1-7 결정 완료 (`flows/*.md`) |
-| runed 통합 (gRPC 클라이언트) | ✅ 확정 (D30, RunedService proto 계약) |
+| embedder 통합 (gRPC 클라이언트) | ✅ 확정 (D30, gRPC proto 계약) |
 | Vault 연동 | ✅ 기존 Python 구조 유지 |
 | envector 연동 | 🟡 SDK 조건 완화 PR 대기 |
 | AES-MAC envelope | 🔵 Deferred (post-MVP) |
@@ -79,8 +81,9 @@ docs/v04/
 
 ## 용어
 
-- **rune-mcp**: Go로 다시 쓴 세션별 MCP 바이너리. Python MCP의 대체. **본 프로젝트의 산출물**
-- **runed**: 임베딩 모델을 호스팅하는 외부 gRPC 데몬. **별도 팀 관리**. rune-mcp는 gRPC 클라이언트로만 사용 (RunedService proto 계약)
+- **rune-mcp**: Python MCP를 Go로 포팅한 세션별 바이너리 (임베딩 기능 제외). **본 프로젝트의 산출물**
+- **embedder**: 임베딩 모델을 호스팅하는 외부 gRPC 데몬 (가칭). 별도 프로세스. rune-mcp는 gRPC 클라이언트로만 사용
+- **runed**: ❌ 폐기된 이름. 초기 설계에서 "Python MCP 대체 + 임베딩 내장" 통합 데몬 의미였음. 현재는 사용 안 함
 - **Vault**: `rune-Vault` gRPC 서비스. FHE 키 관리 + 복호화 (`DecryptScores`/`DecryptMetadata`)
 - **envector**: enVector Cloud. FHE 벡터 저장·검색 (`Insert`/`Score`/`GetMetadata`)
 - **agent_dek**: 에이전트별 AES-256 DEK. metadata envelope 암호화용. Vault가 배포, rune 메모리에만

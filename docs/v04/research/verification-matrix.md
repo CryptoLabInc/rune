@@ -57,7 +57,7 @@
 | `searcher.py` `_apply_recency_weighting` | L273-300 | `flows/recall.md` L1063-1092 | ✅ 공식·상수 line-by-line 일치 |
 | `searcher.py` `_expand_phase_chains` (max_chains=2) | L306-365 | `flows/recall.md` L920-926 | ✅ 구현 일치 (단 문서 상태 충돌 — §B.1) |
 | `searcher.py` `_search_via_vault` (AES envelope 분류) | L375-470 | `flows/recall.md` L628-660 + L714-778 | ✅ 3-way 분류 + batch decrypt + per-entry fallback |
-| `searcher.py` `search_by_id` | L561-567 | `components/runed-integration.md` (EmbedSingle) | ✅ Go에서 명시 얇음 — 구현 가능 |
+| `searcher.py` `search_by_id` | L561-567 | `components/embedder-integration.md` (EmbedSingle) | ✅ Go에서 명시 얇음 — 구현 가능 |
 | `synthesizer.py` | 전체 | D28 agent-delegated (미포팅) | ✅ **의도적 제거** |
 
 ### A.3 Scribe (agents/scribe/) — D14 agent-delegated ✅
@@ -84,7 +84,7 @@
 | 항목 | Python | Go 문서 | 검증 |
 |---|---|---|---|
 | `config.py` schema (7 dataclass) | L26-97 | `components/rune-mcp.md` L207-226 (3-section Config) | ✅ |
-| `embedding_service.py` sbert/femb | L33-40 | `components/runed-integration.md` (외부 데몬 위임) | ✅ **의도적 이관** (D30) |
+| `embedding_service.py` sbert/femb | L33-40 | `components/embedder-integration.md` (외부 프로세스 위임) | ✅ **의도적 이관** (D30) |
 | `language.py` detect_language | L111-172 | D21 (agent-side translation) | ✅ **의도적 제거** |
 | `schemas/decision_record.py` 6 enum (Domain 19 / Sensitivity 3 / Status 4 / Certainty 3 / ReviewState 4 / SourceType 7) | L19-80 | Go internal/domain/ 가정, 명시적 정의 위치 없음 | ⚠️ **정의 위치 명시 필요** — §C.3 |
 
@@ -156,7 +156,7 @@
 |---|---|---|---|
 | 1 MCP entry, state gate | server.py:L698-710 + L1138-1160 | capture.md:L69-95 | ✅ |
 | 2 정규화 · text_to_embed | server.py:L1240-1268 | capture.md:L97-142 | ✅ |
-| 3 embed query (single) | server.py:L1341 | capture.md:L144-194 (runed.Embed gRPC) | ✅ D30 의도적 전환 |
+| 3 embed query (single) | server.py:L1341 | capture.md:L144-194 (embedder.Embed gRPC) | ✅ D30 의도적 전환 |
 | 4 novelty: Score + DecryptScores | server.py:L1342-1361 | capture.md:L197-250 | ✅ top_k=3 for novelty, classify by 0.3/0.7/0.95 |
 | 5 records build + embed batch + AES envelope | server.py:L1333, L1375 | capture.md:L252-323 | ✅ phase chain max 7, L1275 |
 | 6 envector.Insert atomic | server.py:L1377-1382 | capture.md:L326-362 | ✅ |
@@ -261,7 +261,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 | `components/envector-integration.md` | 1회 |
 | **합계** | **48회** (v1 matrix의 "7곳" 주장은 오류) |
 
-**상황**: D6/D9/D29가 Archived되어 runed 팀 책임이 되었으므로 `rune-embedder`라는 이름 자체가 외부 명칭 `runed`로 바뀌어야 함. 본문에 HTTP+JSON 기반 구 설계 서술도 다수 (decisions.md:L1331, L1872, L1890 등).
+**상황**: D6/D9/D29가 Archived되어 embedder 담당 범위가 되었으므로 `rune-embedder`라는 이름 자체가 `embedder`로 바뀌어야 함. 본문에 HTTP+JSON 기반 구 설계 서술도 다수 (decisions.md:L1331, L1872, L1890 등). 추가로 중간 단계에서 "runed"로 잘못 rename된 부분도 있음 → `embedder`로 재정리. **해소됨** (2026-04-22).
 
 **권고**: 
 1. 단순 rename이 아니라 **섹션 단위 재작성 필요한 곳** (구 HTTP 설계 기반 서술): decisions.md §D6, §D7 원문, §D15, §D29 — Archived 마커 붙이고 본문은 그대로 두는 것이 히스토리 보존 측면에서 유리
@@ -271,7 +271,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 
 - **Python**: model_identity 전용 로깅 없음 (실제 코드 확인)
 - **Go decisions.md:L2031**: "MVP에서는 로깅만"
-- **권고**: `components/runed-integration.md` Info cache 섹션에 "첫 Info 조회 시 `model_identity`를 `~/.rune/logs/startup.log`에 구조화 로깅" 형식으로 명시.
+- **권고**: `components/embedder-integration.md` Info cache 섹션에 "첫 Info 조회 시 `model_identity`를 `~/.rune/logs/startup.log`에 구조화 로깅" 형식으로 명시.
 
 ### C.8 ⚠️ `capture.md:L522` "추후 작업" stale — **유효**
 
@@ -300,12 +300,12 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 | Q | 상태 | 블로킹? |
 |---|---|---|
 | Q1 AES envelope MAC | 🔵 Deferred | 아니오 (Post-MVP) |
-| Q2 embedder 엔진 | 📦 Archived (runed 결정) | 아니오 |
+| Q2 embedder 엔진 | 📦 Archived (embedder 담당 범위) | 아니오 |
 | Q3 Multi-MCP ActivateKeys race | 🟡 Pending (실측 필요, 병렬 가능) | 아니오 |
 | Q4 envector-go PR | 🟡 Pending (외부 머지) | 아니오 (병렬) |
 | Q5 설치 순서 | 🟡 Pending | 아니오 |
 | Q6 버전 호환 | 🟡 Pending | 아니오 |
-| Q7 socket 보안 | 🟡 Pending (runed 쪽) | 아니오 |
+| Q7 socket 보안 | 🟡 Pending (embedder 쪽) | 아니오 |
 | Q8 capture_log 저장 | 🟡 Pending (부분 구현) | 아니오 |
 | Q9 Vault 오타 UX | 🟡 Pending (부분 구현) | 아니오 |
 

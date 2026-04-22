@@ -142,7 +142,7 @@
 **searcher.py (576 LoC)**:
 - recency 공식 `(0.7×raw + 0.3×decay) × status_mul`, half-life 90일
 - status multiplier `accepted 1.0 / proposed 0.9 / superseded 0.5 / reverted 0.3`
-- phase chain expansion (MVP DEFER)
+- phase chain expansion (MVP 유지 — D27)
 - group assembly
 - → **rune-mcp `internal/policy/rerank.go` + `internal/service/recall.go`**
 

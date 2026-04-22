@@ -10,7 +10,7 @@ rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 
 
 1. rune-mcp가 stdio로 MCP tool call 수신 (query, topk, domain, status, since)
 2. Query 파싱 — intent · time scope · entity · keyword · expansion 생성 (English regex)
-3. `runed` (외부 gRPC 데몬)에 expansion 전체 batch 임베딩 요청
+3. `embedder` (외부 gRPC 프로세스)에 expansion 전체 batch 임베딩 요청
 4. envector `Score` N회 (expansion 수만큼) 병렬 + Vault `DecryptScores` 병렬
 5. 중복 제거 → top-k × 2 후보에 대해 `GetMetadata` → AES envelope 복호화
 6. Rerank — `(0.7 × raw + 0.3 × decay) × status_mul` 후 filter 적용 → top-k
@@ -19,7 +19,7 @@ rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 
 **핵심 원칙**:
 - Python `mcp/server/server.py` + `agents/retriever/*.py` 동작과 bit-identical
 - **agent-delegated**: query translation은 agent 담당 (D21), synthesis도 agent 담당 (raw results 반환)
-- 모델 연산은 `runed` 위임 (gRPC, D30) · FHE 복호화는 Vault 위임 · AES envelope 복호화는 rune-mcp 직접
+- 모델 연산은 `embedder` 위임 (gRPC, D30) · FHE 복호화는 Vault 위임 · AES envelope 복호화는 rune-mcp 직접
 
 ## 전체 시퀀스
 
@@ -27,7 +27,7 @@ rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 
 sequenceDiagram
     participant Agent as retriever 에이전트
     participant MCP as rune-mcp
-    participant Embedder as runed (gRPC)
+    participant Embedder as embedder (gRPC)
     participant Envector as envector
     participant Vault as Vault
 
@@ -472,12 +472,12 @@ Phase 2는 **에러 반환 없음**. 빈 쿼리도 `Parsed{}` 구조체로 downs
 
 ---
 
-## Phase 3 — Batch embedding (runed EmbedBatch)
+## Phase 3 — Batch embedding (embedder EmbedBatch)
 
 ### 책임
-- Phase 2 `ExpandedQueries` 중 **상위 3개**를 외부 `runed` 데몬에 batch 임베딩 요청 (D22, D23, D30)
+- Phase 2 `ExpandedQueries` 중 **상위 3개**를 외부 `embedder` 프로세스에 batch 임베딩 요청 (D22, D23, D30)
 - 3 (혹은 그 이하) × `[1024]float32` 벡터 수신
-- Capture Phase 3/6의 embedder 클라이언트와 동일 (`RunedService.EmbedBatch`)
+- Capture Phase 3/6의 embedder 클라이언트와 동일 (`EmbedderService.EmbedBatch`)
 
 ### Python 대비
 
@@ -498,7 +498,7 @@ if len(exps) > 3 {
     exps = exps[:3]  // D22 cap
 }
 
-// runed EmbedBatch 호출 (capture와 공용 클라이언트)
+// embedder EmbedBatch 호출 (capture와 공용 클라이언트)
 vectors, err := deps.embedder.EmbedBatch(ctx, exps)
 if err != nil {
     // D7 retry [0, 500ms, 2s]는 adapter 내부에서 처리
@@ -509,7 +509,7 @@ if err != nil {
 
 ### 요청/응답 계약 (proto)
 
-`components/runed-integration.md` 참조. 요약:
+`components/embedder-integration.md` 참조. 요약:
 
 ```
 rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
@@ -519,8 +519,8 @@ message EmbedBatchResponse { repeated EmbedResponse embeddings = 1; }
 message EmbedResponse      { repeated float vector = 1 [packed = true]; }
 ```
 
-- L2-normalize는 runed가 자동 수행 (opt-out 없음)
-- `len(embeddings) == len(texts)` 보장 (runed 계약)
+- L2-normalize는 embedder가 자동 수행 (opt-out 없음)
+- `len(embeddings) == len(texts)` 보장 (embedder 계약)
 - 각 `vector`의 길이는 `Info.vector_dim` (1024)
 
 ### 관련 결정
@@ -528,9 +528,9 @@ message EmbedResponse      { repeated float vector = 1 [packed = true]; }
 - **D16**: capture multi-record batch embedding → recall expansion에도 동일 적용
 - **D22**: expansion search cap `[:3]` 유지 (Python 동일)
 - **D23**: recall embedding = batch 1회 (per-query 아님)
-- **D30**: runed gRPC 프로토콜 채택 (RunedService)
+- **D30**: embedder gRPC 프로토콜 채택
 
-### 에러 (runed gRPC status → 도메인 에러)
+### 에러 (embedder gRPC status → 도메인 에러)
 | gRPC | 도메인 | retry |
 |---|---|---|
 | `UNAVAILABLE` (3회 retry 후) | `EmbedderUnavailableError` | 끝 |
@@ -545,11 +545,11 @@ message EmbedResponse      { repeated float vector = 1 [packed = true]; }
 ### 구현 위치
 - `internal/adapters/embedder/client.go` — gRPC 래퍼 (capture와 공용)
 - `internal/service/recall.go` — Phase 3 dispatch
-- 상세: `components/runed-integration.md`
+- 상세: `components/embedder-integration.md`
 
 ### 테스트 전략
-- Unit: `runedv1.RunedServiceClient` mock으로 `EmbedBatch` 요청 `texts` 검증
-- Integration: 실 runed에 3-query batch → 1 RTT timing 측정
+- Unit: `embedderv1.EmbedderServiceClient` mock으로 `EmbedBatch` 요청 `texts` 검증
+- Integration: 실 embedder에 3-query batch → 1 RTT timing 측정
 - 벡터 개수·dim 실측 assertion
 
 ---

@@ -96,7 +96,7 @@ idx, err := client.Index(ctx,
 // rune-mcp가 AES envelope 생성 (SDK opaque)
 envelope, _ := aesctr.Seal(bundle.AgentDEK, bundle.AgentID, metadataJSON)
 
-// vector는 rune-embedder에서 이미 받았다고 가정
+// vector는 `embedder` 프로세스에서 이미 받았다고 가정 (D30 gRPC)
 result, err := idx.Insert(ctx, envector.InsertRequest{
     Vectors:  [][]float32{vec},
     Metadata: []string{string(envelope)},  // "{"a":...,"c":...}" JSON string

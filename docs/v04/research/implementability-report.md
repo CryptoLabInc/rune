@@ -14,7 +14,7 @@
 |---|---|---|---|
 | **Recall flow** | ✅ 95% Full | 0 | AES envelope 필드 의미 footnote |
 | **Lifecycle 6 tools** | ✅ 100% Full | 0 | 없음 |
-| **Vault/envector/runed adapter** | ✅ 95% Full | 0 | Q3 ActivateKeys race, envector-go SDK PR (외부 대기) |
+| **Vault/envector/embedder adapter** | ✅ 95% Full | 0 | Q3 ActivateKeys race, envector-go SDK PR (외부 대기) |
 | **Bootstrap · state machine · error** | 🟡 85% Full | 0 | `_maybe_reload_for_auto_provider` 결정 |
 | **Capture flow** | 🟡 **70% Full** | **2** | **tier2 필드 + templates.py 상세** |
 | **DecisionRecord schema** | 🟡 Partial | 0 | 6 enum 값 전수 명시 |

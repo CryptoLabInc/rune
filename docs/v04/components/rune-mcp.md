@@ -6,11 +6,11 @@ Claude Code(및 호환 에이전트)가 세션마다 spawn하는 Go 바이너리
 
 - Claude Code의 MCP 확장점을 구현하여 에이전트가 rune 기능에 접근하게 한다
 - 세션별 격리된 상태(Vault token, FHE 키, gRPC 연결)를 보유한다
-- Vault·envector·rune-embedder와 통신해 capture·recall 로직을 완결한다
-- 모델 추론은 **직접 하지 않고** rune-embedder에 위임한다
+- Vault·envector·`embedder`와 통신해 capture·recall 로직을 완결한다
+- 모델 추론은 **직접 하지 않고** 외부 `embedder` 프로세스(gRPC)에 위임한다 (D30)
 
 **책임이 아닌 것**:
-- 임베딩 모델 로드·실행 — rune-embedder 담당
+- 임베딩 모델 로드·실행 — `embedder` 외부 프로세스 담당
 - 전역 상태 공유 — 세션 간 공유 없음. 각 MCP는 독립
 - SecKey 관리 — Vault 소유, rune-mcp는 접근 안 함
 
@@ -163,7 +163,7 @@ Python `mcp/server/server.py`가 노출하는 8개 tool을 그대로 유지. 이
 - **처리**:
   1. 검증 (`phases[:7]`, `title[:60]`, `confidence clamp [0,1]`)
   2. `text_to_embed` 선택 (`reusable_insight > payload.text`, trim 후)
-  3. rune-embedder `/embed` 호출 (단일 텍스트)
+  3. `embedder.Embed(text)` gRPC 호출 (단일 텍스트, D30)
   4. envector `Score(vec)` → Vault `DecryptScores(blob)` → top-1 similarity
   5. `policy.ClassifyNovelty(sim)`
   6. `near_duplicate(≥0.95)`면 Insert 생략 → `{"ok":false, "reason":"near_duplicate", "similar_to":"<id>"}`
@@ -174,8 +174,8 @@ Python `mcp/server/server.py`가 노출하는 8개 tool을 그대로 유지. 이
 - **입력**: `query`, `topk`, `filters`
 - **처리**:
   1. `policy.ParseQuery(query)` → intent(31 regex), entities(4-stage), time scope, expanded[0..2]
-  2. rune-embedder `/embed` batch 호출 (expanded 최대 3개)
-  3. `errgroup` 병렬로 envector `Score` → Vault `DecryptScores` 3번
+  2. `embedder.EmbedBatch(texts)` gRPC 호출 (expanded 최대 3개, D23 batch 1회)
+  3. 순차로 envector `Score` → Vault `DecryptScores` 3번 (D25 sequential, Post-MVP 병렬화 고려)
   4. dedup + filter
   5. envector `GetMetadata(refs)` → AES envelope 배열
   6. 각 envelope을 rune-mcp가 로컬에서 AES-CTR 복호화 (`agent_dek` 사용)
@@ -298,7 +298,7 @@ Rotation: 초기엔 없음. 실측 후 lumberjack 등 검토.
 - **SensitiveFilter** (Python `_SensitiveFilter` 포팅): `sk-` · `api_` · `envector_` · `evt_` · `token=` · `Bearer ` 등 접두사 20자+ 자동 마스킹
 - **request_id**: 매 tool call에 UUID 부여, context로 전파. 로그·에러에 포함
 
-**Metric은 rune-mcp에 내장 안 함** — 세션 수가 가변이라 scrape하기 어렵고, 의미 있는 메트릭은 rune-embedder 쪽이 공유 지점이라 훨씬 유용. rune-mcp 모니터링은 slog의 structured events만.
+**Metric은 rune-mcp에 내장 안 함** — 세션 수가 가변이라 scrape하기 어렵고, 의미 있는 메트릭은 `embedder` 쪽이 공유 지점이라 훨씬 유용. rune-mcp 모니터링은 slog의 structured events만.
 
 ## 에러 처리
 
@@ -307,7 +307,7 @@ Rotation: 초기엔 없음. 실측 후 lumberjack 등 검토.
 | state != active | 503 status-specific (`starting`/`VAULT_PENDING`/`DORMANT`) |
 | Vault RPC 실패 | exp backoff 2-retry → `retryable=true` 에러 반환. 3회 연속이면 `waiting_for_vault` 전환 |
 | envector RPC 실패 | exp backoff 2-retry → `retryable=true` |
-| rune-embedder 연결 실패 | `embedder_unreachable` 에러. 에이전트에 retry 제안 |
+| `embedder` gRPC 연결 실패 | `embedder_unreachable` 에러 (D30 retry 정책). 에이전트에 retry 제안 |
 | AES 복호화 실패 | `metadata_corrupted` 에러. 해당 record만 skip하고 나머지 결과 반환 (partial degrade) |
 | Panic in handler | `recover()` middleware가 잡아 500 `INTERNAL_ERROR`. 다른 요청 무영향 |
 
@@ -315,7 +315,7 @@ Rotation: 초기엔 없음. 실측 후 lumberjack 등 검토.
 - tool call 전체: 30s (context.WithTimeout)
 - Vault gRPC: 10s
 - envector gRPC: 10s
-- embedder HTTP: 5s
+- `embedder` gRPC: 5s (D30, unix socket)
 
 ## 패키지 레이아웃 (rune-mcp 한정)
 
@@ -334,7 +334,7 @@ internal/
   │   ├── config/                   # 3-section loader
   │   ├── vault/                    # gRPC client
   │   ├── envector/                 # SDK + AES envelope
-  │   ├── embedder/                 # HTTP client to rune-embedder
+  │   ├── embedder/                 # gRPC client to `embedder` (external process, D30)
   │   └── logio/                    # capture_log.jsonl flock append
   ├── policy/                       # pure: novelty · rerank · query · record_id · pii
   ├── domain/                       # DecisionRecord v2.1, capture/query types
