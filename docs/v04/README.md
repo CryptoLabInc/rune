@@ -94,6 +94,27 @@ docs/v04/
 | AES-MAC envelope | 🔵 Deferred Post-MVP (Q1) |
 | Python↔Go 대조 검증 | ✅ 완료 (`notes/verification-matrix.md`) |
 | Go 구현 진입 가능성 | 🟢 Ready (`notes/implementability-report.md`, P0 blocker 0건) |
+| Go skeleton | ✅ 완료 (`2eb167d`, 37 파일, stdlib-only compile) |
+
+## 구현 로드맵
+
+Skeleton(`2eb167d`) 이후 단계. 각 Phase는 **별도 PR** 단위이며, 이전 Phase가 완료되기 전에 다음 Phase로 진입하지 않는다 (하위 → 상위 build-order 존중).
+
+| Phase | 범위 | 비고 |
+|---|---|---|
+| 1 | 외부 의존성 추가 | `modelcontextprotocol/go-sdk` v1.5+, `google.golang.org/grpc`, `google.golang.org/protobuf`, envector-go SDK(Q4 PR 머지 후 연결), embedder proto stub import |
+| 2 | `internal/domain/` + `internal/policy/` 순수 로직 | `ParseDomain` 19-enum map + `customer_escalation` alias · 상수·regex 이식 (81 stopwords · 31 intent · 16 time · 4 tech) · `GenerateRecordID` unicode slug · `ClassifyNovelty` · `ApplyRecencyWeighting` · `FilterByTime` · golden fixture 테스트 harness |
+| 3 | `record_builder` (703 LoC) + `payload_text` (364 LoC) 라인 단위 포팅 | D13 Option A · D15 canonical. 5 SENSITIVE + 4 QUOTE + 5 RATIONALE regex, `_parse_domain` 19-map + alias, `ensure_evidence_certainty_consistency` → `render_payload_text` 순서. `testdata/` 50+ 샘플로 byte-identical 검증 (Python 원본이 canonical source) |
+| 4 | `internal/adapters/` 실제 클라이언트 | Vault gRPC (3 RPC + keepalive + 256MB msg + TLS + health 2-tier + endpoint 4-form 정규화) · envector SDK + AES envelope Seal/Open (AES-256-CTR, 16B IV) · embedder gRPC + Info `sync.Once` 캐시 + D7 retry · capture_log `flock` append + 역순 `Tail` |
+| 5 | `internal/service/` orchestration | 7-phase capture (novelty non-fatal, D17 atomicity probe) · 7-phase recall (D25 순차, D26 Vault 위임 decrypt, D27 phase_chain expansion) · 6 lifecycle tools · Vault/envector 실패 시 `state=dormant` 전환 side-effect |
+| 6 | `internal/mcp/` SDK 연결 | 공식 Go SDK로 8 tool 등록 · stdio transport · `Deps` 주입 · adapter error → `domain.RuneError` → MCP response wrap · state-specific recovery hints |
+| 7 | 검증 | policy unit (golden fixture byte-identical) · bufconn Vault integration · libevi/mock backend envector contract tests · `synctest` (Go 1.25) boot retry 결정적 테스트 · Python ↔ Go shadow run (cutover 리스크 완화) |
+
+**우선순위 결정 팁**:
+- Phase 2·3 완료 전에는 외부 의존성(Phase 1) 없이도 순수 로직 테스트 가능 → 빠른 confidence 구축
+- Phase 4는 envector-go SDK `OpenKeysFromFile` 조건 완화 PR(Q4) 머지에 블로킹 가능 — mock backend로 우회 개발
+- Phase 5·6는 adapter interface 확정 후 진입. 미리 시작하면 signature 변경 비용 큼
+- Phase 7 shadow run은 Post-MVP에도 유지 — 장기 품질 보증 수단
 
 ## 이전 문서와의 관계
 

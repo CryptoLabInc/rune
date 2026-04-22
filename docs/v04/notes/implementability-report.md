@@ -221,11 +221,11 @@ detection = _detection_from_agent_data(
 
 ### Go 구현 진입 로드맵
 
-1. **Day 0 (오늘)**: P0 2건 수정 (45분 작업)
-2. **Week 1**: scaffolding — cmd/rune-mcp, config, Vault client, state machine (B.2 병행)
-3. **Week 2-3**: Capture flow (Phase 1-7) + Lifecycle 6 tools
-4. **Week 3-4**: Recall flow (Phase 1-7)
-5. **Week 4**: Integration test + golden fixture (Python ↔ Go bit-identical 검증)
+**Phase 0 완료** (2026-04-22):
+- P0/P1 문서 정비 (`0ba0d5f`) — scope SOT (agent-delegated only), §3a ExtractionResult 타입 계층, 3-레이어 복호화 경계 통일
+- Skeleton 커밋 (`2eb167d`) — 37 Go 파일, stdlib-only compile, 모든 타입·함수 시그니처·TODO·Python 라인 참조 확보
+
+**Phase 1 이후**: `docs/v04/README.md` §구현 로드맵 참조 (Phase 1-7 상세 + 우선순위 결정 팁).
 
 ### 추정 구현가능성: 🟡 → ✅ 
 
