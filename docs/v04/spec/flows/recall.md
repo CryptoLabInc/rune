@@ -21,7 +21,7 @@ rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 
 **핵심 원칙**:
 - Python `mcp/server/server.py` + `agents/retriever/*.py` 동작과 bit-identical
 - **agent-delegated**: query translation은 agent 담당 (D21), synthesis도 agent 담당 (raw results 반환)
-- 모델 연산은 `embedder` 위임 (gRPC, D30) · FHE 복호화는 Vault 위임 · AES envelope 복호화는 rune-mcp 직접
+- 모델 연산은 `embedder` 위임 (gRPC, D30) · FHE 복호화 + AES envelope 복호화 모두 Vault 위임 (`DecryptScores` + `DecryptMetadata`). rune-mcp는 JSON parse만
 
 ## 전체 시퀀스
 
@@ -596,13 +596,15 @@ type SearchHit struct {
 
 func (s *recallService) searchWithExpansions(
     ctx context.Context,
-    exps []string,
+    original string,                // Python L168: query.original (원본 case 보존)
+    exps []string,                  // 최대 3개 (D22)
     vectors [][]float32,
     topk int,
 ) ([]SearchHit, error) {
     var all []SearchHit
     seen := map[string]struct{}{}
 
+    // Step 1: expansions 순차 처리 (Python L160)
     for i, expQuery := range exps {
         hits, err := s.searchSingle(ctx, vectors[i], topk)
         if err != nil {
@@ -615,6 +617,27 @@ func (s *recallService) searchWithExpansions(
             if _, dup := seen[h.RecordID]; dup { continue }
             seen[h.RecordID] = struct{}{}
             all = append(all, h)
+        }
+    }
+
+    // Step 2: original fallback (Python L167-173)
+    // expansions에 query.original이 없으면 원본으로도 검색 (case 차이 고려)
+    originalInExpansions := false
+    for _, e := range exps {
+        if e == original { originalInExpansions = true; break }
+    }
+    if !originalInExpansions {
+        // 원본 case 보존된 original을 embedder에 재임베딩 (배치 Phase 3에서 처리하지 않았으므로)
+        origVec, err := s.embedder.EmbedSingle(ctx, original)
+        if err == nil {
+            hits, err := s.searchSingle(ctx, origVec, topk)
+            if err == nil {
+                for _, h := range hits {
+                    if _, dup := seen[h.RecordID]; dup { continue }
+                    seen[h.RecordID] = struct{}{}
+                    all = append(all, h)
+                }
+            }
         }
     }
 
@@ -819,33 +842,59 @@ func classifyMetadata(data string) (metadataFormat, any) {
 }
 ```
 
-#### `toSearchHit` — Python `_to_search_result` 이식
+#### `toSearchHit` — Python `_to_search_result` 이식 (bit-identical)
+
+Python 필드 경로·default 값 정확 반영 (Python `searcher.py:L472-521`):
 
 ```go
-func toSearchHit(e envector.MetadataEntry) SearchHit {
-    meta, _ := e.Metadata.(map[string]any)
+func toSearchHit(raw envector.MetadataEntry) SearchHit {
+    meta, _ := raw.Metadata.(map[string]any)
+
+    // Python L476: metadata.get("id", raw.get("id", "unknown"))
+    // metadata.id 없으면 raw.id, 그것도 없으면 "unknown"
+    recordID := getStringDefault(meta, "id", "")
+    if recordID == "" {
+        recordID = getStringDefault(raw.Raw, "id", "unknown")
+    }
+
+    // Python L481-485: why.certainty (nested!) default "unknown"
+    certainty := "unknown"
+    if why, ok := meta["why"].(map[string]any); ok {
+        certainty = getStringDefault(why, "certainty", "unknown")
+    }
 
     hit := SearchHit{
-        RecordID:        getString(meta, "record_id"),
-        Title:           getString(meta, "title"),
-        Domain:          getString(meta, "domain"),
-        Status:          getString(meta, "status"),
-        Certainty:       getString(meta, "certainty"),
-        ReusableInsight: getString(meta, "reusable_insight"),
-        PayloadText:     extractPayloadText(meta),
-        Score:           e.Score,
+        RecordID:        recordID,
+        Title:           getStringDefault(meta, "title", "Untitled"),      // Python L477
+        Domain:          getStringDefault(meta, "domain", "general"),      // Python L478
+        Status:          getStringDefault(meta, "status", "unknown"),      // Python L479
+        Certainty:       certainty,                                         // Python L481-485 (why.certainty)
+        ReusableInsight: getStringDefault(meta, "reusable_insight", ""),   // Python L498
+        PayloadText:     extractPayloadText(meta),                          // Python L487-496 (D32 strict v2.1)
+        Score:           raw.Score,                                         // Python L505 raw.get("score", 0.0)
+        AdjustedScore:   raw.Score,                                         // Python L515 (initial = score)
         Metadata:        meta,
     }
-    // Group fields (phase_chain or bundle)
-    if gid := getStringPtr(meta, "group_id"); gid != nil {
-        hit.GroupID = gid
-        hit.GroupType = getStringPtr(meta, "group_type")
-        hit.PhaseSeq = getIntPtr(meta, "phase_seq")
-        hit.PhaseTotal = getIntPtr(meta, "phase_total")
-    }
+    // Group fields (phase_chain or bundle) — Python L500-503
+    hit.GroupID    = getStringPtr(meta, "group_id")
+    hit.GroupType  = getStringPtr(meta, "group_type")
+    hit.PhaseSeq   = getIntPtr(meta, "phase_seq")
+    hit.PhaseTotal = getIntPtr(meta, "phase_total")
     return hit
 }
+
+// getStringDefault: meta[key]가 string이면 값, 아니면 default
+func getStringDefault(m map[string]any, key, def string) string {
+    if v, ok := m[key].(string); ok && v != "" { return v }
+    return def
+}
 ```
+
+**주의** (Python bit-identical):
+- RecordID 필드 key는 `"id"` (not `"record_id"`)
+- Certainty는 **nested** `meta["why"]["certainty"]` path (top-level 아님)
+- 4 필드 default 값: id="unknown", title="Untitled", domain="general", status="unknown", certainty="unknown"
+- `id` fallback chain: metadata.id → raw.id → "unknown"
 
 `extractPayloadText(metadata)` — `metadata.payload.text`만 본다. 없으면 빈 문자열 (fallback 없음).
 
@@ -1020,6 +1069,10 @@ func applyMetadataFilters(results []SearchHit, f Filters) []SearchHit {
 }
 
 // Python L254-271: ISO string comparison
+// 주의: Python isoformat()은 UTC일 때 "+00:00" 출력, Go time.RFC3339은 "Z" 출력
+// → lexicographic 비교 시 edge case 차이. "+00:00" format 강제로 bit-identical 확보.
+const pyIsoFormat = "2006-01-02T15:04:05-07:00"  // "+00:00" 출력 (Z 아님)
+
 func filterSince(results []SearchHit, since string) []SearchHit {
     var out []SearchHit
     for _, r := range results {
@@ -1028,7 +1081,7 @@ func filterSince(results []SearchHit, since string) []SearchHit {
             out = append(out, r)  // Python: if no timestamp, keep
             continue
         }
-        if ts.Format(time.RFC3339) >= since {
+        if ts.Format(pyIsoFormat) >= since {
             out = append(out, r)
         }
     }
@@ -1036,7 +1089,7 @@ func filterSince(results []SearchHit, since string) []SearchHit {
 }
 ```
 
-> Python은 `ts.isoformat() >= since_date` lexicographic 비교 사용. Go도 동일하게 `time.RFC3339` format 후 string 비교. `since_date`는 `"2026-01-01"` 같은 prefix여도 비교 가능 (`"2026-01-01T..." >= "2026-01-01"` → true).
+> Python `datetime.isoformat()`은 UTC일 때 `"2026-01-15T14:30:45+00:00"` 포맷. Go `time.RFC3339`은 UTC일 때 `"2026-01-15T14:30:45Z"` — lexicographic 비교 시 엔드 오프셋 부분 차이 (`"Z"` vs `"+00:00"`, ASCII에서 `"+" < "Z"`). Bit-identical 확보하려면 Go에서 `"2006-01-02T15:04:05-07:00"` 포맷 사용 (위 `pyIsoFormat`). `since_date`는 `"2026-01-01"` 같은 prefix여도 비교 가능 (`"2026-01-01T..." >= "2026-01-01"` → true).
 
 ### Step 4 — filterByTime (Python L523-555)
 
@@ -1072,7 +1125,11 @@ func applyRecencyWeighting(results []SearchHit) []SearchHit {
         ts := parseTimestamp(results[i].Metadata)
         ageDays := 0.0
         if !ts.IsZero() {
-            ageDays = math.Max(0, now.Sub(ts).Hours()/24)
+            // Python L291: (now - ts).days — INTEGER truncation (floor for positive)
+            // Go는 Hours()/24로 float 계산 후 Floor 필수 (bit-identical)
+            rawDays := now.Sub(ts).Hours() / 24
+            if rawDays < 0 { rawDays = 0 }
+            ageDays = math.Floor(rawDays)
         }
 
         var decay float64
@@ -1096,6 +1153,8 @@ func applyRecencyWeighting(results []SearchHit) []SearchHit {
     return results
 }
 ```
+
+> **Bit-identical 주의**: Python `timedelta.days`는 **integer floor** (`.days` 속성이 정수). Go `Hours()/24`는 float이므로 `math.Floor` 적용 필수. 아니면 1.5일 같은 fractional 차이로 decay 값 편차 → sort 순서 미세 차이.
 
 ### parseTimestamp helper (Python L284-293, L548-551, L258-265 중복 추출)
 

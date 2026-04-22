@@ -347,27 +347,62 @@ type DecisionRecord struct {
 
 ### Record ID 생성 규칙
 
-**Python**: `decision_record.py:L245-251` `generate_record_id`
+**Python** (`decision_record.py:L245-251`):
+```python
+words = title.lower().split()[:3]                                   # 첫 3 단어
+slug = "_".join(w for w in words if w.isalnum() or w.replace("_", "").isalnum())
+return f"dec_{date_str}_{domain.value}_{slug}"
+```
+
+**핵심**: **단어(word) 단위 필터**. 각 단어가 통째로 영숫자이거나, `_` 제거 후 영숫자여야 유지. 그 외 단어(구두점·특수문자 포함)는 **통째로 drop**.
+
+**예시**: `"Add email@foo.com support"` → `["add", "email@foo.com", "support"]` → `"email@foo.com"` drop → `slug = "add_support"`
 
 ```go
 func GenerateRecordID(ts time.Time, domain Domain, title string) string {
-    // date_str = ts.UTC().Format("2006-01-02")
-    // 제목 첫 3 단어, lowercase, 영숫자·underscore만 필터, "_" join
-    // 형식: "dec_{date}_{domain}_{slug}"
-    // Python: w.isalnum() or w.replace("_", "").isalnum() — unicode 포함
-    // Go 동등: unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+    dateStr := ts.UTC().Format("2006-01-02")
+    words := strings.Fields(strings.ToLower(title))  // Python split() 대응
+    if len(words) > 3 { words = words[:3] }
+
+    kept := make([]string, 0, len(words))
+    for _, w := range words {
+        if isPyIsalnum(w) || isPyIsalnum(strings.ReplaceAll(w, "_", "")) {
+            kept = append(kept, w)
+        }
+    }
+    slug := strings.Join(kept, "_")
+    return fmt.Sprintf("dec_%s_%s_%s", dateStr, string(domain), slug)
+}
+
+// Python str.isalnum() bit-identical:
+// - 빈 문자열 → False
+// - 모든 rune이 (IsLetter || IsDigit || 유니코드 알파벳/숫자) → True
+// - 하나라도 구두점/공백/기호 포함 → False
+func isPyIsalnum(s string) bool {
+    if s == "" { return false }
+    for _, r := range s {
+        if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+            return false
+        }
+    }
+    return true
 }
 ```
 
-**주의**: Python `str.isalnum()`은 유니코드 포함이므로 한글도 통과. Go는 `unicode.IsLetter`/`IsDigit` 사용해야 파리티.
+**주의**:
+- **문자 단위 아님**: rune 하나씩 필터링하면 Python과 결과 다름. 반드시 단어 전체 판정 후 drop/keep.
+- Python `str.isalnum()`은 유니코드 전 범위 (한글 등 letter/digit 포함). Go `unicode.IsLetter` + `IsDigit`로 대응.
+- `split()`은 Python에서 whitespace 기준. Go는 `strings.Fields` (동일 동작).
 
 ### Group ID 생성 규칙
 
 **Python**: `decision_record.py:L254-259` `generate_group_id`
 
+동일한 slug 로직이지만 prefix만 `grp_`:
+
 ```go
 func GenerateGroupID(ts time.Time, domain Domain, title string) string {
-    // 동일 로직이지만 prefix "grp_"
+    // GenerateRecordID과 동일 slug 로직, prefix만 "grp_"
     // 형식: "grp_{date}_{domain}_{slug}"
 }
 ```
@@ -578,29 +613,48 @@ type Detection struct {
 
 ### 5.4 NoveltyInfo
 
-**Python**: `server.py:L100-108` `_classify_novelty`  
+**Python**: `server.py:L100-108` `_classify_novelty` + `embedding.py:L33-56` `classify_novelty`  
 **용도**: capture Phase 4 결과
 
 ```go
 type NoveltyInfo struct {
-    Class   NoveltyClass    `json:"class"`   // novel | related | evolution | near_duplicate
-    Score   float64         `json:"score"`   // max similarity
-    Related []RelatedRecord `json:"related"` // top-3 비슷한 record (Python L1353-1360)
+    Class   NoveltyClass    `json:"class"`   // novel | evolution | related | near_duplicate
+    Score   float64         `json:"score"`   // 1.0 - max_similarity, round to 4 decimals
+    Related []RelatedRecord `json:"related"` // top-3 유사 record (Python server.py:L1353-1360에서 caller가 추가)
 }
+
+// 분류 범위 (Python server.py:L102-104 runtime defaults = 0.3/0.7/0.95):
+// - similarity < 0.3          → NoveltyClassNovel
+// - 0.3 <= similarity < 0.7   → NoveltyClassEvolution  (관련 있지만 다른 각도, 새 phase)
+// - 0.7 <= similarity < 0.95  → NoveltyClassRelated    (같은 토픽)
+// - similarity >= 0.95        → NoveltyClassNearDuplicate (capture 차단)
+//
+// 주의: embedding.py 모듈 상수 0.4/0.7/0.93은 runtime에 사용 안 됨 (dead defaults).
+// server.py L102-104가 classify_novelty 호출 시 인자로 0.3/0.7/0.95를 명시적으로 전달.
 
 type NoveltyClass string
 const (
-    NoveltyClassNovel         NoveltyClass = "novel"         // < 0.3
-    NoveltyClassRelated       NoveltyClass = "related"       // 0.3 ~ 0.7
-    NoveltyClassEvolution     NoveltyClass = "evolution"     // 0.7 ~ 0.95
-    NoveltyClassNearDuplicate NoveltyClass = "near_duplicate" // >= 0.95 (blocks capture)
+    NoveltyClassNovel         NoveltyClass = "novel"
+    NoveltyClassEvolution     NoveltyClass = "evolution"
+    NoveltyClassRelated       NoveltyClass = "related"
+    NoveltyClassNearDuplicate NoveltyClass = "near_duplicate"
 )
+
+// Score 의미:
+//   novelty_score = 1.0 - max_similarity
+//   round(novelty_score, 4)
+// 예: max_similarity=0.97 → score=0.03 (duplicate에 가까움 = 낮은 novelty)
+//     max_similarity=0.0  → score=1.0  (완전 novel, 기존 레코드 없음)
 
 type RelatedRecord struct {
     ID         string  `json:"id"`
     Title      string  `json:"title"`
-    Similarity float64 `json:"similarity"` // round 3
+    Similarity float64 `json:"similarity"` // round 3 (server.py:L1357)
 }
+
+// Initial state (Python server.py:L1338):
+//   NoveltyInfo{Class: NoveltyNovel, Score: 1.0, Related: []}
+// (기존 레코드 없을 때 최대 novelty)
 ```
 
 ---

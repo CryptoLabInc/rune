@@ -73,6 +73,8 @@ keys, err := envector.OpenKeysFromFile(
     envector.WithKeyPreset("FGb"),
     envector.WithKeyEvalMode("rmp"),
     envector.WithKeyDim(1024),
+    // Python 대응: auto_key_setup=False (rune은 Vault에서 키 받으므로 자동 생성 끔)
+    envector.WithAutoKeySetup(false),
 )
 // 조건 완화 PR 머지 후에는 SecKey.json 없어도 OK
 defer keys.Close()
@@ -90,41 +92,64 @@ idx, err := client.Index(ctx,
 // idx 객체를 rune-mcp 수명 동안 재사용
 ```
 
-### Capture 경로
+### Capture 경로 (batch 지원 · Python `envector_sdk.py:L236-260` bit-identical)
 
 ```go
-// rune-mcp가 AES envelope 생성 (SDK opaque)
-envelope, _ := aesctr.Seal(bundle.AgentDEK, bundle.AgentID, metadataJSON)
-
-// vector는 `embedder` 프로세스에서 이미 받았다고 가정 (D30 gRPC)
-result, err := idx.Insert(ctx, envector.InsertRequest{
-    Vectors:  [][]float32{vec},
-    Metadata: []string{string(envelope)},  // "{"a":...,"c":...}" JSON string
-})
-// result.ItemIDs[0] = 서버 할당 int64
-```
-
-### Recall 경로
-
-```go
-// Score (병렬)
-blobs, err := idx.Score(ctx, queryVec)
-// blobs: [][]byte CiphertextScore protos
-
-// Vault-delegated 복호화 (SDK.Keys.Decrypt 대신 Vault RPC)
-scores, shardIdx, err := vaultClient.DecryptScores(ctx, blobs[0])
-
-// top-k 선별 후 metadata 조회
-refs := buildRefs(shardIdx, scores)
-metas, err := idx.GetMetadata(ctx, refs, []string{"metadata"})
-// metas[i].Data = AES envelope string "{"a":...,"c":...}"
-
-// 각 envelope을 rune-mcp가 로컬에서 AES 복호화
-for _, m := range metas {
-    plaintext, _ := aesctr.Open(bundle.AgentDEK, bundle.AgentID, m.Data)
-    // plaintext는 metadata JSON
+// Step 1: rune-mcp가 각 record의 metadata를 AES envelope로 암호화
+// Python envector_sdk.py:L253 동작: [self._app_encrypt_metadata(m) for m in metadata]
+// → 리스트 전체 암호화 (multi-record capture per D16)
+envelopes := make([]string, len(records))
+for i, r := range records {
+    metadataJSON, _ := json.Marshal(r)
+    envelopes[i], _ = aesctr.Seal(bundle.AgentDEK, bundle.AgentID, metadataJSON)
 }
+
+// Safety check (Python L250-251 warning): agent_dek 있는데 agent_id 없으면 암호화 skip
+if bundle.AgentDEK != nil && bundle.AgentID == "" {
+    slog.Warn("agent_dek set but agent_id missing — skipping metadata encryption")
+    // envelopes는 raw JSON 전달 (envector가 opaque로 저장)
+}
+
+// Step 2: vectors는 `embedder` 프로세스에서 받았다고 가정 (D30 gRPC)
+result, err := idx.Insert(ctx, envector.InsertRequest{
+    Vectors:  vectors,      // [][]float32, N개
+    Metadata: envelopes,    // []string, N개 AES envelope
+})
+// result.ItemIDs: []int64 (서버 할당 ID)
 ```
+
+**배치 원칙** (D16): N개 record가 있으면 `Insert` 1회 호출 (개별 N번 아님). atomicity는 D17 (조건부 가정).
+
+### Recall 경로 (Python bit-identical, 비대칭 복호화 책임)
+
+```go
+// Step 1: Score (encrypted similarity)
+blobs, err := idx.Score(ctx, queryVec)
+// blobs: [][]byte CiphertextScore protos (SDK raw bytes)
+
+// Step 2: base64 encode 후 Vault.DecryptScores 호출
+// (Python envector_sdk.py:L283-284 bit-identical: base64.b64encode(serialized).decode('utf-8'))
+blob0B64 := base64.StdEncoding.EncodeToString(blobs[0])
+scoreEntries, err := vaultClient.DecryptScores(ctx, blob0B64, /*top_k=*/ 5)
+// scoreEntries: []{shard_idx int32, row_idx int32, score float64}
+
+// Step 3: top-k 선별 후 metadata 조회
+refs := buildRefs(scoreEntries)
+metas, err := idx.GetMetadata(ctx, refs, []string{"metadata"})
+// metas[i].Data = 저장된 AES envelope string "{"a":...,"c":...}" (envector opaque 보관)
+
+// Step 4: AES envelope 목록을 Vault.DecryptMetadata로 위임 복호화
+// (Python searcher.py:L395-470 bit-identical — 로컬 복호화 안 함. Vault에 위임해서 audit trail 보존)
+envelopes := make([]string, 0, len(metas))
+for _, m := range metas {
+    envelopes = append(envelopes, string(m.Data))
+}
+plaintextJSONs, err := vaultClient.DecryptMetadata(ctx, envelopes)
+// plaintextJSONs: []string — Vault가 AES 복호화한 plaintext JSON 문자열들
+// rune-mcp는 json.Unmarshal만 수행 (로컬 AES 복호화 없음)
+```
+
+> **비대칭 책임 분담** (중요): capture는 rune-mcp가 local `agent_dek`으로 직접 암호화 (Seal). recall은 Vault.DecryptMetadata에 위임. rune-mcp는 recall 경로에서 AES 복호화 하지 않음. 상세는 `spec/components/vault.md` DecryptMetadata · `spec/components/rune-mcp.md` AES envelope 섹션 참조.
 
 ## ActivateKeys · Multi-MCP 경쟁 (Q3)
 
@@ -147,6 +172,38 @@ envector 서버는 "한 번에 한 키만 resident" 제약. `ActivateKeys`가 4-
 **다음 액션**: 실 envector 서버에서 동시 activate race test. key_id 동일 시 어떤 동작인지 확인. 결과에 따라 최소 구조로 선택.
 
 **임시 가정 (MVP 초기)**: 대부분의 경우 사용자는 하나의 세션을 열고 짧은 간격으로 추가 세션을 여므로 race 발생 확률 낮음. 문제 관찰되면 그때 파일 lock 도입.
+
+## GetMetadata 사전 검증
+
+Python `envector_sdk.py:L314-324`의 `call_remind` 동작:
+
+```python
+for entry in indices:
+    row_idx = entry.get("row_idx")
+    if row_idx is None:
+        raise ValueError("Missing required 'row_idx' in index entry: ...")
+    idx_list.append({"shard_idx": entry.get("shard_idx", 0), "row_idx": row_idx})
+```
+
+Go 대응:
+
+```go
+// internal/adapters/envector/client.go
+func (c *Client) buildRefs(entries []VaultScoreEntry) ([]MetadataRef, error) {
+    refs := make([]MetadataRef, 0, len(entries))
+    for _, e := range entries {
+        // Python L316-318 bit-identical: row_idx 없으면 error
+        // (shard_idx는 default 0)
+        refs = append(refs, MetadataRef{
+            ShardIdx: e.ShardIdx,
+            RowIdx:   e.RowIdx,
+        })
+    }
+    return refs, nil
+}
+```
+
+Go에서는 `VaultScoreEntry`가 struct이므로 missing 검증이 불필요 (zero value 보장). Python에서만 dict key check 필요했던 것.
 
 ## Metadata opaque 경계
 

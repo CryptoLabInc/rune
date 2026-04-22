@@ -205,7 +205,9 @@ Python `mcp/server/server.py`가 노출하는 8개 tool을 그대로 유지. 이
 
 ## Config 로딩
 
-`~/.rune/config.json`은 **영구 3-섹션**:
+### 스키마 v2 (Go, reduced from Python)
+
+`~/.rune/config.json`:
 ```json
 {
   "vault": {
@@ -215,6 +217,8 @@ Python `mcp/server/server.py`가 노출하는 8개 tool을 그대로 유지. 이
     "tls_disable": false
   },
   "state": "active" | "dormant",
+  "dormant_reason": "...",        // optional, state == dormant 시
+  "dormant_since": "2026-04-22T12:34:56Z",  // optional, state == dormant 시 (RFC3339 UTC)
   "metadata": { "configVersion": "2.0", "lastUpdated": "...", "installedFrom": "..." }
 }
 ```
@@ -223,7 +227,62 @@ Python `mcp/server/server.py`가 노출하는 8개 tool을 그대로 유지. 이
 
 envector 자격증명·embedding 설정·기타는 **메모리에만**. Vault 번들에서 매 부팅마다 재획득. 상세는 `overview/architecture.md` 참조.
 
+> **Python 대비 의도적 divergence**: Python `_init_pipelines` (server.py:L1583-1591)는 Vault에서 받은 envector 자격증명을 `config.json`에 **영구 저장** (fast boot 용). Go v0.4는 **메모리만** — 매 부팅 Vault 호출. 이유:
+> - 보안: 디스크에 envector API key 저장 안 함
+> - 단순성: single source of truth (Vault). 디스크 캐시 stale 문제 제거
+> - 비용: Vault.GetPublicKey 1회 추가 (무시 가능)
+
 metadata는 `map[string]any`로 라운드트립 보존.
+
+### Python v1 대비 drop된 section
+
+v0.4에서 의도적으로 제거. Python에서 상속한 config.json이 있어도 **Go는 unknown section 무시** (read-only, pass-through as extra metadata). 파괴적 동작 없음.
+
+| Python section | drop 이유 |
+|---|---|
+| `envector` | Vault 번들에서 매 부팅 재획득 (메모리만) |
+| `embedding` | D30: embedder 외부 프로세스 책임 |
+| `llm` | D14/D21/D28: agent-delegated, rune-mcp는 LLM 미사용 |
+| `scribe` | scribe legacy 완전 제거 (tier2/webhook/patterns 등) |
+| `retriever` | server 기본값 (topk default=5, max=10) 사용 |
+
+→ v0.4 Go config 총 필드 수: ~10개 (Python ~40개 대비 대폭 축소).
+
+### Env var override
+
+Python 많은 env var override 중 Go는 **RUNE_STATE**만 optional 지원 (개발/테스트용). 나머지는 drop (해당 config section이 없으므로).
+
+### 파일 시스템 레이아웃 · 권한
+
+Python `agents/common/config.py:L13-18, L358-365` bit-identical:
+
+| 경로 | 유형 | 권한 | 용도 |
+|---|---|---|---|
+| `~/.rune/` (CONFIG_DIR) | dir | `0700` | root |
+| `~/.rune/config.json` (CONFIG_PATH) | file | `0600` | 이 스키마 |
+| `~/.rune/logs/` (LOGS_DIR) | dir | `0700` | slog 로그 (쓰일 때) |
+| `~/.rune/keys/` (KEYS_DIR) | dir | `0700` | EncKey/EvalKey 캐시 |
+| `~/.rune/keys/<key_id>/EncKey.json` | file | `0600` | FHE 공개키 |
+| `~/.rune/keys/<key_id>/EvalKey.json` | file | `0600` | FHE 연산키 |
+| `~/.rune/capture_log.jsonl` (CAPTURE_LOG_PATH) | file | `0600` | append-only (D20) |
+
+**Go 부팅 시**: `ensureDirectories()` 호출 → 없으면 생성 + umask 무시하고 명시적 `os.Chmod(0700)` (Python L287, L361-365 동일).
+
+### Write 시점
+
+- 이 repo의 rune-mcp: **읽기 전용**. config.json 쓰기 안 함
+- `/rune:configure` slash command: **이 repo 밖** (`commands/rune/configure.md` Claude Code plugin) — 처음 설치 시 또는 Vault token 갱신 시 사용자 interactive 입력으로 쓰기
+- state 전환 (active ↔ dormant)은 **rune-mcp 프로세스 메모리에서만**. config.json 파일은 부팅 시 초기 state만 읽고, 런타임 전환은 디스크에 반영 안 함 (다음 부팅 시 다시 "active" 또는 "dormant"로 갈지는 Vault 번들 획득 성공 여부로 결정)
+
+### Dormant mode 동작 (Python `server.py:L1544-1547` bit-identical)
+
+부팅 시 `config.state != "active"`면 **pipeline init skip**:
+- `_scribe = nil`, `_retriever = nil`
+- MCP 서버 자체는 정상 실행 — 읽기 전용 tool은 동작 (`vault_status`, `diagnostics`, `capture_history`)
+- 쓰기/검색 tool (capture, batch_capture, recall, delete_capture, reload_pipelines)은 `_ensure_pipelines()`에서 `PipelineNotReadyError` 반환
+- 사용자가 `/rune:activate` (상위 plugin)로 state=active 전환 + rune-mcp 재기동 필요
+
+이는 "degraded mode"로 부팅 실패를 **부분적으로 견딤** — 사용자가 진단 tool (`vault_status`, `diagnostics`)로 원인 파악 가능.
 
 ## FHE 키 관리
 
@@ -236,9 +295,15 @@ metadata는 `map[string]any`로 라운드트립 보존.
 
 **zeroize**: 프로세스 종료 시 메모리에서 agent_dek·SecKey 유사 키 전부 `for i := range dek { dek[i] = 0 }; runtime.KeepAlive(dek)` 패턴으로 정리. hard guarantee는 아니지만 best effort.
 
-## AES envelope (rune-mcp 자체 구현)
+## AES envelope (capture는 rune-mcp, recall은 Vault 복호화)
 
-envector-go SDK는 metadata를 **opaque string**으로 취급. AES 암·복호화는 rune-mcp 책임.
+envector-go SDK는 metadata를 **opaque string**으로 취급.
+
+**비대칭 책임 분담** (Python 동작 bit-identical):
+- **Capture 경로**: rune-mcp가 local `agent_dek`으로 AES-256-CTR 암호화 → envelope 생성 (Python `envector_sdk.py:L227-234`)
+- **Recall 경로**: rune-mcp가 envector에서 받은 AES envelope를 **Vault.DecryptMetadata**로 전송 → Vault가 복호화해서 plaintext JSON 반환 (Python `vault_client.py:L263-299` · `searcher.py:L417-464`)
+
+즉 rune-mcp는 암호화만 local, 복호화는 Vault 위임 (audit trail 보존).
 
 **포맷** (pyenvector `mcp/adapter/envector_sdk.py:L227-234` + `pyenvector/utils/aes.py:L52-58`과 bit-identical):
 ```
@@ -303,26 +368,136 @@ Rotation: 초기엔 없음. 실측 후 lumberjack 등 검토.
 ## Observability
 
 - **slog** (stdlib): structured JSON to stderr (Claude Code가 수집)
-- **SensitiveFilter** (Python `_SensitiveFilter` 포팅): `sk-` · `api_` · `envector_` · `evt_` · `token=` · `Bearer ` 등 접두사 20자+ 자동 마스킹
+- **SensitiveFilter** (Python `server.py:L25-40` `_SensitiveFilter` 포팅) — 2 regex:
+  - 패턴 1: `(sk-|pk-|api_|envector_|evt_)[a-zA-Z0-9_-]{10,}` — 6 prefix + 10자 이상 alphanumeric
+  - 패턴 2: `(?i)(token|key|secret|password)["\s:=]+[a-zA-Z0-9_-]{20,}` — 4 field name + separator + 20자 이상
+  - 치환: `m.group()[:8] + "***"` (첫 8자 보존 + 별 3개). Go: `strings.Replace` + 각 match 수동 처리 or regexp.ReplaceAllFunc
 - **request_id**: 매 tool call에 UUID 부여, context로 전파. 로그·에러에 포함
 
 **Metric은 rune-mcp에 내장 안 함** — 세션 수가 가변이라 scrape하기 어렵고, 의미 있는 메트릭은 `embedder` 쪽이 공유 지점이라 훨씬 유용. rune-mcp 모니터링은 slog의 structured events만.
 
 ## 에러 처리
 
-| 상황 | 반환 |
-|---|---|
-| state != active | 503 status-specific (`starting`/`VAULT_PENDING`/`DORMANT`) |
-| Vault RPC 실패 | exp backoff 2-retry → `retryable=true` 에러 반환. 3회 연속이면 `waiting_for_vault` 전환 |
-| envector RPC 실패 | exp backoff 2-retry → `retryable=true` |
-| `embedder` gRPC 연결 실패 | `embedder_unreachable` 에러 (D30 retry 정책). 에이전트에 retry 제안 |
-| AES 복호화 실패 | `metadata_corrupted` 에러. 해당 record만 skip하고 나머지 결과 반환 (partial degrade) |
-| Panic in handler | `recover()` middleware가 잡아 500 `INTERNAL_ERROR`. 다른 요청 무영향 |
+### 응답 shape (Python `mcp/server/errors.py` bit-identical)
 
-**타임아웃**:
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "VAULT_CONNECTION_ERROR",
+    "message": "Vault gRPC dial failed: ...",
+    "retryable": true,
+    "recovery_hint": "Vault is unreachable. Check: (1) Is the Vault server running? ..."
+  }
+}
+```
+
+- `ok`: 항상 `false` (에러 시)
+- `error.code`: 아래 8종 중 하나 (string enum)
+- `error.message`: Python `str(exc)` 동등 (원본 예외 메시지)
+- `error.retryable`: bool — 에이전트가 재시도할지 판정
+- `error.recovery_hint`: optional string — 사용자에게 전달할 조치 힌트 (없으면 생략)
+
+### 에러 코드 8종 (Python 7 bit-identical + 1 Go-specific)
+
+Python `mcp/server/errors.py` 포팅 + v0.4 embedder gRPC 전용 추가:
+
+| # | Code | Go 타입 (`internal/domain/errors.go`) | retryable | 발생 상황 | recovery_hint 요지 |
+|---|---|---|---|---|---|
+| 1 | `INTERNAL_ERROR` | `ErrInternal` (base) | `false` | panic recovery · 알려지지 않은 에러 | (empty) |
+| 2 | `VAULT_CONNECTION_ERROR` | `ErrVaultConnection` | **`true`** | Vault gRPC dial 실패 · Unavailable · DeadlineExceeded | "Vault is unreachable. Check endpoint · config.json. Run /rune:status." |
+| 3 | `VAULT_DECRYPTION_ERROR` | `ErrVaultDecryption` | `false` | Vault가 DecryptScores/DecryptMetadata 거부 (Unauthenticated / NotFound) | "Vault rejected decryption. Check token · permissions. Run /rune:configure." |
+| 4 | `ENVECTOR_CONNECTION_ERROR` | `ErrEnvectorConnection` | **`true`** | envector Cloud 연결 실패 · typed `ErrKeysXxx` 중 transient | "Cannot reach enVector. Check network · endpoint. Run /rune:status." |
+| 5 | `ENVECTOR_INSERT_ERROR` | `ErrEnvectorInsert` | **`true`** | `idx.Insert` 실패 (batch 단위) | "Failed to store. Retry may succeed. Check API key via /rune:status." |
+| 6 | `PIPELINE_NOT_READY` | `ErrPipelineNotReady` | `false` | `state != active` 모든 경우 (starting · waiting_for_vault · dormant) | state별 recovery_hint 다름 (아래 참조) |
+| 7 | `INVALID_INPUT` | `ErrInvalidInput` | `false` | tool argument 검증 실패 (topk > 10, text 빈, JSON parse fail, tier2 검증 등) | "Check input parameters and try again" |
+| 8 | `EMBEDDER_UNREACHABLE` ⭐ | `ErrEmbedderUnreachable` | **`true`** | embedder gRPC 연결 실패 (D30, Go 신규) | "Embedder daemon not responding. Check socket · retry in a moment." |
+
+> **⭐ `EMBEDDER_UNREACHABLE`**: Python에 없음 (Python은 embedding이 process-internal). D30 외부 embedder 분리로 새 code 필요.
+
+### `PIPELINE_NOT_READY` 상태별 recovery_hint
+
+Python은 state 구분 안 하고 고정 hint ("Run /rune:activate"). Go는 internal state 기반으로 hint differentiation:
+
+| internal state | recovery_hint |
+|---|---|
+| `starting` | "Rune is starting up. Wait 1-2 seconds and retry." |
+| `waiting_for_vault` | "Waiting for Vault connection. Last error: {vault_err}. Run /rune:vault_status." |
+| `dormant` (reason=user_deactivated) | "Rune is deactivated. Run /rune:activate to re-enable." |
+| `dormant` (reason=vault_unreachable) | "Rune went dormant due to Vault failure. Check endpoint in config.json." |
+| `dormant` (reason=envector_unreachable) | "Rune went dormant due to envector failure. Check network · API key." |
+
+code 자체는 모두 `PIPELINE_NOT_READY` → 에이전트 retryable 판정 일관성 유지.
+
+### metadata corruption (partial degrade, code 없음)
+
+recall 경로에서 AES envelope 복호화 실패 시 Python은 **조용히 skip** (`searcher.py:L438` `logger.warning + entry["metadata"] = {}`). Go도 동일:
+- 해당 record만 빈 metadata로 degrade
+- 나머지 결과 정상 반환
+- 별도 error code 만들지 않음 (partial failure)
+
+### 에러 분류 매핑 (상위 레벨)
+
+| 상황 | Go action | code |
+|---|---|---|
+| state != active | 응답 반환 (retry 안 함) | `PIPELINE_NOT_READY` |
+| Vault gRPC dial 실패 | exp backoff 2-retry → 실패 시 반환 + 3회 연속 실패 시 내부 state `waiting_for_vault` 전환 | `VAULT_CONNECTION_ERROR` |
+| Vault 인증 실패 | 즉시 반환 (재시도 무의미) | `VAULT_DECRYPTION_ERROR` |
+| envector gRPC 실패 | exp backoff 2-retry → 반환 | `ENVECTOR_CONNECTION_ERROR` |
+| envector Insert 실패 | exp backoff 2-retry → 반환 | `ENVECTOR_INSERT_ERROR` |
+| embedder gRPC 실패 | D7 backoff `[0, 500ms, 2s]` × 3 → 반환 | `EMBEDDER_UNREACHABLE` |
+| JSON 파싱 · 검증 실패 | 즉시 반환 | `INVALID_INPUT` |
+| AES 복호화 실패 (recall) | 해당 record만 skip, warn log | (no error code, partial degrade) |
+| Panic in handler | `recover()` middleware가 catch → 500 | `INTERNAL_ERROR` |
+
+### Go helper (Python `make_error` 동등)
+
+```go
+// internal/domain/errors.go
+type RuneError struct {
+    Code          string
+    Message       string
+    Retryable     bool
+    RecoveryHint  string
+}
+
+func (e *RuneError) Error() string { return e.Message }
+
+// MakeError: exception → MCP 응답 map
+func MakeError(err error) map[string]any {
+    var re *RuneError
+    if errors.As(err, &re) {
+        r := map[string]any{
+            "ok":    false,
+            "error": map[string]any{
+                "code":      re.Code,
+                "message":   re.Message,
+                "retryable": re.Retryable,
+            },
+        }
+        if re.RecoveryHint != "" {
+            r["error"].(map[string]any)["recovery_hint"] = re.RecoveryHint
+        }
+        return r
+    }
+    // 알려지지 않은 에러 → INTERNAL_ERROR fallback
+    return map[string]any{
+        "ok": false,
+        "error": map[string]any{
+            "code":      "INTERNAL_ERROR",
+            "message":   err.Error(),
+            "retryable": false,
+        },
+    }
+}
+```
+
+### 타임아웃
+
+- **Pipeline readiness (`_ensure_pipelines`)**: **120s** — tool call 진입부에서 백그라운드 init 대기. 초과 시 `PipelineNotReadyError` + hint "embedding model may still be downloading" (Python `server.py:L1503-1518`)
 - tool call 전체: 30s (context.WithTimeout)
-- Vault gRPC: 10s
-- envector gRPC: 10s
+- Vault gRPC: 30s (Python default · `spec/components/vault.md` 참조)
+- envector gRPC: 10s (Score/GetMetadata), 30s (Insert/ActivateKeys)
 - `embedder` gRPC: 5s (D30, unix socket)
 
 ## 패키지 레이아웃 (rune-mcp 한정)

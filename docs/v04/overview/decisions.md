@@ -907,6 +907,29 @@ Python `templates.py` 363 LoC:
 
 이 fixture는 **포팅 완료 판정 기준**이다.
 
+### 포팅 주의사항 (line-by-line 놓치기 쉬운 것)
+
+1. **phase_line / group_summary는 post-insertion** (`templates.py:L204-216`):
+   - `PAYLOAD_TEMPLATE.format(...)` 완료 후 text를 line split → "ID: "로 시작하는 라인 찾아 **그 다음 position에 삽입**
+   - `group_summary` 존재 시 "Group Summary: ..." 라인 추가 삽입
+   - template string 자체에는 포함 안 됨 → Go에서도 동일 후처리 필요
+
+2. **Blank line collapse + trim** (L219-222):
+   ```python
+   while "\n\n\n" in text:
+       text = text.replace("\n\n\n", "\n\n")
+   return text.strip()
+   ```
+   - triple-newline을 double-newline으로 반복 치환 후 마지막 strip. 빠뜨리면 1자 diff → embedding 공간 다름.
+
+3. **`_format_alternatives` 빈 `chosen` 특이 동작** (L59):
+   - `chosen=""` 이면 Python `"" in alt.lower()` 항상 True → 모든 alternative가 "(chosen)" marker로 표시됨
+   - 버그로 보이지만 Python 현재 동작이므로 **MVP에서는 Go에서 수정하지 말고 bit-identical 재현**
+   - chosen 빈 경우 test fixture로 규정
+   - **Post-MVP 수정 예정**: Python `if chosen and (...)` guard 추가 후 Go 재동기화. 상세 계획은 `overview/open-questions.md` Post-MVP 6 참조
+
+4. **PAYLOAD_HEADERS (ko/ja)**는 `render_display_text`용, MVP에서 Post-MVP로 미룸 (`render_payload_text` 자체는 항상 English header).
+
 ### 재평가 트리거
 
 - `payload.text`가 실사용에서 거의 읽히지 않음 관측 시 단순화 검토

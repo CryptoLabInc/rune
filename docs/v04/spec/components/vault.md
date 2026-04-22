@@ -36,20 +36,30 @@ Python `vault_client.py`가 호출하는 3 RPC 그대로 유지. proto도 기존
 
 ### DecryptScores
 
-- **입력**: `vault_token` + envector `Score` 응답의 `CiphertextScore` proto bytes (base64)
-- **출력**: `[{ score: float64, shard_idx: int32, row_idx: int32 }, ...]` (top-k 정렬)
+- **입력**: `token` (vault_token) + `encrypted_blob_b64` (envector `Score` 응답의 ciphertext, base64) + `top_k: int` (default **5**, max 10)
+- **출력**: `results: [{shard_idx: int32, row_idx: int32, score: float64}, ...]` (top-k 정렬)
 - **호출 시점**: recall · near-duplicate check 때 envector `Score` 직후
+- **Python 참조**: `vault_client.py:L217-261`
 
 ### DecryptMetadata
 
-- **입력**: `vault_token` + refs `[{shard_idx, row_idx}]`
-- **출력**: metadata dict 배열 (AES envelope 상태로 반환. 실제 AES 복호화는 rune-mcp가)
-- **호출 시점**: recall에서 top-k 결정된 후 metadata 수집
-- **주의**: 반환된 metadata는 **여전히 AES envelope 상태**. rune-mcp가 로컬에서 `agent_dek`으로 AES-CTR 복호화해야 plaintext JSON 얻음
+- **입력**: `token` (vault_token) + `encrypted_metadata_list: List[str]` (AES envelope 문자열 배열, 각각 `{"a": agent_id, "c": base64(IV||CT)}`)
+- **출력**: `decrypted_metadata: List[str]` — **Vault가 AES 복호화까지 수행**한 plaintext **JSON 문자열** 배열. rune-mcp는 각 문자열을 `json.Unmarshal`로 parse만
+- **호출 시점**: recall Phase 5에서 AES envelope 포맷으로 분류된 entries에 대해 일괄 호출
+- **중요**: Vault가 agent_dek을 내부 보유하고 AES-256-CTR 복호화 수행. rune-mcp는 로컬 복호화 **안 함** (Vault-delegated audit trail). capture 경로에서는 rune-mcp가 직접 암호화하지만 (local agent_dek), recall 복호화는 Vault에 위임
+- **Python 참조**: `vault_client.py:L263-299` + proto docstring "Decrypts a list of AES-encrypted metadata strings"
 
 ## Endpoint 파싱·정규화
 
-Python `vault_client.py:117-140` 동작을 Go로 이식. 3가지 입력 형식 지원:
+Python `vault_client.py:L116-140` `_derive_grpc_target` 동작을 Go로 이식.
+
+**우선순위** (Python `vault_client.py:L108-110`):
+1. 환경변수 `RUNEVAULT_GRPC_TARGET` (명시적 override, 최우선)
+2. `vault_endpoint` (config.json or `RUNEVAULT_ENDPOINT` env)에서 `_derive_grpc_target`으로 자동 추출
+
+Go에서도 동일 우선순위 적용 (env var override 지원).
+
+3가지 입력 형식 지원:
 
 | 입력 | 정규화 |
 |---|---|
@@ -78,12 +88,40 @@ func NormalizeEndpoint(raw string) (string, error) {
 }
 ```
 
-## Health fallback
+## Health check (2-tier)
 
-Python은 gRPC dial 실패 시 특정 조건 아래 HTTP `/health`로 재시도한다 (`vault_client.py:321-332`):
+Python `vault_client.py:L301-337` `health_check()` 동작:
+
+### Tier 1: gRPC 표준 health check (`grpc_health.v1`)
+
+```python
+from grpc_health.v1 import health_pb2, health_pb2_grpc
+health_stub = health_grpc.HealthStub(self._channel)
+resp = await health_stub.Check(
+    health_proto.HealthCheckRequest(service=""),
+    timeout=5.0,
+)
+return resp.status == health_proto.HealthCheckResponse.SERVING
+```
+
+Go 대응:
+```go
+import "google.golang.org/grpc/health/grpc_health_v1"
+
+stub := grpc_health_v1.NewHealthClient(conn)
+resp, err := stub.Check(ctx, &grpc_health_v1.HealthCheckRequest{Service: ""})
+return err == nil && resp.Status == grpc_health_v1.HealthCheckResponse_SERVING
+```
+
+- Timeout: 5s (Python L315)
+- Service 이름 빈 문자열 (전체 서버 상태)
+
+### Tier 2: HTTP `/health` fallback (진단용)
+
+Tier 1 실패 시, **endpoint가 http(s):// scheme인 경우만** 시도:
 
 ```
-gRPC dial 실패 + 원본 endpoint가 http(s):// scheme
+원본 endpoint가 http(s):// scheme
   → /mcp, /sse path suffix 제거
   → GET {base}/health
   → 응답 status 2xx면 "endpoint 살아있음, gRPC만 실패" 진단
@@ -203,14 +241,20 @@ func (c *Client) authCtx(ctx context.Context) context.Context {
 
 ## 타임아웃·재시도
 
+### Python default (전 RPC 공통)
+
+Python `vault_client.py:L84` `timeout: float = 30.0` — 모든 RPC (GetPublicKey, DecryptScores, DecryptMetadata)에 동일 30초 적용. `self._stub.X(request, timeout=self.timeout)` 패턴.
+
+Go도 기본 30초로 맞춤 (bit-identical). health_check만 별도 5초 (Python L315).
+
 ### 부팅 시 (GetPublicKey)
 
-`rune-mcp` 부팅 시 호출. 실패하면 `waiting_for_vault` 상태로 exp backoff retry (상세는 `rune-mcp.md` 참조). 재시도 경계 1s → 60s cap, 무한 반복.
+`rune-mcp` 부팅 시 호출. 실패하면 `waiting_for_vault` 상태로 exp backoff retry (상세는 `rune-mcp.md` 참조). 재시도 경계 1s → 60s cap, 무한 반복. 단일 시도 timeout 30초.
 
 ### 런타임 (DecryptScores, DecryptMetadata)
 
 capture/recall 경로에 포함. 실패 시 정책:
-- context timeout 10s
+- context timeout 30s (Python default 기준)
 - exp backoff 2-retry (1s, 2s) 후 에러 반환
 - 에러에 `retryable=true` 마킹 → 에이전트에게 재시도 힌트
 
