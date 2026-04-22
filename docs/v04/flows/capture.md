@@ -94,50 +94,138 @@ mcp.AddTool(srv, &mcp.Tool{Name: "rune_capture", Description: "..."},
 
 ---
 
-## Phase 2 — 검증 + text_to_embed 선택
+## Phase 2 — 검증 + tier2 체크 + text_to_embed 선택
 
 ### 책임
-- `extracted` 내 알려진 필드 정규화 (phases[:7], title[:60], confidence clamp)
+- `extracted` JSON 파싱 실패 응답 조립 (Python `server.py:L1240-1242`)
+- **에이전트 tier2 판정 처리 (Python `server.py:L1244-1254`)** — `tier2.capture=false`이면 즉시 reject 응답
+- `extracted` 내 알려진 필드 정규화 (phases[:7], title[:60], confidence clamp [0,1])
 - Python과 동일한 silent truncate 동작
-- `reusable_insight > payload.text` 우선순위로 임베딩 텍스트 선택
+- `reusable_insight > payload.text` 우선순위로 임베딩 텍스트 선택 (Python `server.py:L1337` + `embedding.py:embedding_text_for_record`)
+
+### 입력 `extracted` JSON shape (Python `server.py:L1244-1267`)
+
+에이전트(Claude Code 등)가 보내는 `extracted` 필드의 **계약**:
+
+> **⚠️ Legacy 3-tier 시스템과 혼동 주의**  
+> Python에는 legacy `Tier2Filter` 클래스(rune-mcp 내부 LLM filter, `agents/scribe/tier2_filter.py`)가 존재하나 **Go 포팅에서 제거됨** (D14 + `research/python-codebase-map.md:L128` "detector, tier2_filter, llm_extractor 삭제"). 여기 기술하는 `extracted.tier2` **JSON 필드**는 이름만 같고 의미가 다르다:  
+> - Legacy Tier2Filter = rune-mcp가 내부 LLM 호출해 판정 → **Go에서 제거**  
+> - `extracted.tier2` = **에이전트가 자체 판정 결과를 JSON으로 전달** (agent-delegated 계약)  
+> 
+> Go rune-mcp는 LLM을 직접 호출하지 않는다. `extracted.tier2.*`는 단순 dict lookup.
+
+```json
+{
+  "tier2": {
+    "capture": true,
+    "reason": "decision + rationale present",
+    "domain": "architecture"
+  },
+  "confidence": 0.85,
+  "title": "...",
+  "reusable_insight": "...",
+  "phases": [ { /* max 7 */ } ],
+  "payload": { "text": "..." },
+  // 기타 DecisionRecord v2.1 필드 (domain, status, certainty, evidence, ...)
+}
+```
+
+**필드 계약**:
+| 필드 | 타입 | 기본 | 처리 |
+|---|---|---|---|
+| `tier2.capture` | bool | `true` | `false`면 즉시 rejection 응답 (아래) |
+| `tier2.reason` | string | `"no reason"` | rejection 응답 `reason` 필드에 포함 |
+| `tier2.domain` | string | `"general"` | detection에 반영 (Python `agent_domain`) |
+| `confidence` | number | `None` | `[0.0, 1.0]` 클램프, 비숫자면 `None` |
 
 ### 구현 형태
+
 ```go
 // internal/validate/capture.go
-func Capture(req *domain.CaptureRequest) error {
+func Capture(req *domain.CaptureRequest) (*domain.CaptureResponse, error) {
     if strings.TrimSpace(req.Text) == "" {
-        return domain.ErrInvalidInput.With("reason", "text empty")
+        return nil, domain.ErrInvalidInput.With("reason", "text empty")
     }
     if req.Extracted == nil {
-        return domain.ErrInvalidInput.With("reason", "extracted missing")
+        // Python: parse_llm_json 실패 시 {"ok": false, "error": "..."}
+        return nil, domain.ErrInvalidInput.With("reason", "Invalid extracted JSON — could not parse.")
     }
+
+    // tier2 검증 — 에이전트가 이미 판정한 경우
+    tier2, _ := domain.GetMap(req.Extracted, "tier2")
+    capture, hasCapture := domain.GetBool(tier2, "capture")
+    if hasCapture && !capture {
+        // Python server.py:L1246-1251
+        reason, _ := domain.GetString(tier2, "reason")
+        if reason == "" { reason = "no reason" }
+        return &domain.CaptureResponse{
+            OK:       true,
+            Captured: false,
+            Reason:   fmt.Sprintf("Agent rejected: %s", reason),
+        }, nil
+    }
+
     // phases[:7], title[:60] (UTF-8 rune), confidence clamp [0,1]
     // in-place mutation, 에러 없이 정규화
-    return nil
+    return nil, nil  // 계속 진행
 }
 
 // internal/policy/embedtext.go
 func PickTextToEmbed(extracted map[string]any) string {
     // reusable_insight (trim, non-empty) > payload.text (trim, non-empty)
 }
+
+// internal/policy/detection.go — Python _detection_from_agent_data 포팅 (server.py:L70-87)
+func DetectionFromAgent(extracted map[string]any) Detection {
+    tier2, _ := GetMap(extracted, "tier2")
+    domain, _ := GetString(tier2, "domain")
+    if domain == "" { domain = "general" }
+
+    conf, hasConf := GetFloat(extracted, "confidence")
+    if !hasConf {
+        conf = 0.0  // Python: None → 0.0
+    } else {
+        conf = math.Max(0.0, math.Min(1.0, conf))  // clamp
+    }
+
+    return Detection{
+        IsSignificant: true,  // agent-delegated 전제 (L82)
+        Confidence:    conf,
+        Domain:        domain,
+    }
+}
 ```
 
 ### 관련 결정
 - **D3**: title 60자 rune-단위 truncate (Python 동일)
-- **D4**: `extracted`는 `map[string]any` + `GetString/GetFloat/GetMap/GetList` helper
+- **D4**: `extracted`는 `map[string]any` + `GetString/GetFloat/GetBool/GetMap/GetList` helper
 - **D5**: 빈 embed 텍스트 → `EMPTY_EMBED_TEXT` 전용 에러
+- **D14**: agent-delegated — `tier2.domain`, `confidence` 에이전트가 제공
+
+### 분기 · 응답 shape
+
+#### tier2 rejection 응답 (Python L1246-1251)
+```json
+{
+  "ok": true,
+  "captured": false,
+  "reason": "Agent rejected: <tier2.reason or 'no reason'>"
+}
+```
 
 ### 에러
-| 상황 | 코드 |
-|---|---|
-| `text` 빈 문자열 | `INVALID_INPUT` |
-| `extracted` 필드 부재 | `INVALID_INPUT` |
-| `reusable_insight` + `payload.text` 둘 다 빈 문자열 | `EMPTY_EMBED_TEXT` |
+| 상황 | 코드 | 응답 shape |
+|---|---|---|
+| `text` 빈 문자열 | `INVALID_INPUT` | `{"ok": false, "error": "text empty"}` |
+| `extracted` 필드 부재/파싱 실패 | `INVALID_INPUT` | `{"ok": false, "error": "Invalid extracted JSON — could not parse."}` |
+| `tier2.capture=false` | — (성공 응답) | `{"ok": true, "captured": false, "reason": "Agent rejected: ..."}` |
+| `reusable_insight` + `payload.text` 둘 다 빈 문자열 | `EMPTY_EMBED_TEXT` | `{"ok": false, "error": "...", "error_code": "EMPTY_EMBED_TEXT"}` |
 
 ### 구현 위치
 - `internal/validate/capture.go`
 - `internal/policy/embedtext.go`
-- `internal/domain/extracted.go` (helpers)
+- `internal/policy/detection.go` (DetectionFromAgent)
+- `internal/domain/extracted.go` (GetString/GetFloat/GetBool/GetMap/GetList helpers)
 
 ---
 
@@ -292,9 +380,23 @@ internal/policy/
 ├── tags.go             # ExtractTags
 ├── title.go            # ExtractTitle
 ├── record_id.go        # GenerateRecordID · GenerateGroupID (Unicode-aware slug)
-├── payload_text.go     # RenderPayloadText (templates.py 이식)
+├── payload_text.go     # RenderPayloadText (templates.py 이식 — D15)
 └── consistency.go      # EnsureEvidenceCertaintyConsistency
 ```
+
+### 🔒 Canonical reference & golden fixture (D15)
+
+`payload_text.go`는 Python `agents/common/schemas/templates.py` (363 LoC)를 **라인 단위로 미러링**. 구체 내용은 이 문서에 인라인하지 않음 — Python이 canonical.
+
+**포팅 계약** (decisions.md D15 참조):
+- `PAYLOAD_TEMPLATE` 멀티라인 format string (L14~) → Go const
+- 7개 `_format_*` 헬퍼 (L52~131) → Go 함수
+- `render_payload_text` 메인 (L138-222) → `RenderPayloadText`
+- `render_compact_payload`, `render_display_text`는 Post-MVP
+
+**검증**: `testdata/payload_text/golden/{id}.md` 50개 샘플 byte-for-byte 비교. **이 테스트 통과가 포팅 완료 판정 기준.**
+
+> **Go 개발자 노트**: payload.text는 embedding 대상이므로 Python과 1자라도 다르면 vector 공간이 달라져 recall이 다른 결과를 냄. 반드시 Python 원본을 펼쳐놓고 라인 단위 포팅할 것.
 
 ### AES envelope 포맷 (bit-identical with pyenvector)
 ```json

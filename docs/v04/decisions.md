@@ -271,12 +271,32 @@ func GetString(m map[string]any, key string) (string, bool) {
     s, ok := m[key].(string)
     return s, ok
 }
-func GetFloat(m map[string]any, key string) (float64, bool) { /* ... */ }
-func GetMap(m map[string]any, key string) (map[string]any, bool) { /* ... */ }
-func GetList(m map[string]any, key string) ([]any, bool) { /* ... */ }
+func GetBool(m map[string]any, key string) (bool, bool)                   { /* ... */ }
+func GetFloat(m map[string]any, key string) (float64, bool)               { /* ... */ }
+func GetMap(m map[string]any, key string) (map[string]any, bool)          { /* ... */ }
+func GetList(m map[string]any, key string) ([]any, bool)                  { /* ... */ }
 ```
 
 **주의**: Go `encoding/json`은 JSON number를 `float64`로 unmarshal. `confidence`·`phase_seq` 같은 숫자 필드 접근 시 `float64` 기대, int 필요하면 명시 변환.
+
+### `extracted` JSON 계약 (agent-delegated 필드)
+
+에이전트가 제공하는 `extracted` top-level 키:
+
+| key | 타입 | 용도 | Python 처리 위치 |
+|---|---|---|---|
+| `tier2` | object | 에이전트 tier2 판정 결과 | server.py:L1245-1254 |
+| `tier2.capture` | bool (default `true`) | `false`면 즉시 rejection | L1246 |
+| `tier2.reason` | string | rejection 사유 | L1250 |
+| `tier2.domain` | string (default `"general"`) | Domain 추론 결과 | L1254 |
+| `confidence` | number (0-1) | 에이전트 신뢰도 (클램프) | L1257-1261 |
+| `title` | string | 60자 truncate (D3) | record_builder |
+| `reusable_insight` | string | 임베딩 텍스트 우선 source (D14) | L1337 |
+| `phases` | array (max 7) | multi-phase/bundle records | L1272-1275 |
+| `payload.text` | string | fallback 임베딩 텍스트 | L1337 |
+| 기타 | — | DecisionRecord v2.1 필드 (domain, status, certainty, evidence, ...) | record_builder |
+
+**tier2 rejection 처리** (flows/capture.md Phase 2 참조) — `capture=false`면 Phase 3-7 skip.
 
 ---
 
@@ -847,13 +867,43 @@ Python `templates.py` 363 LoC:
 
 ### 결정
 
-**전체 포팅**.
+**전체 포팅** — Python 파일을 **canonical source로 선언**, Go는 라인 단위 미러링.
 
 근거:
 - Python 동작 equivalence 원칙 (D3·D11·D13과 일관)
 - `payload.text`는 envector에 저장돼 recall 때 활용. 단순화하면 기존 레코드와 차이 발생
 - 순수 함수라 포팅 기계적
 - 다국어 template은 일단 유지 (MVP scope 안에서 EN만 쓰더라도 KO/JA 포팅 비용 크지 않음)
+
+### 포팅 contract (Go 개발자가 구현할 항목)
+
+**Canonical source**: `agents/common/schemas/templates.py` (363 LoC, 읽기 필수)
+
+포팅 대상:
+
+| Python symbol (templates.py) | 라인 | Go 대응 | MVP 여부 |
+|---|---|---|---|
+| `PAYLOAD_TEMPLATE` (멀티라인 format string) | L14~ | const `payloadTemplate` | ✅ 필수 |
+| `_format_alternatives(alternatives, chosen)` — "chosen" marker 삽입 | L52 | `formatAlternatives` | ✅ 필수 |
+| `_format_trade_offs(trade_offs)` | L66 | `formatTradeOffs` | ✅ 필수 |
+| `_format_assumptions(assumptions)` | L73 | `formatAssumptions` | ✅ 필수 |
+| `_format_risks(risks)` | L85 | `formatRisks` | ✅ 필수 |
+| `_format_evidence(evidence)` — quote 번호 매김 | L97 | `formatEvidence` | ✅ 필수 |
+| `_format_links(links)` | L118 | `formatLinks` | ✅ 필수 |
+| `_format_tags(tags)` | L131 | `formatTags` | ✅ 필수 |
+| `render_payload_text(record)` — 메인 (phase_line/group_summary 삽입 포함) | L138-222 | `RenderPayloadText` | ✅ 필수 |
+| `render_compact_payload(record)` | L225 | `RenderCompactPayload` | 🟡 Post-MVP (retriever test에서만 사용) |
+| `render_display_text(record, language)` — 다국어 EN/KO/JA | L288 | `RenderDisplayText` | 🟡 Post-MVP (retriever test에서만 사용) |
+
+### 검증 방식 (필수)
+
+**Golden fixture test** — Python↔Go bit-identical 보장:
+
+1. Python에서 대표 DecisionRecord 50개 샘플로 `render_payload_text` 실행 → `testdata/payload_text/golden/{id}.md` 저장
+2. Go 구현에서 동일 input으로 실행 → **byte-for-byte 비교**
+3. 차이 발견 시 test fail
+
+이 fixture는 **포팅 완료 판정 기준**이다.
 
 ### 재평가 트리거
 
