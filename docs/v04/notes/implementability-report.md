@@ -120,23 +120,16 @@ detection = _detection_from_agent_data(
 
 **영향**: `_infer_provider_from_context` · `_maybe_reload_for_auto_provider` · `_client_provider_override` 모두 포팅 X.
 
-### 🟡 B.3 Phase 5 `extractPayloadText` fallback chain
+### ✅ B.3 Phase 5 `extractPayloadText` — **해소됨** (2026-04-22)
 
-**Python** (`searcher.py:L487-496`):
-```python
-payload = metadata.get("payload", {})
-if isinstance(payload, dict):
-    payload_text = payload.get("text", "")
-else:
-    payload_text = metadata.get("text", raw.get("text", ""))
+**Python** (`searcher.py:L487-496`): 4단계 fallback (payload.text → metadata.text/raw.text → decision.what → 빈 문자열).
 
-if not payload_text:
-    decision = metadata.get("decision", {})
-    if isinstance(decision, dict):
-        payload_text = decision.get("what", "")
-```
+**해소 방식**: P1 #3로 **D32 strict v2.1** 결정. v1/v2.0 schema fallback + decision.what bug 방어 fallback **모두 drop**.
 
-**Go 문서**: `recall.md:L848` — 한 줄 참조만
+- `spec/types.md` §5.1: `ExtractPayloadText` Go 함수 명세 (strict v2.1)
+- `spec/flows/recall.md` Phase 5: D32 참조 + 빈 결과 surface 원칙 명시
+
+**근거**: v0.4 Go는 Python v0.3 (schema v2.1)만 호환. payload.text는 `render_payload_text`가 자동 생성하므로 비어있으면 capture bug. masking 금지.
 
 **권고**: recall.md Phase 5 또는 SearchHit 변환 섹션에 4-step fallback 알고리즘 인라인.
 
@@ -206,7 +199,7 @@ if novelty_info["class"] == "near_duplicate":
 |---|---|---|
 | 3 | 6 enum 값 전수 | spec/components/rune-mcp.md |
 | ~~4~~ | ~~_maybe_reload_for_auto_provider 결정~~ | ✅ D31 Drop (2026-04-22) |
-| 5 | extractPayloadText fallback | spec/flows/recall.md Phase 5 |
+| ~~5~~ | ~~extractPayloadText fallback~~ | ✅ D32 Strict v2.1 (2026-04-22) |
 | 6 | AES envelope `"a"`, `"c"` 의미 | spec/flows/capture.md + recall.md footnote |
 | 7 | near_duplicate 응답 JSON shape | spec/flows/capture.md Phase 4 |
 | 8 | Vault MAX_MESSAGE_LENGTH 256MB gRPC 옵션 | spec/components/vault.md (verification-matrix C.4 동일) |

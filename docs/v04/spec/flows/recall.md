@@ -847,10 +847,13 @@ func toSearchHit(e envector.MetadataEntry) SearchHit {
 }
 ```
 
-`extractPayloadText` — Python `_to_search_result`에서 `metadata.get("payload", {}).get("text", "")` 패턴. DecisionRecord 2.1 schema의 payload 구조 참조.
+`extractPayloadText(metadata)` — `metadata.payload.text`만 본다. 없으면 빈 문자열 (fallback 없음).
+
+**D32** (strict v2.1): Python의 4단계 fallback (v1 schema `metadata.text`/`raw.text` + `decision.what` bug 방어)은 **전부 drop**. v0.4는 Python v0.3 schema v2.1만 호환. payload.text가 비어있다면 capture pipeline 버그로 간주하고 빈 결과 노출 (masking 금지). 상세 구현은 `spec/types.md` §5.1 `ExtractPayloadText` 참조.
 
 ### 관련 결정
 - **D26**: AES decrypt Vault 위임 + legacy base64 format 유지 + per-entry fallback 유지
+- **D32**: `payload_text` strict v2.1 (Python 4-step fallback drop)
 - Vault API 시그니처: `spec/components/vault.md`
 
 ### 에러 처리
