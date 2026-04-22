@@ -15,7 +15,7 @@
 | **Recall flow** | ✅ 95% Full | 0 | AES envelope 필드 의미 footnote |
 | **Lifecycle 6 tools** | ✅ 100% Full | 0 | 없음 |
 | **Vault/envector/embedder adapter** | ✅ 95% Full | 0 | Q3 ActivateKeys race, envector-go SDK PR (외부 대기) |
-| **Bootstrap · state machine · error** | 🟡 85% Full | 0 | `_maybe_reload_for_auto_provider` 결정 |
+| **Bootstrap · state machine · error** | ✅ 100% Full | 0 | (D31로 `_maybe_reload_for_auto_provider` drop 결정) |
 | **Capture flow** | 🟡 **70% Full** | **2** | **tier2 필드 + templates.py 상세** |
 | **DecisionRecord schema** | 🟡 Partial | 0 | 6 enum 값 전수 명시 |
 
@@ -112,23 +112,13 @@ detection = _detection_from_agent_data(
 
 **해소 방식**: P1 #1로 `spec/types.md` 신규 작성 (2026-04-22). 모든 도메인 타입의 단일 진실 소스로 설정.
 
-### 🟡 B.2 `_maybe_reload_for_auto_provider` 미명시
+### ✅ B.2 `_maybe_reload_for_auto_provider` — **해소됨** (2026-04-22)
 
-**Python**: `server.py:L451-488`
-- `_infer_provider_from_context(ctx)` — MCP clientInfo.name에서 provider 추론 (claude/openai/gemini)
-- `_maybe_reload_for_auto_provider(ctx)` — 추론된 provider가 override와 다르면 `_init_pipelines()` 재호출
-- 호출 위치: L706 (capture), L826 (batch_capture), L918 (recall)
+**Python**: `server.py:L451-488` — MCP clientInfo.name으로 LLM provider 자동 감지 후 `_init_pipelines()` 재실행 (legacy tier2/llm_extractor LLM 클라이언트용).
 
-**분석**:
-- 이 기능은 **legacy tier2/llm_extractor LLM 클라이언트**를 위한 것
-- D14 (agent-delegated) 모드에서 rune-mcp는 내부 LLM 사용 안 함
-- 따라서 **v0.4 Go에서는 실제로 dead code**일 가능성 높음
+**해소 방식**: P1 #2로 **D31 Drop** 결정 (2026-04-22). D14/D21/D28 조합으로 rune-mcp는 내부 LLM 호출 안 하므로 dead code. Go 포팅에서 완전 제외.
 
-**Go 문서**: 언급 **zero**
-
-**권고**: `overview/decisions.md`에 결정 추가:
-- "D14 agent-delegated로 내부 LLM 제거됨에 따라 auto-provider reload 기능 **Go에서 제거**"
-- 또는 runtime에 tier2 LLM 남겨둔다면 포팅 필요 명시
+**영향**: `_infer_provider_from_context` · `_maybe_reload_for_auto_provider` · `_client_provider_override` 모두 포팅 X.
 
 ### 🟡 B.3 Phase 5 `extractPayloadText` fallback chain
 
@@ -215,7 +205,7 @@ if novelty_info["class"] == "near_duplicate":
 | # | 항목 | 수정 위치 |
 |---|---|---|
 | 3 | 6 enum 값 전수 | spec/components/rune-mcp.md |
-| 4 | _maybe_reload_for_auto_provider 결정 (drop/port) | decisions.md 신규 결정 |
+| ~~4~~ | ~~_maybe_reload_for_auto_provider 결정~~ | ✅ D31 Drop (2026-04-22) |
 | 5 | extractPayloadText fallback | spec/flows/recall.md Phase 5 |
 | 6 | AES envelope `"a"`, `"c"` 의미 | spec/flows/capture.md + recall.md footnote |
 | 7 | near_duplicate 응답 JSON shape | spec/flows/capture.md Phase 4 |
