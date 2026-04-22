@@ -269,22 +269,15 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 - **Go 신규 기능**: `spec/components/embedder.md` Info cache 섹션에 `slog.Info("embedder info loaded", ...)` 명시. 첫 Info 호출 시 stderr 구조화 로그 1회. Claude Code가 수집.
 - **Post-MVP**: 모델 변경 자동 감지 (disk persist + 비교) · 재임베딩 migration tool은 실제 사용 패턴 관찰 후 결정
 
-### C.8 ⚠️ `capture.md:L522` "추후 작업" stale — **유효**
+### C.8 ✅ `capture.md` "추후 작업" stale — **해소됨** (2026-04-22)
 
-실제 확인 (`spec/flows/capture.md:L522-527`):
-```
-## 추후 작업 (capture flow 이후)
-- Recall flow (`spec/flows/recall.md` 예정)
-- Lifecycle flow (부팅 · Vault retry · shutdown)
-- Phase chain · group expansion (현재 DEFER)
-```
+reorganization 시점에 `spec/flows/capture.md:L681`의 "## 추후 작업" 섹션을 "## 관련 문서"로 재작성:
+- `spec/flows/recall.md` — "완성, 7-phase" 명시
+- `spec/flows/lifecycle.md` — "완성, 6-tool" 명시
+- Phase chain expansion — "D27에서 MVP 유지 결정" 명시
+- 에이전트 ExtractionResult — D4 `extracted` JSON 계약 참조
 
-**오류 3가지**:
-- recall.md는 이미 완성 (예정 아님)
-- lifecycle.md도 이미 완성
-- Phase chain은 D27에서 "유지" 결정됨 (DEFER 아님)
-
-**권고**: L522-527 전체 삭제 또는 완료 상태로 재작성.
+기존 3가지 stale 오류 전부 해소 완료.
 
 ### C.9 ~~commands/ 포팅 scope 명시 필요~~ — **무효**
 
@@ -328,7 +321,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 ### 🟢 P2 — 명확성 · 정합성
 
 5. ~~**[C.7] model_identity 로깅 위치 명시**~~ ✅ 해소 (2026-04-22) — `spec/components/embedder.md` Info cache slog 주입
-6. **[C.8] capture.md:L522-527 stale 문단 정리**
+6. ~~**[C.8] capture.md:L522-527 stale 문단 정리**~~ ✅ 해소 (reorganization 시점)
 7. **[C.2] envector error 매핑 방식 설명 추가 (typed error 전략 설명)**
 8. **[C.10] open-questions.md Q1-Q9 전체 재검토 + D6/D9/D29 Archived 반영**
 
@@ -371,4 +364,4 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 **v2에서 발견·수정된 오류**:
 1. vault-integration.md에 256MB 명시됐다고 잘못 판정 → grep 재검증으로 zero hit 확인 → C.4 P1으로 재오픈
 2. `_filter_by_time`과 `_filter_since`의 Python 라인 번호가 서로 바뀌어 기재됨 → searcher.py 직접 읽어 수정 (agent 2가 잘못 보고, 내가 전파)
-| capture.md:L522 stale | 확정 (+ 3가지 오류) | 🟢 유효 |
+| capture.md:L522 stale | reorganization 때 "관련 문서"로 재작성 | ✅ 해소 |
