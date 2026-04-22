@@ -285,7 +285,7 @@ func Seal(dek []byte, agentID string, plaintext []byte) (string, error) {
 | `policy/rerank.go` | `(0.7×raw + 0.3×decay) × status_mul`, half-life 90d |
 | `policy/query.go` | 31 intent regex, 81 stop words, 4-stage entity, 16 time patterns |
 | `policy/record_id.go` | `dec_YYYY-MM-DD_<domain>_<slug>` 생성 |
-| `policy/pii.go` | 5 regex (email/phone/API key prefix/32+hex/card) — 참조용. 실제 마스킹은 에이전트 md 책임 (결정 #13 방향) |
+| `policy/pii.go` | 5 regex (email/phone/API key prefix/32+hex/card) — **rune-mcp 내부에서 실행** (Python `record_builder.py:L228` `_redact_sensitive` bit-identical). `BuildPhases` 진입부에서 `raw_event.text`에 적용한 결과 `cleanText`가 extraction helpers (title/evidence/decision 추출)에 공급됨. `original_text` 필드에는 redact 전 원본 저장 (AES envelope으로 암호화되어 envector에 저장). D13 Option A에 따라 record_builder가 rune-mcp 소속 |
 
 **원칙**: 이 패키지는 테스트 fixture 기반 golden 비교로 Python과 bit-identical 보장.
 

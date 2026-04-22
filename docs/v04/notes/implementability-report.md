@@ -201,7 +201,7 @@ detection = _detection_from_agent_data(
 
 ### 🟢 P2 (Post-구현 가능)
 
-- PII redaction 책임 경계 명확화 (verification-matrix C.1)
+- ~~PII redaction 책임 경계~~ ✅ 해소 (verification-matrix C.1)
 - `render_compact_payload`, `render_display_text` 2 추가 함수 포팅 scope 결정
 - Q3 Multi-MCP ActivateKeys race 실측
 - envector-go SDK `OpenKeysFromFile` PR 머지 대기

@@ -65,7 +65,7 @@
 | Python module | Python 라인 | Go 문서 반영 | 검증 |
 |---|---|---|---|
 | `detector.py` threshold=0.35, high_conf=0.7 | detector.py:L42-43 | D14 (포팅 제외) + `capture.md` L230 참고용 | ✅ **의도적 제거** |
-| `record_builder.py` SENSITIVE_PATTERNS (5) | record_builder.py:L89-95 | `rune-mcp.md` L280 (policy/pii.go "참조용. 실제 마스킹은 에이전트 md 책임") vs `capture.md` L54, L256 (Phase 5a "PII 마스킹") | ⚠️ **문서 내부 모순** — §C.1 |
+| `record_builder.py` SENSITIVE_PATTERNS (5) + `_redact_sensitive` (L228, agent-delegated 모드에서도 호출) | record_builder.py:L89-95, L228 | `spec/components/rune-mcp.md` L288 (policy/pii.go rune-mcp 내부 실행) + `spec/flows/capture.md` Phase 5 책임 명확화 | ✅ 해소 (2026-04-22) — D13 Option A bit-identical |
 | `llm_extractor.py` PHASE_SPLIT=800, BUNDLE_SPLIT=1500 | llm_extractor.py:L22-25 | `capture.md` L229 참고용 | ✅ **의도적 제거** (D14) |
 | `tier2_filter.py` 19 domain (string) | tier2_filter.py:L47 (pipe-delimited) matches `schemas/decision_record.py` Domain enum (L21-39, 19 values) | D14 (포팅 제외) | ✅ `spec/types.md` §1.1 에 Go const 블록으로 정의 (2026-04-22) |
 
@@ -207,15 +207,19 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 
 ## C. Implementation Gaps & Ambiguities (v1에서 재검증된 것)
 
-### C.1 ⚠️ PII redaction 책임 — **Go 문서 내부 모순 발견**
+### C.1 ✅ PII redaction 책임 — **해소됨** (2026-04-22)
 
-- **Python**: `record_builder.py:L89-95` SENSITIVE_PATTERNS (5) + L130 `_redact_sensitive` 호출 (rune-mcp 내부)
-- **Go `rune-mcp.md:L280`**: "policy/pii.go | 5 regex ... **참조용. 실제 마스킹은 에이전트 md 책임** (결정 #13 방향)"
-- **Go `capture.md:L54`** (Phase 5a Mermaid): "record_builder → N records (**PII 마스킹** · domain 매핑 · certainty 규칙)"
-- **Go `capture.md:L256`**: "각 record: **PII 마스킹** · quote 추출 · certainty/status 규칙 · domain 매핑"
-- **Go `capture.md:L285`**: "pii.go # Redact (5 regex SENSITIVE_PATTERNS)"
-- **모순**: rune-mcp.md는 "에이전트 책임"이라 하는데 capture.md는 "Phase 5a rune-mcp에서 수행"으로 기술.
-- **권고**: 둘 중 하나로 통일. 보수적으로는 **rune-mcp가 2차 방어선으로 수행** (D14 에이전트가 놓친 것 방어). 또는 완전히 에이전트에 위임하고 rune-mcp에서 pii.go 제거.
+**Python 실측** (`record_builder.py`):
+- L89-95: `SENSITIVE_PATTERNS` 5개
+- L228 (`build_phases` 진입부): **agent-delegated 모드에서도 항상** `_redact_sensitive(raw_event.text)` 호출
+- `cleanText`: extraction helpers (title/evidence/decision 추출) 공급
+- `original_text=raw_event.text`: redact 전 원본 보존 (AES envelope으로 암호화되어 envector에 저장)
+
+**결론**: Python은 rune-mcp가 PII redaction 주체 (D13 Option A bit-identical).
+
+**문서 내부 모순 해소**:
+- `spec/components/rune-mcp.md:L288` policy/pii.go 설명 수정: "**rune-mcp 내부에서 실행** (Python `record_builder.py:L228` bit-identical). `BuildPhases` 진입부에서 호출, `cleanText`→extraction helpers 공급, `original_text`에는 원본 보존"
+- `spec/flows/capture.md` Phase 5 책임 명확화: "agent-delegated 모드에서도 **항상** 실행 (Python L228 bit-identical)"
 
 ### C.2 ⚠️ envector 11 연결 에러 패턴 — **구조적 차이 (의도적)**
 
@@ -316,8 +320,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 
 ### 🟡 P1 — 구현 입력 보충 (30분 이내)
 
-3. **[C.1] PII redaction 책임 경계 결정**  
-   에이전트 책임 명시 or rune-mcp 2차 방어선 유지 결정.
+3. ~~**[C.1] PII redaction 책임 경계 결정**~~ ✅ 해소 (2026-04-22) — Python 실측 기반: rune-mcp 주체 (D13 Option A)
 4. ~~**[C.3] Decision schema enum 정의 위치 명시**~~ ✅ 해소 (`spec/types.md`)  
    `spec/components/rune-mcp.md`에 6 enum 집합 정의 위치 확정.
 5. ~~**[C.4] Vault `MAX_MESSAGE_LENGTH=256MB` 명시**~~ ✅ 해소 (2026-04-22) — `spec/components/vault.md` "메시지 크기 제한" 섹션
