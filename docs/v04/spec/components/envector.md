@@ -222,6 +222,16 @@ if errors.Is(err, envector.ErrKeysAlreadyActivated) {
 
 SDK 내부에서 gRPC 에러는 `fmt.Errorf("envector: ... : %w", err)` 형태로 감싸서 나옴. `errors.Is(err, ...)` 체크 + `gRPC status.Code()` 재검사로 retry 가능성 판단.
 
+### Python 대비 (의도적 차이)
+
+Python `mcp/adapter/envector_sdk.py:L89-101`에는 연결 에러 감지용 **11개 string pattern** (`CONNECTION_ERROR_PATTERNS`): `"UNAVAILABLE"`, `"DEADLINE_EXCEEDED"`, `"Connection refused"`, `"Connection reset"`, `"Stream removed"`, `"RST_STREAM"`, `"Broken pipe"`, `"Transport closed"`, `"Socket closed"`, `"EOF"`, `"failed to connect"` — 자유 텍스트 에러 메시지에서 substring matching.
+
+**Go는 이 11 패턴을 포팅하지 않음**. 대신:
+- envector-go SDK가 **typed error** 제공 (`ErrKeysNotFound` 등) → `errors.Is()`로 판정
+- gRPC 에러는 `status.Code()` (`Unavailable`, `DeadlineExceeded` 등 enum) → code 비교로 판정
+
+**이유**: Go는 SDK 수준에서 structured error가 이미 노출됨. string matching은 취약 (메시지 변경 시 깨짐). Python은 SDK가 structured error 노출 안 해서 fallback으로 string matching 했던 것. 기능 동등, **구현 전략 차이**.
+
 ## 재연결
 
 Python의 `_with_reconnect` (`envector_sdk.py:185-196`)는 연결 끊김 감지 시 `ev.init(...)` 전체 재호출. 매우 공격적.
