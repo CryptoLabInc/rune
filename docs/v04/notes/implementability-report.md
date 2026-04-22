@@ -197,7 +197,7 @@ detection = _detection_from_agent_data(
 | ~~5~~ | ~~extractPayloadText fallback~~ | ✅ D32 Strict v2.1 (2026-04-22) |
 | 6 | AES envelope `"a"`, `"c"` 의미 | spec/flows/capture.md + recall.md footnote |
 | ~~7~~ | ~~near_duplicate 응답 JSON shape~~ | ✅ Python parity (D10 Archived) (2026-04-22) |
-| 8 | Vault MAX_MESSAGE_LENGTH 256MB gRPC 옵션 | spec/components/vault.md (verification-matrix C.4 동일) |
+| ~~8~~ | ~~Vault MAX_MESSAGE_LENGTH 256MB gRPC 옵션~~ | ✅ 해소 (2026-04-22) — `spec/components/vault.md` "메시지 크기 제한" 섹션 |
 
 ### 🟢 P2 (Post-구현 가능)
 

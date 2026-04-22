@@ -114,13 +114,44 @@ func HealthFallback(ctx context.Context, rawEndpoint string) error {
 각 rune-mcp 프로세스가 **자기 Vault gRPC 채널**을 독립적으로 관리. 공유 풀 없음.
 
 ```go
-conn, err := grpc.Dial(endpoint, grpc.WithTransportCredentials(creds))
+conn, err := grpc.NewClient(
+    endpoint,
+    grpc.WithTransportCredentials(creds),
+    grpc.WithDefaultCallOptions(
+        grpc.MaxCallRecvMsgSize(MaxVaultMessageLength), // 256MB (EvalKey 수용)
+        grpc.MaxCallSendMsgSize(MaxVaultMessageLength),
+    ),
+    grpc.WithKeepaliveParams(keepaliveParams),
+)
 defer conn.Close()
 client := vaultpb.NewRuneVaultServiceClient(conn)
 ```
 
 - 세션 3개 = Vault 연결 3개
 - Vault 서버 입장에서는 여러 token이 동시 접속 (같은 token일 수도, 다를 수도)
+
+### 메시지 크기 제한 (EvalKey 수용)
+
+Python `mcp/adapter/vault_client.py:L33, L166-169`와 bit-identical:
+
+```go
+// internal/adapters/vault/client.go
+const MaxVaultMessageLength = 256 * 1024 * 1024  // 256 MB
+
+// grpc.NewClient 생성 시 WithDefaultCallOptions로 주입
+grpc.WithDefaultCallOptions(
+    grpc.MaxCallRecvMsgSize(MaxVaultMessageLength),
+    grpc.MaxCallSendMsgSize(MaxVaultMessageLength),
+)
+```
+
+**왜 필요한가**:
+- `GetPublicKey` 응답의 `EvalKey`(FHE 연산키)가 **수십 MB** 크기
+- gRPC 기본 max message size = 4MB → **수신 실패** (`ResourceExhausted`)
+- Python은 `grpc.max_send_message_length` + `grpc.max_receive_message_length` 양방향 256MB
+- Go는 `MaxCallRecvMsgSize` + `MaxCallSendMsgSize` 동일 설정
+
+**insecure / secure 양쪽 동일 적용** (Python `vault_client.py:L170-182`는 TLS 분기 안에서도 같은 `options`를 전달).
 
 ### TLS
 

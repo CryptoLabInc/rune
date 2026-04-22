@@ -77,7 +77,7 @@
 | `vault_client.py` `decrypt_search_results` (L217) | L217-261 | `spec/components/vault.md` `DecryptScores` (L13-48) | ✅ |
 | `vault_client.py` `decrypt_metadata` | L263-295 | `spec/components/vault.md` `DecryptMetadata` | ✅ |
 | `vault_client.py` `health_check` | L301-337 | `spec/components/vault.md` L94-105 | ✅ |
-| `vault_client.py` `MAX_MESSAGE_LENGTH=256MB` | L33 | `spec/components/vault.md` **전체 미검색** (grep `256\|MAX_MESSAGE` → 0 hit, L218 `32바이트`만 있음) | ⚠️ **미명시 — v1 C.4 재오픈** |
+| `vault_client.py` `MAX_MESSAGE_LENGTH=256MB` | L33, L166-169 | `spec/components/vault.md` "메시지 크기 제한" 섹션 (MaxCallRecvMsgSize/MaxCallSendMsgSize) | ✅ 해소 (2026-04-22) |
 
 ### A.5 Common (agents/common/)
 
@@ -139,7 +139,7 @@
 | 20 | TimeScope.LAST_MONTH | searcher.py:L533 | 30 days | recall.md:L912 | 30*24h |
 | 21 | TimeScope.LAST_QUARTER | searcher.py:L534 | 90 days | recall.md:L913 | 90*24h |
 | 22 | TimeScope.LAST_YEAR | searcher.py:L535 | 365 days | recall.md:L914 | 365*24h |
-| 23 | Vault MAX_MESSAGE_LENGTH | vault_client.py:L33 | 256MB | vault-integration.md **미명시** | ❌ Go 문서 누락 |
+| 23 | Vault MAX_MESSAGE_LENGTH | vault_client.py:L33 | 256MB | spec/components/vault.md | ✅ 256MB |
 | 24 | CAPTURE_LOG_PATH | server.py:L112 | ~/.rune/capture_log.jsonl | lifecycle.md:L380 | 동일 |
 | 25 | capture_history limit cap | server.py:L1106 | 100 | lifecycle.md:L378 | 100 |
 | 26 | ENVECTOR_DIAGNOSIS_TIMEOUT | server.py:L633 | 5.0s | lifecycle.md:L187 | 5*time.Second |
@@ -229,19 +229,11 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 - **Go**: `spec/types.md` 신규 생성 — 8 enum + 9 sub-models + DecisionRecord v2.1 + I/O schemas 전체 중앙화
 - **해소**: P1 #1로 처리 완료. `spec/types.md`가 모든 도메인 타입의 단일 진실 소스.
 
-### C.4 🟡 P1: Vault `MAX_MESSAGE_LENGTH=256MB` 명시 필요 — **재오픈**
+### C.4 ✅ Vault `MAX_MESSAGE_LENGTH=256MB` — **해소됨** (2026-04-22)
 
-- **Python**: `vault_client.py:L33` `MAX_MESSAGE_LENGTH = 256 * 1024 * 1024` (256 MB)
-- **Go 문서**: `spec/components/vault.md`에 **없음** (grep `256\|MAX_MESSAGE` zero hit). 해당 문서에는 agent_dek 32바이트 제약만 있음.
-- **중요도**: gRPC 기본 max message size는 4MB. EvalKey는 수 MB ~ 수 십 MB이므로 **이 옵션 없으면 GetPublicKey 수신 실패** 가능.
-- **권고**: `spec/components/vault.md`에 gRPC 연결 설정 섹션 추가:
-  ```go
-  const MaxVaultMessageLength = 256 * 1024 * 1024  // 256 MB (EvalKey ~tens of MB)
-  grpc.WithDefaultCallOptions(
-      grpc.MaxCallRecvMsgSize(MaxVaultMessageLength),
-      grpc.MaxCallSendMsgSize(MaxVaultMessageLength),
-  )
-  ```
+- **Python**: `vault_client.py:L33` `MAX_MESSAGE_LENGTH = 256 * 1024 * 1024` · `L166-169` grpc options 양방향 적용
+- **Go**: `spec/components/vault.md` "메시지 크기 제한 (EvalKey 수용)" 섹션에 `MaxCallRecvMsgSize` + `MaxCallSendMsgSize` 256MB 설정 명시 + "세션별 독립 연결" 예시 코드에도 반영
+- **해소 방식**: P1 #6 (2026-04-22). Python `vault_client.py:L33, L166-169` 실측 기반 이식.
 - **잘못 판정한 이력**: v1에서 gap으로 정확히 지적 → v2 초안에서 "해소됨"이라 잘못 씀 → v2 재검증에서 다시 gap으로 확정.
 
 ### C.5 ~~WARMUP_TIMEOUT 60s 명시 필요~~ — **해소됨**
@@ -328,8 +320,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
    에이전트 책임 명시 or rune-mcp 2차 방어선 유지 결정.
 4. ~~**[C.3] Decision schema enum 정의 위치 명시**~~ ✅ 해소 (`spec/types.md`)  
    `spec/components/rune-mcp.md`에 6 enum 집합 정의 위치 확정.
-5. **[C.4] Vault `MAX_MESSAGE_LENGTH=256MB` 명시**  
-   `spec/components/vault.md`에 gRPC max call size 설정 추가. 없으면 EvalKey 수신 실패.
+5. ~~**[C.4] Vault `MAX_MESSAGE_LENGTH=256MB` 명시**~~ ✅ 해소 (2026-04-22) — `spec/components/vault.md` "메시지 크기 제한" 섹션
 
 ### 🟢 P2 — 명확성 · 정합성
 
@@ -368,7 +359,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 | v1 주장 | v2 재검증 결과 | 상태 |
 |---|---|---|
 | STATUS_MULTIPLIER Go 값 미명시 ⚠️ | recall.md:L904-907 완전 명시 | ✅ 해소 |
-| Vault 256MB 명시 필요 | **vault-integration.md에 실제로 없음** (grep 0 hit) | 🟡 **유효 — P1 재오픈** |
+| Vault 256MB 명시 필요 | **vault-integration.md에 실제로 없음** → 2026-04-22 `spec/components/vault.md`에 명시됨 | ✅ 해소 |
 | WARMUP_TIMEOUT 60s 명시 필요 | server.py:L1059 + lifecycle.md:L584, 587, 602 명시 | ✅ 해소 |
 | rune-embedder 참조 7곳 | 실제 48곳 | 🔴 규모 수정 (P0) |
 | commands/ scope 미정 | Python 모듈 없음 (무효 질문) | ✅ 해소 |
