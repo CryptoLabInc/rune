@@ -60,7 +60,7 @@ service EmbedderService {
 - **dim**: Qwen3-Embedding-0.6B 기준 1024. `Info.vector_dim`으로 확인 후 불일치면 에러
 - **최대 텍스트 길이**: `Info.max_text_length` (문자 수). 초과 시 `INVALID_ARGUMENT` 반환
 - **최대 배치 크기**: `Info.max_batch_size`. 초과 시 rune-mcp 측에서 **split** 후 재호출
-- **model_identity**: 변경되면 저장된 embedding 공간 무효. MVP에서는 로깅만, 재임베딩은 Post-MVP
+- **model_identity**: 변경되면 저장된 embedding 공간 무효. MVP에서는 **slog 로깅만** (Info cache 섹션 참조, post-MVP 재임베딩 migration tool의 breadcrumb). 자동 감지·차단은 Post-MVP
 
 ## 소켓 경로
 
@@ -237,6 +237,14 @@ func (ic *infoCache) Get(ctx context.Context) (InfoSnapshot, error) {
             MaxTextLength: int(resp.MaxTextLength),
             MaxBatchSize:  int(resp.MaxBatchSize),
         }
+        // Breadcrumb for post-MVP re-embedding migration tool (D30).
+        // Model 변경 자동 감지/차단은 MVP scope 밖. 로그로만 기록.
+        slog.Info("embedder info loaded",
+            "daemon_version", ic.snap.DaemonVersion,
+            "model_identity", ic.snap.ModelIdentity,
+            "vector_dim", ic.snap.VectorDim,
+            "max_batch_size", ic.snap.MaxBatchSize,
+        )
     })
     return ic.snap, ic.err
 }

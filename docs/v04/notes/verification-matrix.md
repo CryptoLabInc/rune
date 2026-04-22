@@ -263,11 +263,11 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 1. 단순 rename이 아니라 **섹션 단위 재작성 필요한 곳** (구 HTTP 설계 기반 서술): decisions.md §D6, §D7 원문, §D15, §D29 — Archived 마커 붙이고 본문은 그대로 두는 것이 히스토리 보존 측면에서 유리
 2. Active 참조만 수정: `spec/components/rune-mcp.md`, `spec/components/envector.md`, `overview/open-questions.md` 이관 목록, `spec/python-mapping.md`
 
-### C.7 ⚠️ `model_identity` 로깅 위치 미명시
+### C.7 ✅ `model_identity` 로깅 위치 — **해소됨** (2026-04-22)
 
-- **Python**: model_identity 전용 로깅 없음 (실제 코드 확인)
-- **Go overview/decisions.md:L2031**: "MVP에서는 로깅만"
-- **권고**: `spec/spec/components/embedder.md` Info cache 섹션에 "첫 Info 조회 시 `model_identity`를 `~/.rune/logs/startup.log`에 구조화 로깅" 형식으로 명시.
+- **Python**: model_identity 전용 로깅 없음 (Python은 모델이 rune-mcp 내부이므로 개념 없음)
+- **Go 신규 기능**: `spec/components/embedder.md` Info cache 섹션에 `slog.Info("embedder info loaded", ...)` 명시. 첫 Info 호출 시 stderr 구조화 로그 1회. Claude Code가 수집.
+- **Post-MVP**: 모델 변경 자동 감지 (disk persist + 비교) · 재임베딩 migration tool은 실제 사용 패턴 관찰 후 결정
 
 ### C.8 ⚠️ `capture.md:L522` "추후 작업" stale — **유효**
 
@@ -327,7 +327,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 
 ### 🟢 P2 — 명확성 · 정합성
 
-5. **[C.7] model_identity 로깅 위치 명시**
+5. ~~**[C.7] model_identity 로깅 위치 명시**~~ ✅ 해소 (2026-04-22) — `spec/components/embedder.md` Info cache slog 주입
 6. **[C.8] capture.md:L522-527 stale 문단 정리**
 7. **[C.2] envector error 매핑 방식 설명 추가 (typed error 전략 설명)**
 8. **[C.10] open-questions.md Q1-Q9 전체 재검토 + D6/D9/D29 Archived 반영**
