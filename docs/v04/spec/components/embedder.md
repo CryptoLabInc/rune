@@ -278,5 +278,5 @@ func (ic *infoCache) Get(ctx context.Context) (InfoSnapshot, error) {
 ## 참고
 
 - Proto 파일: embedder 프로젝트 레포 (본 프로젝트에 소스는 두지 않음, `go.mod`로 import)
-- 결정 이력: `decisions.md` D6 · D9 · D29 (Archived), D30 (Current)
-- 관련 flow: `flows/capture.md` Phase 3 · 6, `flows/recall.md` Phase 3
+- 결정 이력: `overview/decisions.md` D6 · D9 · D29 (Archived), D30 (Current)
+- 관련 flow: `spec/flows/capture.md` Phase 3 · 6, `spec/flows/recall.md` Phase 3

@@ -28,36 +28,36 @@
 
 | Python tool | Python 라인 | Go 문서 | 검증 |
 |---|---|---|---|
-| `tool_capture` | server.py:L698-806 (entry) + L1208-1407 (`_capture_single`) + L1409-1486 (`_legacy_standard_capture`) | `flows/capture.md` L69-427 (Phase 1-7) | ✅ 모든 Phase line-level 일치 |
-| `tool_recall` | server.py:L910-1034 + L393-412 (`_calculate_confidence`) | `flows/recall.md` 전체 + L1253-1279 | ✅ 7 phase + confidence 11-point 일치 |
-| `tool_batch_capture` | server.py:L819-896 | `flows/lifecycle.md` §3 L249-333 | ✅ per-item novelty 독립 처리 |
-| `tool_capture_history` | server.py:L1101-1111 + L140-168 (`_read_capture_log`) | `flows/lifecycle.md` §4 L336-418 | ✅ reversed JSONL, limit 100, domain/since 필터 |
-| `tool_delete_capture` | server.py:L1123-1206 | `flows/lifecycle.md` §5 L421-536 | ✅ soft-delete (status=reverted, re-insert, capture_log) |
-| `tool_vault_status` | server.py:L496-528 | `flows/lifecycle.md` §1 L66-130 | ✅ |
-| `tool_diagnostics` | server.py:L540-684 | `flows/lifecycle.md` §2 L139-246 | ✅ 7 섹션, ENVECTOR_DIAGNOSIS_TIMEOUT=5s 일치 |
-| `tool_reload_pipelines` | server.py:L1046-1089 | `flows/lifecycle.md` §6 L539-607 | ✅ WARMUP_TIMEOUT=60s 일치 (server.py:L1059, lifecycle.md:L587) |
+| `tool_capture` | server.py:L698-806 (entry) + L1208-1407 (`_capture_single`) + L1409-1486 (`_legacy_standard_capture`) | `spec/flows/capture.md` L69-427 (Phase 1-7) | ✅ 모든 Phase line-level 일치 |
+| `tool_recall` | server.py:L910-1034 + L393-412 (`_calculate_confidence`) | `spec/flows/recall.md` 전체 + L1253-1279 | ✅ 7 phase + confidence 11-point 일치 |
+| `tool_batch_capture` | server.py:L819-896 | `spec/flows/lifecycle.md` §3 L249-333 | ✅ per-item novelty 독립 처리 |
+| `tool_capture_history` | server.py:L1101-1111 + L140-168 (`_read_capture_log`) | `spec/flows/lifecycle.md` §4 L336-418 | ✅ reversed JSONL, limit 100, domain/since 필터 |
+| `tool_delete_capture` | server.py:L1123-1206 | `spec/flows/lifecycle.md` §5 L421-536 | ✅ soft-delete (status=reverted, re-insert, capture_log) |
+| `tool_vault_status` | server.py:L496-528 | `spec/flows/lifecycle.md` §1 L66-130 | ✅ |
+| `tool_diagnostics` | server.py:L540-684 | `spec/flows/lifecycle.md` §2 L139-246 | ✅ 7 섹션, ENVECTOR_DIAGNOSIS_TIMEOUT=5s 일치 |
+| `tool_reload_pipelines` | server.py:L1046-1089 | `spec/flows/lifecycle.md` §6 L539-607 | ✅ WARMUP_TIMEOUT=60s 일치 (server.py:L1059, lifecycle.md:L587) |
 
 ### A.2 Retriever (agents/retriever/) — 전부 ✅
 
 | Python module | Python 라인 | Go 문서 | 검증 |
 |---|---|---|---|
-| `query_processor.py` INTENT_PATTERNS | L70-116 (31 regex, 7 intent) | `flows/recall.md` L224-291 | ✅ 전수 이식 |
-| `query_processor.py` TIME_PATTERNS | L119-124 (16 regex, 4 scope) | `flows/recall.md` L294-314 | ✅ |
-| `query_processor.py` STOP_WORDS | L127-137 (81 words) | `flows/recall.md` L376-411 | ✅ |
-| `query_processor.py` tech patterns | L345-350 (4 groups) | `flows/recall.md` L367-372 | ✅ |
-| `query_processor.py` entity extraction (4 stage, max 10) | L356 | `flows/recall.md` L359 | ✅ |
-| `query_processor.py` keyword extraction (len>2, max 15) | L370 | `flows/recall.md` L389 | ✅ |
-| `query_processor.py` expansion (max 5) | L417 | `flows/recall.md` L450 | ✅ |
-| `searcher.py` `search` (6-step pipeline) | L106-151 | `flows/recall.md` L880-891 | ✅ 순서 동일 |
-| `searcher.py` `_search_with_expansions` (`[:3]` cap, dedup, sort) | L153-176 | `flows/recall.md` L595-623 | ✅ |
-| `searcher.py` `_assemble_groups` | L178-226 | `flows/recall.md` L932-991 | ✅ interleave 로직 동일 |
-| `searcher.py` `_apply_metadata_filters` (domain/status/since) | L228-252 | `flows/recall.md` L1003-1015 | ✅ |
-| `searcher.py` `_filter_since` (ISO date lexicographic) | L254-271 | `flows/recall.md` L1018-1031 (`filterSince`) | ✅ |
-| `searcher.py` `_filter_by_time` (TimeScope 7/30/90/365 days) | L523-559 | `flows/recall.md` L1039-1057 (`filterByTime`) | ✅ |
-| `searcher.py` `_apply_recency_weighting` | L273-300 | `flows/recall.md` L1063-1092 | ✅ 공식·상수 line-by-line 일치 |
-| `searcher.py` `_expand_phase_chains` (max_chains=2) | L306-365 | `flows/recall.md` L920-926 | ✅ 구현 일치 (단 문서 상태 충돌 — §B.1) |
-| `searcher.py` `_search_via_vault` (AES envelope 분류) | L375-470 | `flows/recall.md` L628-660 + L714-778 | ✅ 3-way 분류 + batch decrypt + per-entry fallback |
-| `searcher.py` `search_by_id` | L561-567 | `components/embedder-integration.md` (EmbedSingle) | ✅ Go에서 명시 얇음 — 구현 가능 |
+| `query_processor.py` INTENT_PATTERNS | L70-116 (31 regex, 7 intent) | `spec/flows/recall.md` L224-291 | ✅ 전수 이식 |
+| `query_processor.py` TIME_PATTERNS | L119-124 (16 regex, 4 scope) | `spec/flows/recall.md` L294-314 | ✅ |
+| `query_processor.py` STOP_WORDS | L127-137 (81 words) | `spec/flows/recall.md` L376-411 | ✅ |
+| `query_processor.py` tech patterns | L345-350 (4 groups) | `spec/flows/recall.md` L367-372 | ✅ |
+| `query_processor.py` entity extraction (4 stage, max 10) | L356 | `spec/flows/recall.md` L359 | ✅ |
+| `query_processor.py` keyword extraction (len>2, max 15) | L370 | `spec/flows/recall.md` L389 | ✅ |
+| `query_processor.py` expansion (max 5) | L417 | `spec/flows/recall.md` L450 | ✅ |
+| `searcher.py` `search` (6-step pipeline) | L106-151 | `spec/flows/recall.md` L880-891 | ✅ 순서 동일 |
+| `searcher.py` `_search_with_expansions` (`[:3]` cap, dedup, sort) | L153-176 | `spec/flows/recall.md` L595-623 | ✅ |
+| `searcher.py` `_assemble_groups` | L178-226 | `spec/flows/recall.md` L932-991 | ✅ interleave 로직 동일 |
+| `searcher.py` `_apply_metadata_filters` (domain/status/since) | L228-252 | `spec/flows/recall.md` L1003-1015 | ✅ |
+| `searcher.py` `_filter_since` (ISO date lexicographic) | L254-271 | `spec/flows/recall.md` L1018-1031 (`filterSince`) | ✅ |
+| `searcher.py` `_filter_by_time` (TimeScope 7/30/90/365 days) | L523-559 | `spec/flows/recall.md` L1039-1057 (`filterByTime`) | ✅ |
+| `searcher.py` `_apply_recency_weighting` | L273-300 | `spec/flows/recall.md` L1063-1092 | ✅ 공식·상수 line-by-line 일치 |
+| `searcher.py` `_expand_phase_chains` (max_chains=2) | L306-365 | `spec/flows/recall.md` L920-926 | ✅ 구현 일치 (단 문서 상태 충돌 — §B.1) |
+| `searcher.py` `_search_via_vault` (AES envelope 분류) | L375-470 | `spec/flows/recall.md` L628-660 + L714-778 | ✅ 3-way 분류 + batch decrypt + per-entry fallback |
+| `searcher.py` `search_by_id` | L561-567 | `spec/spec/components/embedder.md` (EmbedSingle) | ✅ Go에서 명시 얇음 — 구현 가능 |
 | `synthesizer.py` | 전체 | D28 agent-delegated (미포팅) | ✅ **의도적 제거** |
 
 ### A.3 Scribe (agents/scribe/) — D14 agent-delegated ✅
@@ -73,18 +73,18 @@
 
 | 항목 | Python | Go 문서 | 검증 |
 |---|---|---|---|
-| `envector_sdk.py` CONNECTION_ERROR_PATTERNS (11개) | L89-101 | `components/envector-integration.md` L200-223 (typed error + gRPC status 매핑) | ⚠️ **구조적 차이 (intentional)**: Python은 string patterns / Go는 SDK typed error — 기능 동등 |
-| `vault_client.py` `decrypt_search_results` (L217) | L217-261 | `components/vault-integration.md` `DecryptScores` (L13-48) | ✅ |
-| `vault_client.py` `decrypt_metadata` | L263-295 | `components/vault-integration.md` `DecryptMetadata` | ✅ |
-| `vault_client.py` `health_check` | L301-337 | `components/vault-integration.md` L94-105 | ✅ |
-| `vault_client.py` `MAX_MESSAGE_LENGTH=256MB` | L33 | `components/vault-integration.md` **전체 미검색** (grep `256\|MAX_MESSAGE` → 0 hit, L218 `32바이트`만 있음) | ⚠️ **미명시 — v1 C.4 재오픈** |
+| `envector_sdk.py` CONNECTION_ERROR_PATTERNS (11개) | L89-101 | `spec/components/envector.md` L200-223 (typed error + gRPC status 매핑) | ⚠️ **구조적 차이 (intentional)**: Python은 string patterns / Go는 SDK typed error — 기능 동등 |
+| `vault_client.py` `decrypt_search_results` (L217) | L217-261 | `spec/components/vault.md` `DecryptScores` (L13-48) | ✅ |
+| `vault_client.py` `decrypt_metadata` | L263-295 | `spec/components/vault.md` `DecryptMetadata` | ✅ |
+| `vault_client.py` `health_check` | L301-337 | `spec/components/vault.md` L94-105 | ✅ |
+| `vault_client.py` `MAX_MESSAGE_LENGTH=256MB` | L33 | `spec/components/vault.md` **전체 미검색** (grep `256\|MAX_MESSAGE` → 0 hit, L218 `32바이트`만 있음) | ⚠️ **미명시 — v1 C.4 재오픈** |
 
 ### A.5 Common (agents/common/)
 
 | 항목 | Python | Go 문서 | 검증 |
 |---|---|---|---|
-| `config.py` schema (7 dataclass) | L26-97 | `components/rune-mcp.md` L207-226 (3-section Config) | ✅ |
-| `embedding_service.py` sbert/femb | L33-40 | `components/embedder-integration.md` (외부 프로세스 위임) | ✅ **의도적 이관** (D30) |
+| `config.py` schema (7 dataclass) | L26-97 | `spec/components/rune-mcp.md` L207-226 (3-section Config) | ✅ |
+| `embedding_service.py` sbert/femb | L33-40 | `spec/spec/components/embedder.md` (외부 프로세스 위임) | ✅ **의도적 이관** (D30) |
 | `language.py` detect_language | L111-172 | D21 (agent-side translation) | ✅ **의도적 제거** |
 | `schemas/decision_record.py` 6 enum (Domain 19 / Sensitivity 3 / Status 4 / Certainty 3 / ReviewState 4 / SourceType 7) | L19-80 | Go internal/domain/ 가정, 명시적 정의 위치 없음 | ⚠️ **정의 위치 명시 필요** — §C.3 |
 
@@ -104,10 +104,10 @@
 | 위치 | 기술 | 상태 |
 |---|---|---|
 | `decisions.md:1636-1670` D27 | "✅ Decided (2026-04-21) — 유지 (MVP)" | **최신** |
-| `flows/recall.md:1133, 1315` | "D27 유지" | D27 반영됨 |
+| `spec/flows/recall.md:1133, 1315` | "D27 유지" | D27 반영됨 |
 | `decisions.md:787` | "phase chain 로직은 post-MVP" | ⚠️ **stale (pre-D27)** |
 | `open-questions.md:183` | "MVP는 DEFER, flat list 반환" | ⚠️ **stale (pre-D27)** |
-| `research/python-codebase-map.md:145` | "MVP DEFER" | ⚠️ **stale (pre-D27)** |
+| `spec/python-mapping.md:145` | "MVP DEFER" | ⚠️ **stale (pre-D27)** |
 
 **실제 구현 확인**: Python `searcher.py:306-365` `_expand_phase_chains` 활성 + Go `recall.md:920-926` D27 유지 → **구현은 일치**, 문서만 충돌.
 
@@ -148,7 +148,7 @@
 
 **결과**: **27/28 일치 ✅, 1건 누락 ❌**. 
 - v1의 C.5 WARMUP 60s는 lifecycle.md:L587, L602에 실제 명시 확인 (v1 오류)
-- **v1의 C.4 Vault 256MB는 실제로 미명시**: v2 initial 업데이트에서 "명시됨"이라 적었으나 재검증 결과 `components/vault-integration.md` 전체에 256 / MAX_MESSAGE 문자열 zero. 실제로는 agent_dek 32바이트 제약만 명시. **C.4 재오픈.**
+- **v1의 C.4 Vault 256MB는 실제로 미명시**: v2 initial 업데이트에서 "명시됨"이라 적었으나 재검증 결과 `spec/components/vault.md` 전체에 256 / MAX_MESSAGE 문자열 zero. 실제로는 agent_dek 32바이트 제약만 명시. **C.4 재오픈.**
 
 ### B.3 Capture Phase 1-7 — 전부 ✅
 
@@ -220,21 +220,21 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 ### C.2 ⚠️ envector 11 연결 에러 패턴 — **구조적 차이 (의도적)**
 
 - **Python**: `envector_sdk.py:L89-101` 11개 string pattern
-- **Go**: `components/envector-integration.md:L200-223` SDK typed error + gRPC status code 매핑
+- **Go**: `spec/components/envector.md:L200-223` SDK typed error + gRPC status code 매핑
 - **판정**: **기능 동등, 구현 전략 차이**. Go는 typed errors로 상위화해 string matching 제거. matrix에서 ⚠️로 남기나 **블로커 아님**.
 
 ### C.3 ⚠️ Decision schema enum 정의 위치 명시 필요
 
 - **Python**: `agents/common/schemas/decision_record.py` L19-80 (6 enum, 총 40 값)
-- **Go**: `flows/capture.md` L140 근방 CaptureRequest 구조만 있음. **enum 전수 정의 위치 미명시**.
-- **권고**: `components/rune-mcp.md`에 `type Domain string; const(...)` 방식 enum 집합 정의 위치 확정.
+- **Go**: `spec/flows/capture.md` L140 근방 CaptureRequest 구조만 있음. **enum 전수 정의 위치 미명시**.
+- **권고**: `spec/components/rune-mcp.md`에 `type Domain string; const(...)` 방식 enum 집합 정의 위치 확정.
 
 ### C.4 🟡 P1: Vault `MAX_MESSAGE_LENGTH=256MB` 명시 필요 — **재오픈**
 
 - **Python**: `vault_client.py:L33` `MAX_MESSAGE_LENGTH = 256 * 1024 * 1024` (256 MB)
-- **Go 문서**: `components/vault-integration.md`에 **없음** (grep `256\|MAX_MESSAGE` zero hit). 해당 문서에는 agent_dek 32바이트 제약만 있음.
+- **Go 문서**: `spec/components/vault.md`에 **없음** (grep `256\|MAX_MESSAGE` zero hit). 해당 문서에는 agent_dek 32바이트 제약만 있음.
 - **중요도**: gRPC 기본 max message size는 4MB. EvalKey는 수 MB ~ 수 십 MB이므로 **이 옵션 없으면 GetPublicKey 수신 실패** 가능.
-- **권고**: `components/vault-integration.md`에 gRPC 연결 설정 섹션 추가:
+- **권고**: `spec/components/vault.md`에 gRPC 연결 설정 섹션 추가:
   ```go
   const MaxVaultMessageLength = 256 * 1024 * 1024  // 256 MB (EvalKey ~tens of MB)
   grpc.WithDefaultCallOptions(
@@ -246,7 +246,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 
 ### C.5 ~~WARMUP_TIMEOUT 60s 명시 필요~~ — **해소됨**
 
-- 실제 확인: `server.py:L1059` = 60.0s, `flows/lifecycle.md:L587` = `60*time.Second`. 양쪽 명시됨.
+- 실제 확인: `server.py:L1059` = 60.0s, `spec/flows/lifecycle.md:L587` = `60*time.Second`. 양쪽 명시됨.
 - v1 matrix의 주장은 **오류** (agent 4가 rune-mcp.md만 보고 tool_timeout 30s와 혼동).
 
 ### C.6 🔴 P0: rune-embedder 참조 ~48곳 — **매우 광범위**
@@ -254,31 +254,31 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 **정확한 카운트 (grep)**:
 | 파일 | 출현 |
 |---|---|
-| `decisions.md` | 18회 |
-| `open-questions.md` | 11회 |
-| `research/python-codebase-map.md` | 10회 |
-| `components/rune-mcp.md` | 8회 |
-| `components/envector-integration.md` | 1회 |
+| `overview/decisions.md` | 18회 |
+| `overview/open-questions.md` | 11회 |
+| `spec/python-mapping.md` | 10회 |
+| `spec/components/rune-mcp.md` | 8회 |
+| `spec/components/envector.md` | 1회 |
 | **합계** | **48회** (v1 matrix의 "7곳" 주장은 오류) |
 
-**상황**: D6/D9/D29가 Archived되어 embedder 담당 범위가 되었으므로 `rune-embedder`라는 이름 자체가 `embedder`로 바뀌어야 함. 본문에 HTTP+JSON 기반 구 설계 서술도 다수 (decisions.md:L1331, L1872, L1890 등). 추가로 중간 단계에서 "runed"로 잘못 rename된 부분도 있음 → `embedder`로 재정리. **해소됨** (2026-04-22).
+**상황**: D6/D9/D29가 Archived되어 embedder 담당 범위가 되었으므로 `rune-embedder`라는 이름 자체가 `embedder`로 바뀌어야 함. 본문에 HTTP+JSON 기반 구 설계 서술도 다수 (overview/decisions.md:L1331, L1872, L1890 등). 추가로 중간 단계에서 "runed"로 잘못 rename된 부분도 있음 → `embedder`로 재정리. **해소됨** (2026-04-22).
 
 **권고**: 
 1. 단순 rename이 아니라 **섹션 단위 재작성 필요한 곳** (구 HTTP 설계 기반 서술): decisions.md §D6, §D7 원문, §D15, §D29 — Archived 마커 붙이고 본문은 그대로 두는 것이 히스토리 보존 측면에서 유리
-2. Active 참조만 수정: `components/rune-mcp.md`, `components/envector-integration.md`, `open-questions.md` 이관 목록, `python-codebase-map.md`
+2. Active 참조만 수정: `spec/components/rune-mcp.md`, `spec/components/envector.md`, `overview/open-questions.md` 이관 목록, `spec/python-mapping.md`
 
 ### C.7 ⚠️ `model_identity` 로깅 위치 미명시
 
 - **Python**: model_identity 전용 로깅 없음 (실제 코드 확인)
-- **Go decisions.md:L2031**: "MVP에서는 로깅만"
-- **권고**: `components/embedder-integration.md` Info cache 섹션에 "첫 Info 조회 시 `model_identity`를 `~/.rune/logs/startup.log`에 구조화 로깅" 형식으로 명시.
+- **Go overview/decisions.md:L2031**: "MVP에서는 로깅만"
+- **권고**: `spec/spec/components/embedder.md` Info cache 섹션에 "첫 Info 조회 시 `model_identity`를 `~/.rune/logs/startup.log`에 구조화 로깅" 형식으로 명시.
 
 ### C.8 ⚠️ `capture.md:L522` "추후 작업" stale — **유효**
 
-실제 확인 (`flows/capture.md:L522-527`):
+실제 확인 (`spec/flows/capture.md:L522-527`):
 ```
 ## 추후 작업 (capture flow 이후)
-- Recall flow (`flows/recall.md` 예정)
+- Recall flow (`spec/flows/recall.md` 예정)
 - Lifecycle flow (부팅 · Vault retry · shutdown)
 - Phase chain · group expansion (현재 DEFER)
 ```
@@ -327,9 +327,9 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 3. **[C.1] PII redaction 책임 경계 결정**  
    에이전트 책임 명시 or rune-mcp 2차 방어선 유지 결정.
 4. **[C.3] Decision schema enum 정의 위치 명시**  
-   `components/rune-mcp.md`에 6 enum 집합 정의 위치 확정.
+   `spec/components/rune-mcp.md`에 6 enum 집합 정의 위치 확정.
 5. **[C.4] Vault `MAX_MESSAGE_LENGTH=256MB` 명시**  
-   `components/vault-integration.md`에 gRPC max call size 설정 추가. 없으면 EvalKey 수신 실패.
+   `spec/components/vault.md`에 gRPC max call size 설정 추가. 없으면 EvalKey 수신 실패.
 
 ### 🟢 P2 — 명확성 · 정합성
 

@@ -1,90 +1,111 @@
-# Rune v0.4.0 — Go 전환 아키텍처 문서
+# Rune v0.4.0 — Go 전환 설계 문서
 
-2026-04 기준 Go 포팅 설계 문서. 현재 Python 코드베이스(`mcp/`, `agents/`, `commands/`, `scripts/`)를 기반으로 새 아키텍처를 설계한다.
+2026-04 기준 Python MCP → Go MCP 포팅 설계 문서. Python 코드베이스(`mcp/`, `agents/`)를 기반으로 Go 구현을 위한 계약·결정·흐름을 정리한다.
 
-이 디렉토리는 **새로 쓰는 권위 있는 설계 문서**다. 이전 `docs/migration/` · `docs/runed/` 문서들은 레퍼런스·연구 자료로만 참조하고, 이 디렉토리가 향후 단일 진실 소스.
+**이 디렉토리가 단일 진실 소스**. 이전 `docs/migration/` · `docs/runed/` 문서는 히스토리·배경 자료로만 참조.
 
-## 핵심 아키텍처 요약
+## 핵심 아키텍처
 
-Python의 "세션당 MCP 프로세스에 embedding model까지 포함" 구조가 갖는 **모델 메모리 중복 문제**만 제거하고, 나머지는 Python 구조에 가깝게 유지한다:
+Python의 "세션당 MCP 프로세스에 embedding model까지 포함" 구조가 갖는 **모델 메모리 중복 문제**만 제거하고 나머지는 Python 구조에 가깝게 유지:
 
-- **`rune-mcp`** (이 프로젝트): 세션당 1개. stdio JSON-RPC. Claude Code가 spawn. **Python MCP를 Go로 포팅** (임베딩 제외)
+- **`rune-mcp`** (이 프로젝트): 세션당 1개. stdio JSON-RPC. Python MCP를 Go로 포팅 (임베딩 제외)
 - **`embedder`** (별도 프로세스, 가칭): 머신당 1개 상주. 임베딩 모델 전담. gRPC over unix socket
 - **Vault · envector**: 각 MCP가 독립적으로 gRPC 연결
 
-이득: 모델이 세션별로 복제되지 않아 메모리 N× 증가 제거. 동시에 세션 격리·Python 구조 유사성을 유지해 마이그레이션 cost 최소화. `embedder`는 외부 컴포넌트이므로 본 프로젝트는 **gRPC 클라이언트로만 사용**하며 모델·런타임 관리는 하지 않는다.
+`embedder`는 외부 컴포넌트. rune-mcp는 **gRPC 클라이언트로만** 사용.
 
-> **네이밍 히스토리**: 초기 설계에서 "runed"라는 이름으로 중앙화 통합 데몬(Python MCP 대체 + 임베딩 내장)을 구상했으나 폐기. 대신 **rune-mcp (Python MCP의 Go 포팅)** + **embedder (임베딩 전담 별도 프로세스)** 구조로 진행.
+> **네이밍 히스토리**: 초기 설계에서 "runed" (Python MCP 대체 + 임베딩 내장 통합 데몬)을 구상했으나 폐기. 현재는 **rune-mcp (Go 포팅) + embedder (임베딩 별도)** 구조.
 
 ## 디렉토리 구조
 
 ```
 docs/v04/
-├── README.md                       # 이 파일 (index)
-├── architecture.md                  # 3-프로세스 아키텍처 · 전체 그림
-├── decisions.md                     # ⭐ 결정 트래커 (모든 결정 — 가벼운 것부터 중대한 것까지)
-├── flows/                           # end-to-end flow 설계
-│   ├── capture.md                  # Capture 7-phase 전체 flow (D1~D20, D30)
-│   ├── recall.md                   # Recall 7-phase 전체 flow (D21~D28, D30)
-│   └── lifecycle.md                # 나머지 6개 MCP tool 설계
-├── components/                      # 컴포넌트별 설계
-│   ├── rune-mcp.md                 # 세션별 MCP (Go)
-│   ├── embedder-integration.md     # embedder 외부 gRPC 데몬 클라이언트 가이드 (D30)
-│   ├── vault-integration.md        # Vault gRPC 연동
-│   └── envector-integration.md     # envector-go SDK 연동
-├── open-questions.md                # 미결 항목 · 설계 디테일 TBD
-└── research/                        # 조사 · 근거 자료
-    └── python-codebase-map.md      # 현재 Python 코드 → 새 구조 매핑
+├── README.md                      # 이 파일 (index · role별 reading order)
+│
+├── overview/                      # 사람용 — Why & What
+│   ├── architecture.md             # 3-프로세스 구조 · 메모리 모델 · 원칙 · 상태머신
+│   ├── decisions.md                # D1-D30 결정 트래커 (배경·선택지·근거·재평가)
+│   └── open-questions.md           # Q1-Q9 미결 사항
+│
+├── spec/                          # 개발자용 — How (구현 계약)
+│   ├── flows/                      # Phase 단위 end-to-end 로직 + Go pseudocode
+│   │   ├── capture.md               # 7-phase capture
+│   │   ├── recall.md                # 7-phase recall
+│   │   └── lifecycle.md             # 6 tool (vault_status · diagnostics · batch_capture · …)
+│   ├── components/                 # 컴포넌트 계약 · 패키지 구조 · gRPC client 구현
+│   │   ├── rune-mcp.md              # 세션별 MCP 바이너리 (메인)
+│   │   ├── embedder.md              # 외부 embedder gRPC 클라이언트
+│   │   ├── vault.md                 # Vault gRPC 클라이언트
+│   │   └── envector.md              # envector-go SDK
+│   └── python-mapping.md           # Python 파일/LoC → Go 구조 매핑
+│
+└── notes/                         # 내부 작업 노트 (참고용)
+    ├── verification-matrix.md      # Python↔Go bit-identical 대조 검증 로그
+    └── implementability-report.md  # Go 개발자 진입 가능성 검증 리포트
 ```
-
-**`decisions.md` vs `open-questions.md` 구분**:
-- `decisions.md` — **모든 결정** 트래커. 가벼운 구현 선택(에러 코드 명명 등)부터 중대 결정(SDK 선택·보안 모델)까지 전부. 상태 마커 (Blocking/Pending/Deferred/Decided)로 무게 구분
-- `open-questions.md` — 아직 "결정 후보"로 정리 안 된 조사 중 항목
 
 ## 읽는 순서
 
-처음 보는 사람:
-1. 이 README → 전체 요약
-2. `architecture.md` → 왜·무엇을·어떻게
-3. `flows/capture.md` → 실제 end-to-end 흐름 (가장 구체적)
-4. `components/*.md` → 컴포넌트별 책임·API
-5. `decisions.md` → 결정 근거·대안
-6. `open-questions.md` → 아직 결정 안 된 것들
+### 🧑‍💼 **처음 보는 사람 / 리뷰어** (overview만 읽어도 충분)
 
-기존 Python 코드 아는 사람:
-1. `research/python-codebase-map.md` → 뭐가 어디로 옮겨지는가
-2. `flows/capture.md` → Phase 단위 Python ↔ Go 매핑
-3. `components/*.md` → 구체 설계
+1. 이 README → 전체 요약
+2. `overview/architecture.md` → 왜·무엇을·어떻게 (narrative)
+3. `overview/decisions.md` → 결정 히스토리·대안 근거
+4. `overview/open-questions.md` → 아직 결정 안 된 것들
+
+### 👨‍💻 **Go로 구현할 개발자**
+
+1. `overview/architecture.md` → 맥락 파악 (한 번만)
+2. `spec/python-mapping.md` → Python 파일 → Go 패키지 매핑
+3. `spec/flows/capture.md` → 7-phase 상세 흐름 (가장 구체적)
+4. `spec/flows/recall.md` → 동일
+5. `spec/flows/lifecycle.md` → 나머지 6 tool
+6. `spec/components/*.md` → 각 컴포넌트 gRPC 계약·패키지 구조
+7. 헷갈리면 `overview/decisions.md` D_N 참조 (spec 문서들이 D_N으로 link)
+
+### 🔍 **검증 상태 확인하고 싶은 사람**
+
+- `notes/verification-matrix.md` — 28 상수 · Phase 순서 · 함수 라인 전수 대조 결과
+- `notes/implementability-report.md` — "docs만으로 Go 구현 가능한가" 검증
+
+## overview vs spec vs notes
+
+| 유형 | 누가 읽나 | 성격 |
+|---|---|---|
+| **overview/** | PM, 아키텍트, 신규 참여자 | narrative prose, "왜"에 집중, 결정 히스토리 |
+| **spec/** | Go 개발자 | 구체 인터페이스·pseudocode·상수·에러 매핑, "어떻게"에 집중 |
+| **notes/** | 작성자·검증자 | 작업 중 발견·검증 로그, 참고용 |
+
+**`overview/decisions.md` vs `overview/open-questions.md` 구분**:
+- `decisions.md` — 모든 결정 트래커 (가벼운 구현 선택부터 중대 결정까지). 상태 마커 (Blocking/Pending/Deferred/Decided/Archived)로 무게 구분
+- `open-questions.md` — 아직 "결정 후보"로 정리 안 된 조사 중 항목
 
 ## 상태 (2026-04-22)
 
 | 영역 | 상태 |
 |---|---|
 | 아키텍처 방향 | ✅ 결정됨 (세션별 rune-mcp + 외부 embedder) |
-| rune-mcp 설계 | 🟢 Phase 1-7 결정 완료 (`flows/*.md`) |
-| embedder 통합 (gRPC 클라이언트) | ✅ 확정 (D30, gRPC proto 계약) |
+| rune-mcp 설계 (7-phase) | 🟢 완료 (`spec/flows/*.md`) |
+| embedder gRPC 통합 | ✅ 확정 (D30) |
 | Vault 연동 | ✅ 기존 Python 구조 유지 |
-| envector 연동 | 🟡 SDK 조건 완화 PR 대기 |
-| AES-MAC envelope | 🔵 Deferred (post-MVP) |
-| Capture flow | ✅ 완료 (D1~D20, D30 반영) |
-| Recall flow | ✅ 완료 (D21~D28, D30 반영) |
-| Lifecycle flow | ✅ 완료 (6 tool bit-identical 포팅) |
-| 벤치마크 계획 | 🟡 초안 |
+| envector 연동 | 🟡 SDK 조건 완화 PR 대기 (Q4) |
+| AES-MAC envelope | 🔵 Deferred Post-MVP (Q1) |
+| Python↔Go 대조 검증 | ✅ 완료 (`notes/verification-matrix.md`) |
+| Go 구현 진입 가능성 | 🟢 Ready (`notes/implementability-report.md`, P0 blocker 0건) |
 
 ## 이전 문서와의 관계
 
-기존 `docs/migration/python-go-comparison.html`은 **이전 방향(단일 데몬) 기준**으로 작성된 것. 2026-04-20 아키텍처 전환(세션별 MCP + embedder 분리)과 일부 충돌한다. 다음 처리:
-
-- 이 `docs/v04/`가 **권위 있는 설계 문서**. 앞으로의 논의·구현은 여기를 기준
-- 기존 HTML·노트는 **과거 의사결정 히스토리 · 배경 자료**로 보존. 삭제 안 함
-- 충돌하는 내용은 여기서 재서술. 일치하는 부분(정책 상수·Python 코드 실측 등)은 그대로 원용
+- 기존 `docs/migration/python-go-comparison.html` — 이전 방향(단일 데몬) 기준. 일부 충돌
+- 기존 `docs/runed/` — 폐기된 "runed" 통합 데몬 설계. 히스토리 보존
+- 이 `docs/v04/`가 권위 있는 설계 문서
 
 ## 용어
 
-- **rune-mcp**: Python MCP를 Go로 포팅한 세션별 바이너리 (임베딩 기능 제외). **본 프로젝트의 산출물**
-- **embedder**: 임베딩 모델을 호스팅하는 외부 gRPC 데몬 (가칭). 별도 프로세스. rune-mcp는 gRPC 클라이언트로만 사용
-- **runed**: ❌ 폐기된 이름. 초기 설계에서 "Python MCP 대체 + 임베딩 내장" 통합 데몬 의미였음. 현재는 사용 안 함
-- **Vault**: `rune-Vault` gRPC 서비스. FHE 키 관리 + 복호화 (`DecryptScores`/`DecryptMetadata`)
+- **rune-mcp**: Python MCP를 Go로 포팅한 세션별 바이너리 (임베딩 제외). **본 프로젝트 산출물**
+- **embedder**: 임베딩 모델 호스팅 외부 gRPC 프로세스 (가칭). rune-mcp는 gRPC 클라이언트로만 사용
+- **runed**: ❌ 폐기된 이름. 초기 "Python MCP 대체 + 임베딩 내장" 통합 데몬 의미
+- **Vault**: `rune-Vault` gRPC 서비스. FHE 키 관리 + 복호화 (`GetPublicKey`/`DecryptScores`/`DecryptMetadata`)
 - **envector**: enVector Cloud. FHE 벡터 저장·검색 (`Insert`/`Score`/`GetMetadata`)
-- **agent_dek**: 에이전트별 AES-256 DEK. metadata envelope 암호화용. Vault가 배포, rune 메모리에만
-- **Vault-delegated 보안 모델**: SecKey를 Vault가 보유, rune은 EncKey + EvalKey만 로컬. 복호화는 Vault RPC 경유
+- **agent_dek**: 에이전트별 AES-256 DEK. metadata envelope 암호화용. Vault가 배포, rune-mcp 메모리에만
+- **Vault-delegated 보안 모델**: SecKey는 Vault만 보유. rune-mcp는 EncKey + EvalKey만 로컬. 복호화는 Vault RPC 경유
+- **agent-delegated**: 에이전트(Claude Code 등)가 extraction·판정을 수행하고 rune-mcp는 저장·검색 파이프라인만 담당 (D14/D21/D28)

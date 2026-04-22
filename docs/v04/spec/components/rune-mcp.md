@@ -112,7 +112,7 @@ func runBootLoop(cfg *Config) {
 
 ## MCP 서버 구현 — 공식 SDK 채택
 
-`github.com/modelcontextprotocol/go-sdk` (v1.5.0+, stable) 사용. 이유·비교는 `decisions.md` D2 참조.
+`github.com/modelcontextprotocol/go-sdk` (v1.5.0+, stable) 사용. 이유·비교는 `overview/decisions.md` D2 참조.
 
 ```go
 import "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -221,7 +221,7 @@ Python `mcp/server/server.py`가 노출하는 8개 tool을 그대로 유지. 이
 
 **읽기만**. rune-mcp는 config.json을 수정하지 않음 (state 전환은 rune-mcp 메모리에서만, config.json에 쓰는 건 `/rune:configure` 시점뿐).
 
-envector 자격증명·embedding 설정·기타는 **메모리에만**. Vault 번들에서 매 부팅마다 재획득. 상세는 `architecture.md` 참조.
+envector 자격증명·embedding 설정·기타는 **메모리에만**. Vault 번들에서 매 부팅마다 재획득. 상세는 `overview/architecture.md` 참조.
 
 metadata는 `map[string]any`로 라운드트립 보존.
 
@@ -265,7 +265,7 @@ func Seal(dek []byte, agentID string, plaintext []byte) (string, error) {
 }
 ```
 
-**Open question**: MAC 필드 `"m"` 추가 (Q1, `open-questions.md` 참조).
+**Open question**: MAC 필드 `"m"` 추가 (Q1, `overview/open-questions.md` 참조).
 
 ## Policy (순수 함수, 공유)
 
@@ -354,7 +354,7 @@ internal/
 
 ## 제약 · 미결
 
-- AES envelope MAC 필드 (`open-questions.md` Q1)
+- AES envelope MAC 필드 (`overview/open-questions.md` Q1)
 - Multi-MCP에서 envector `ActivateKeys` 경쟁 (Q3)
 - envector-go SDK `OpenKeysFromFile` 조건 완화 PR (Q4)
 - Vault 영구 실패 UX (Q9)

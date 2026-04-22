@@ -1,8 +1,8 @@
 # Recall Flow — 전체 설계
 
-rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 end-to-end 흐름. 7-phase로 나뉘며 각 phase에서 내려진 결정은 `decisions.md`에 기록된다.
+rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 end-to-end 흐름. 7-phase로 나뉘며 각 phase에서 내려진 결정은 `overview/decisions.md`에 기록된다.
 
-이 문서는 **"전체를 한 번에 훑는 레퍼런스"**. 구현 디테일·대안 근거는 `decisions.md` 참조.
+이 문서는 **"전체를 한 번에 훑는 레퍼런스"**. 구현 디테일·대안 근거는 `overview/decisions.md` 참조.
 
 ## 개요
 
@@ -145,7 +145,7 @@ mcp.AddTool(srv, &mcp.Tool{Name: "rune_recall", Description: "..."},
 - rune-mcp는 **English query만** 파싱
 - Non-English 쿼리는 agent (Claude Code 등)가 호출 전 영어로 번역하여 전달
 - Multilingual LLM path는 Go rune-mcp에 **구현하지 않음**
-- 상세는 `decisions.md` D21 참조
+- 상세는 `overview/decisions.md` D21 참조
 
 ### 구현 형태
 
@@ -509,7 +509,7 @@ if err != nil {
 
 ### 요청/응답 계약 (proto)
 
-`components/embedder-integration.md` 참조. 요약:
+`spec/spec/components/embedder.md` 참조. 요약:
 
 ```
 rpc EmbedBatch(EmbedBatchRequest) returns (EmbedBatchResponse);
@@ -545,7 +545,7 @@ message EmbedResponse      { repeated float vector = 1 [packed = true]; }
 ### 구현 위치
 - `internal/adapters/embedder/client.go` — gRPC 래퍼 (capture와 공용)
 - `internal/service/recall.go` — Phase 3 dispatch
-- 상세: `components/embedder-integration.md`
+- 상세: `spec/spec/components/embedder.md`
 
 ### 테스트 전략
 - Unit: `embedderv1.EmbedderServiceClient` mock으로 `EmbedBatch` 요청 `texts` 검증
@@ -662,8 +662,8 @@ func (s *recallService) searchSingle(
 
 ### 관련 결정
 - **D25**: MVP는 순차 실행 (Python bit-identical). 병렬화·batch score는 Post-MVP.
-- Vault 연동: `components/vault-integration.md`
-- envector 연동: `components/envector-integration.md`
+- Vault 연동: `spec/components/vault.md`
+- envector 연동: `spec/components/envector.md`
 
 ### 에러 처리 방침 (Python L468-470 동일)
 
@@ -849,7 +849,7 @@ func toSearchHit(e envector.MetadataEntry) SearchHit {
 
 ### 관련 결정
 - **D26**: AES decrypt Vault 위임 + legacy base64 format 유지 + per-entry fallback 유지
-- Vault API 시그니처: `components/vault-integration.md`
+- Vault API 시그니처: `spec/components/vault.md`
 
 ### 에러 처리
 

@@ -61,7 +61,7 @@
 **Go 포팅 방향**:
 - `internal/adapters/envector/sdk.go` — envector-go SDK 호출 wrapper
 - `internal/adapters/envector/aes_ctr.go` — AES envelope 생성 (rune 자체 구현)
-- monkey-patch 5개는 **envector-go SDK에 조건 완화 PR로 정식 지원 요청** (components/envector-integration.md 참조)
+- monkey-patch 5개는 **envector-go SDK에 조건 완화 PR로 정식 지원 요청** (spec/components/envector.md 참조)
 - `_with_reconnect`는 Go SDK의 `grpc.ClientConn` keepalive로 대체 가능성 → 실측
 
 ### mcp/adapter/vault_client.py (380 LoC) — Go adapter

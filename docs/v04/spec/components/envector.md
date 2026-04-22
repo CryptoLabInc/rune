@@ -14,7 +14,7 @@
 
 ## Vault-delegated 보안 모델
 
-기존 Python rune은 pyenvector의 `KeyParameter` 5개 property를 런타임에 monkey-patch해서 "SecKey 없어도 Encrypt 가능" 모드를 성립시킨다. Go에서는 monkey-patch가 언어적으로 불가능하므로 **envector-go SDK에 조건 완화 PR** 을 제출해 정식 지원 추가. 자세한 배경·근거는 Q4 (`open-questions.md`).
+기존 Python rune은 pyenvector의 `KeyParameter` 5개 property를 런타임에 monkey-patch해서 "SecKey 없어도 Encrypt 가능" 모드를 성립시킨다. Go에서는 monkey-patch가 언어적으로 불가능하므로 **envector-go SDK에 조건 완화 PR** 을 제출해 정식 지원 추가. 자세한 배경·근거는 Q4 (`overview/open-questions.md`).
 
 **요청할 SDK 패치 (방법 1)** — `keys.go`의 `OpenKeysFromFile` 내부 변경:
 
@@ -157,7 +157,7 @@ SDK 명시 (`doc.go`): *"Metadata is stored verbatim — the SDK never interpret
 - `GetMetadata` 응답의 `Metadata[i].Data`는 저장된 바이트 그대로 반환
 - **rune-mcp가 AES envelope JSON을 string으로 넣고, 꺼낼 때 parse + 복호화**. SDK는 관여 안 함
 
-AES envelope 포맷·코드는 `components/rune-mcp.md`의 "AES envelope" 섹션 참조. 결정 #4 (AES-256-CTR) + Q1 (MAC 추가).
+AES envelope 포맷·코드는 `spec/components/rune-mcp.md`의 "AES envelope" 섹션 참조. 결정 #4 (AES-256-CTR) + Q1 (MAC 추가).
 
 ## Build tags
 

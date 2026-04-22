@@ -60,7 +60,7 @@ detection = _detection_from_agent_data(
 
 **영향**: Python 에이전트가 보내는 실제 JSON shape와 Go 서버가 기대하는 shape 불일치 → agent integration 실패.
 
-**권고**: `flows/capture.md` Phase 2에 다음 추가:
+**권고**: `spec/flows/capture.md` Phase 2에 다음 추가:
 1. `CaptureRequest.extracted` JSON shape에 `tier2: {capture: bool, reason: string, domain: string}` 명시
 2. Phase 2 분기: `tier2.capture=false` → rejection response 조립
 3. `confidence` 필드 0-1 클램프 규칙
@@ -87,8 +87,8 @@ detection = _detection_from_agent_data(
 - `render_display_text` L288 (다국어 지원)
 
 **Go 문서 상태**:
-- `decisions.md` D15 (L830): "Python templates.py 363 LoC 전체 Go 포팅"
-- `flows/capture.md:L295`: "`payload_text.go` # RenderPayloadText (templates.py 이식)"
+- `overview/decisions.md` D15 (L830): "Python templates.py 363 LoC 전체 Go 포팅"
+- `spec/flows/capture.md:L295`: "`payload_text.go` # RenderPayloadText (templates.py 이식)"
 - **알고리즘·템플릿 문자열·헬퍼 로직 전부 Go 문서에 없음**
 
 **영향**: payload.text는 **embedding 대상 텍스트**. Python과 다르게 렌더하면 vector 공간이 달라져 recall 품질 변함. Bit-identical 테스트 통과 불가.
@@ -114,13 +114,13 @@ detection = _detection_from_agent_data(
 - SourceType (7): slack, meeting, doc, github, email, notion, other
 
 **Go 문서**: 
-- `decisions.md:L711`: "19 enum 매핑" 언급만
-- `flows/capture.md:L291`: "domain.go # ParseDomain · ParseSourceType (19 enum)" 언급만
+- `overview/decisions.md:L711`: "19 enum 매핑" 언급만
+- `spec/flows/capture.md:L291`: "domain.go # ParseDomain · ParseSourceType (19 enum)" 언급만
 - 실제 값 **전수 열거 어디에도 없음** (grep `"architecture"` → 2 hits, 예시 JSON)
 - STATUS_MULTIPLIER 키로 Status 4값은 유추 가능 (recall.md)
 - Certainty 3값은 calculateConfidence weights dict로 유추 가능
 
-**권고**: `components/rune-mcp.md`에 Go const 블록 추가:
+**권고**: `spec/components/rune-mcp.md`에 Go const 블록 추가:
 ```go
 const (
     DomainArchitecture Domain = "architecture"
@@ -143,7 +143,7 @@ const (
 
 **Go 문서**: 언급 **zero**
 
-**권고**: `decisions.md`에 결정 추가:
+**권고**: `overview/decisions.md`에 결정 추가:
 - "D14 agent-delegated로 내부 LLM 제거됨에 따라 auto-provider reload 기능 **Go에서 제거**"
 - 또는 runtime에 tier2 LLM 남겨둔다면 포팅 필요 명시
 
@@ -170,9 +170,9 @@ if not payload_text:
 ### 🟡 B.4 AES envelope 필드 의미 미설명
 
 **Python** (`searcher.py:L424`): `if "a" in parsed and "c" in parsed:` — 필드 의미 주석 없음  
-**Go `flows/capture.md:L299`**: `{"a": "agent_xyz", "c": "base64(IV||CT)"}` — 예시로만 설명
+**Go `spec/flows/capture.md:L299`**: `{"a": "agent_xyz", "c": "base64(IV||CT)"}` — 예시로만 설명
 
-**권고**: `flows/capture.md` Phase 5c와 `flows/recall.md` Phase 5에 footnote:  
+**권고**: `spec/flows/capture.md` Phase 5c와 `spec/flows/recall.md` Phase 5에 footnote:  
 > `"a"` = agent_id (16-32자), `"c"` = base64(IV(16B) ‖ AES-CTR ciphertext)
 
 ### 🟡 B.5 Phase 4 near_duplicate 응답 shape
@@ -224,19 +224,19 @@ if novelty_info["class"] == "near_duplicate":
 
 | # | 항목 | 수정 위치 | 예상 시간 |
 |---|---|---|---|
-| 1 | tier2 필드 처리 누락 | flows/capture.md Phase 2 + rune-mcp.md CaptureRequest | 30분 |
-| 2 | render_payload_text 포팅 전략 | decisions.md D15 + flows/capture.md Phase 5 | 15분 (A안: Python 참조 지정) |
+| 1 | tier2 필드 처리 누락 | spec/flows/capture.md Phase 2 + rune-mcp.md CaptureRequest | 30분 |
+| 2 | render_payload_text 포팅 전략 | decisions.md D15 + spec/flows/capture.md Phase 5 | 15분 (A안: Python 참조 지정) |
 
 ### 🟡 P1 (구현 병행 정비)
 
 | # | 항목 | 수정 위치 |
 |---|---|---|
-| 3 | 6 enum 값 전수 | components/rune-mcp.md |
+| 3 | 6 enum 값 전수 | spec/components/rune-mcp.md |
 | 4 | _maybe_reload_for_auto_provider 결정 (drop/port) | decisions.md 신규 결정 |
-| 5 | extractPayloadText fallback | flows/recall.md Phase 5 |
-| 6 | AES envelope `"a"`, `"c"` 의미 | flows/capture.md + recall.md footnote |
-| 7 | near_duplicate 응답 JSON shape | flows/capture.md Phase 4 |
-| 8 | Vault MAX_MESSAGE_LENGTH 256MB gRPC 옵션 | components/vault-integration.md (verification-matrix C.4 동일) |
+| 5 | extractPayloadText fallback | spec/flows/recall.md Phase 5 |
+| 6 | AES envelope `"a"`, `"c"` 의미 | spec/flows/capture.md + recall.md footnote |
+| 7 | near_duplicate 응답 JSON shape | spec/flows/capture.md Phase 4 |
+| 8 | Vault MAX_MESSAGE_LENGTH 256MB gRPC 옵션 | spec/components/vault.md (verification-matrix C.4 동일) |
 
 ### 🟢 P2 (Post-구현 가능)
 
