@@ -4,6 +4,8 @@ rune-mcp가 scribe 에이전트의 `rune_capture` tool 호출을 처리하는 en
 
 이 문서는 **"전체를 한 번에 훑는 레퍼런스"**. 구현 디테일·대안 근거는 `overview/decisions.md` 참조.
 
+> **타입 참조**: `CaptureRequest`·`CaptureResponse`·`DecisionRecord v2.1`·8 enum 등 모든 도메인 타입은 `spec/types.md`에 정의. 이 문서는 flow에만 집중.
+
 ## 개요
 
 에이전트가 의사결정 레코드를 저장하려 할 때:

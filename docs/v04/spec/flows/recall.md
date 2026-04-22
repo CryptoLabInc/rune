@@ -4,6 +4,8 @@ rune-mcp가 retriever 에이전트의 `rune_recall` tool 호출을 처리하는 
 
 이 문서는 **"전체를 한 번에 훑는 레퍼런스"**. 구현 디테일·대안 근거는 `overview/decisions.md` 참조.
 
+> **타입 참조**: `RecallArgs`·`RecallResult`·`SearchHit`·`ParsedQuery`·`QueryIntent`·`TimeScope` 등 모든 도메인 타입은 `spec/types.md`에 정의. 이 문서는 flow에만 집중.
+
 ## 개요
 
 에이전트가 사용자 질문으로 조직 메모리를 검색할 때:

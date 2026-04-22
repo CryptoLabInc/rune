@@ -67,7 +67,7 @@
 | `detector.py` threshold=0.35, high_conf=0.7 | detector.py:L42-43 | D14 (포팅 제외) + `capture.md` L230 참고용 | ✅ **의도적 제거** |
 | `record_builder.py` SENSITIVE_PATTERNS (5) | record_builder.py:L89-95 | `rune-mcp.md` L280 (policy/pii.go "참조용. 실제 마스킹은 에이전트 md 책임") vs `capture.md` L54, L256 (Phase 5a "PII 마스킹") | ⚠️ **문서 내부 모순** — §C.1 |
 | `llm_extractor.py` PHASE_SPLIT=800, BUNDLE_SPLIT=1500 | llm_extractor.py:L22-25 | `capture.md` L229 참고용 | ✅ **의도적 제거** (D14) |
-| `tier2_filter.py` 19 domain (string) | tier2_filter.py:L47 (pipe-delimited) matches `schemas/decision_record.py` Domain enum (L21-39, 19 values) | D14 (포팅 제외) | ⚠️ 에이전트가 알아야 할 Domain enum 정의 위치 명시 필요 — §C.3 |
+| `tier2_filter.py` 19 domain (string) | tier2_filter.py:L47 (pipe-delimited) matches `schemas/decision_record.py` Domain enum (L21-39, 19 values) | D14 (포팅 제외) | ✅ `spec/types.md` §1.1 에 Go const 블록으로 정의 (2026-04-22) |
 
 ### A.4 Adapter
 
@@ -86,7 +86,7 @@
 | `config.py` schema (7 dataclass) | L26-97 | `spec/components/rune-mcp.md` L207-226 (3-section Config) | ✅ |
 | `embedding_service.py` sbert/femb | L33-40 | `spec/spec/components/embedder.md` (외부 프로세스 위임) | ✅ **의도적 이관** (D30) |
 | `language.py` detect_language | L111-172 | D21 (agent-side translation) | ✅ **의도적 제거** |
-| `schemas/decision_record.py` 6 enum (Domain 19 / Sensitivity 3 / Status 4 / Certainty 3 / ReviewState 4 / SourceType 7) | L19-80 | Go internal/domain/ 가정, 명시적 정의 위치 없음 | ⚠️ **정의 위치 명시 필요** — §C.3 |
+| `schemas/decision_record.py` 6 enum (Domain 19 / Sensitivity 3 / Status 4 / Certainty 3 / ReviewState 4 / SourceType 7) | L19-80 | `spec/types.md` §1.1-1.6 (전수 Go const) | ✅ 해소 |
 
 ### A.6 Commands/ (`/Users/od/rune/commands/`)
 
@@ -223,11 +223,11 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 - **Go**: `spec/components/envector.md:L200-223` SDK typed error + gRPC status code 매핑
 - **판정**: **기능 동등, 구현 전략 차이**. Go는 typed errors로 상위화해 string matching 제거. matrix에서 ⚠️로 남기나 **블로커 아님**.
 
-### C.3 ⚠️ Decision schema enum 정의 위치 명시 필요
+### C.3 ✅ Decision schema enum 정의 위치 — **해소됨** (2026-04-22)
 
-- **Python**: `agents/common/schemas/decision_record.py` L19-80 (6 enum, 총 40 값)
-- **Go**: `spec/flows/capture.md` L140 근방 CaptureRequest 구조만 있음. **enum 전수 정의 위치 미명시**.
-- **권고**: `spec/components/rune-mcp.md`에 `type Domain string; const(...)` 방식 enum 집합 정의 위치 확정.
+- **Python**: `agents/common/schemas/decision_record.py` L19-80 (6 enum, 총 40 값) + `query_processor.py` L23-41 (QueryIntent 8 + TimeScope 5)
+- **Go**: `spec/types.md` 신규 생성 — 8 enum + 9 sub-models + DecisionRecord v2.1 + I/O schemas 전체 중앙화
+- **해소**: P1 #1로 처리 완료. `spec/types.md`가 모든 도메인 타입의 단일 진실 소스.
 
 ### C.4 🟡 P1: Vault `MAX_MESSAGE_LENGTH=256MB` 명시 필요 — **재오픈**
 
@@ -326,7 +326,7 @@ agent 3 직접 대조로 6개 tool 모두 **bit-identical** 확인:
 
 3. **[C.1] PII redaction 책임 경계 결정**  
    에이전트 책임 명시 or rune-mcp 2차 방어선 유지 결정.
-4. **[C.3] Decision schema enum 정의 위치 명시**  
+4. ~~**[C.3] Decision schema enum 정의 위치 명시**~~ ✅ 해소 (`spec/types.md`)  
    `spec/components/rune-mcp.md`에 6 enum 집합 정의 위치 확정.
 5. **[C.4] Vault `MAX_MESSAGE_LENGTH=256MB` 명시**  
    `spec/components/vault.md`에 gRPC max call size 설정 추가. 없으면 EvalKey 수신 실패.

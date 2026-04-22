@@ -103,31 +103,14 @@ detection = _detection_from_agent_data(
 
 ## B. 구현 친화성 문제 (블로커 아니지만 갭)
 
-### 🟡 B.1 Enum 값 전수 미명시
+### ✅ B.1 Enum 값 전수 — **해소됨** (2026-04-22)
 
-**Python** (`agents/common/schemas/decision_record.py:L19-80`):
-- Domain (19): architecture, security, product, exec, ops, design, data, hr, marketing, incident, debugging, qa, legal, finance, sales, customer_success, research, risk, general
-- Sensitivity (3): public, internal, restricted
-- Status (4): proposed, accepted, superseded, reverted
-- Certainty (3): supported, partially_supported, unknown
-- ReviewState (4): unreviewed, approved, edited, rejected
-- SourceType (7): slack, meeting, doc, github, email, notion, other
+**Python** (`agents/common/schemas/decision_record.py:L19-80`): Domain 19 · Sensitivity 3 · Status 4 · Certainty 3 · ReviewState 4 · SourceType 7 = 40값  
+**Python** (`agents/retriever/query_processor.py:L23-41`): QueryIntent 8 · TimeScope 5
 
-**Go 문서**: 
-- `overview/decisions.md:L711`: "19 enum 매핑" 언급만
-- `spec/flows/capture.md:L291`: "domain.go # ParseDomain · ParseSourceType (19 enum)" 언급만
-- 실제 값 **전수 열거 어디에도 없음** (grep `"architecture"` → 2 hits, 예시 JSON)
-- STATUS_MULTIPLIER 키로 Status 4값은 유추 가능 (recall.md)
-- Certainty 3값은 calculateConfidence weights dict로 유추 가능
+**Go 문서**: `spec/types.md` §1.1-1.8 — 8 enum 전수 Go const 블록 + `ParseDomain` 시그니처 등 포함.
 
-**권고**: `spec/components/rune-mcp.md`에 Go const 블록 추가:
-```go
-const (
-    DomainArchitecture Domain = "architecture"
-    DomainSecurity     Domain = "security"
-    // ... 19 values
-)
-```
+**해소 방식**: P1 #1로 `spec/types.md` 신규 작성 (2026-04-22). 모든 도메인 타입의 단일 진실 소스로 설정.
 
 ### 🟡 B.2 `_maybe_reload_for_auto_provider` 미명시
 

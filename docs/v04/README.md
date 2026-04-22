@@ -28,6 +28,7 @@ docs/v04/
 │   └── open-questions.md           # Q1-Q9 미결 사항
 │
 ├── spec/                          # 개발자용 — How (구현 계약)
+│   ├── types.md                    # 🔑 DecisionRecord v2.1 · 8 enum · I/O schemas (단일 진실 소스)
 │   ├── flows/                      # Phase 단위 end-to-end 로직 + Go pseudocode
 │   │   ├── capture.md               # 7-phase capture
 │   │   ├── recall.md                # 7-phase recall
@@ -56,12 +57,13 @@ docs/v04/
 ### 👨‍💻 **Go로 구현할 개발자**
 
 1. `overview/architecture.md` → 맥락 파악 (한 번만)
-2. `spec/python-mapping.md` → Python 파일 → Go 패키지 매핑
-3. `spec/flows/capture.md` → 7-phase 상세 흐름 (가장 구체적)
-4. `spec/flows/recall.md` → 동일
-5. `spec/flows/lifecycle.md` → 나머지 6 tool
-6. `spec/components/*.md` → 각 컴포넌트 gRPC 계약·패키지 구조
-7. 헷갈리면 `overview/decisions.md` D_N 참조 (spec 문서들이 D_N으로 link)
+2. `spec/types.md` → **모든 도메인 타입·enum·I/O schema** (항상 옆에 두기)
+3. `spec/python-mapping.md` → Python 파일 → Go 패키지 매핑
+4. `spec/flows/capture.md` → 7-phase 상세 흐름 (가장 구체적)
+5. `spec/flows/recall.md` → 동일
+6. `spec/flows/lifecycle.md` → 나머지 6 tool
+7. `spec/components/*.md` → 각 컴포넌트 gRPC 계약·패키지 구조
+8. 헷갈리면 `overview/decisions.md` D_N 참조 (spec 문서들이 D_N으로 link)
 
 ### 🔍 **검증 상태 확인하고 싶은 사람**
 
