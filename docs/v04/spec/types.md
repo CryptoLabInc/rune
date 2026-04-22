@@ -423,12 +423,14 @@ type CaptureResponse struct {
     Title    string `json:"title,omitempty"`
     Domain   Domain `json:"domain,omitempty"`
 
-    Reason   string       `json:"reason,omitempty"`   // captured=false 시 사유
-    Novelty  *NoveltyInfo `json:"novelty,omitempty"`  // near_duplicate 시 포함
-    SimilarTo string      `json:"similar_to,omitempty"` // D10: record_id 또는 "shard=X,row=Y"
+    Reason  string       `json:"reason,omitempty"`  // captured=false 시 사유
+    Novelty *NoveltyInfo `json:"novelty,omitempty"` // near_duplicate 시 포함 (related[] 배열로 중복 record 정보 전달)
 
     Error string `json:"error,omitempty"` // ok=false 시
 }
+
+// NOTE: Python 응답에 `similar_to` 필드 없음 (D10 Archived). 중복 record 정보는
+// `novelty.related[]`의 {id, title, similarity}로 전달. 에이전트는 related[0].id 사용.
 ```
 
 ### 4.2 RecallArgs / RecallResult

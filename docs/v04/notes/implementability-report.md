@@ -144,22 +144,14 @@ detection = _detection_from_agent_data(
 - `spec/flows/capture.md` Phase 5c: 짧은 설명 + rune-mcp.md link
 - `spec/flows/recall.md` Phase 5: 포맷 분류 설명에 필드 의미 1줄 추가
 
-### 🟡 B.5 Phase 4 near_duplicate 응답 shape
+### ✅ B.5 Phase 4 near_duplicate 응답 shape — **해소됨** (2026-04-22)
 
-**Python** (`server.py:L1363-1369`):
-```python
-if novelty_info["class"] == "near_duplicate":
-    return {
-        "ok": True,
-        "captured": False,
-        "reason": "Near-duplicate — virtually identical insight already stored",
-        "novelty": novelty_info,
-    }
-```
+**Python 응답** (`server.py:L1363-1369`): `{ok: true, captured: false, reason, novelty: {class, score, related[]}}`. `similar_to` 필드 없음.
 
-**Go `capture.md:L48`**: "near_duplicate (similar_to, OK=false)" — 필드 부분적 기술
-
-**권고**: 정확한 JSON shape 명시 (특히 `ok=True` vs `OK=false` 상충 해소).
+**해소 방식**:
+- `spec/flows/capture.md` Phase 4: Python 정확 응답 JSON 인라인 + `novelty.related[:3]` 조립 로직 포함 Go 의사코드 + 시퀀스 다이어그램 라벨 수정 (`OK=false` → `ok: true, captured: false`)
+- `spec/types.md` CaptureResponse: `SimilarTo` 필드 제거 + 주석으로 D10 Archived 명시
+- `overview/decisions.md` D10: 📦 Archived — Python parity 우선으로 `similar_to` 필드 drop. 중복 정보는 `novelty.related[]`로 전달
 
 ---
 
@@ -204,7 +196,7 @@ if novelty_info["class"] == "near_duplicate":
 | ~~4~~ | ~~_maybe_reload_for_auto_provider 결정~~ | ✅ D31 Drop (2026-04-22) |
 | ~~5~~ | ~~extractPayloadText fallback~~ | ✅ D32 Strict v2.1 (2026-04-22) |
 | 6 | AES envelope `"a"`, `"c"` 의미 | spec/flows/capture.md + recall.md footnote |
-| 7 | near_duplicate 응답 JSON shape | spec/flows/capture.md Phase 4 |
+| ~~7~~ | ~~near_duplicate 응답 JSON shape~~ | ✅ Python parity (D10 Archived) (2026-04-22) |
 | 8 | Vault MAX_MESSAGE_LENGTH 256MB gRPC 옵션 | spec/components/vault.md (verification-matrix C.4 동일) |
 
 ### 🟢 P2 (Post-구현 가능)
