@@ -56,14 +56,17 @@ docs/v04/
 
 ### 👨‍💻 **Go로 구현할 개발자**
 
-1. `overview/architecture.md` → 맥락 파악 (한 번만)
-2. `spec/types.md` → **모든 도메인 타입·enum·I/O schema** (항상 옆에 두기)
-3. `spec/python-mapping.md` → Python 파일 → Go 패키지 매핑
-4. `spec/flows/capture.md` → 7-phase 상세 흐름 (가장 구체적)
-5. `spec/flows/recall.md` → 동일
-6. `spec/flows/lifecycle.md` → 나머지 6 tool
-7. `spec/components/*.md` → 각 컴포넌트 gRPC 계약·패키지 구조
-8. 헷갈리면 `overview/decisions.md` D_N 참조 (spec 문서들이 D_N으로 link)
+**새 개발자라면 먼저 [`onboarding.md`](onboarding.md)** — 10분 안에 첫 PR 위치까지 안내 (환경 셋업 · 읽기 순서 · Phase별 starter task · 컨벤션 · FAQ).
+
+그 다음 (필요 시점에):
+
+1. `overview/architecture.md` → 맥락 + **§Scope** (agent-delegated only 전제가 프로젝트 전반을 좌우)
+2. [`../../internal/README.md`](../../internal/README.md) → 패키지 지도 (Go 파일 ↔ spec ↔ Python 원본 매핑표)
+3. `spec/types.md` → 모든 도메인 타입·enum·I/O schema (항상 옆에 두기)
+4. `spec/python-mapping.md` → Python 파일 → Go 패키지 LoC 매핑
+5. `spec/flows/{capture,recall,lifecycle}.md` → 담당 Phase에 해당하는 7-phase 흐름
+6. `spec/components/*.md` → 각 컴포넌트 gRPC 계약·패키지 구조
+7. 헷갈리면 `overview/decisions.md` D_N 참조 (spec 문서들이 D_N으로 link)
 
 ### 🔍 **검증 상태 확인하고 싶은 사람**
 
@@ -95,6 +98,7 @@ docs/v04/
 | Python↔Go 대조 검증 | ✅ 완료 (`notes/verification-matrix.md`) |
 | Go 구현 진입 가능성 | 🟢 Ready (`notes/implementability-report.md`, P0 blocker 0건) |
 | Go skeleton | ✅ 완료 (`2eb167d`, 37 파일, stdlib-only compile) |
+| 개발자 onboarding 가이드 | ✅ 완료 (`onboarding.md` · `internal/README.md`) |
 
 ## 구현 로드맵
 
