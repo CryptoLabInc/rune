@@ -2,6 +2,32 @@
 
 Rune v0.4.0의 전체 아키텍처 개요. "왜 이 모양인가"를 먼저 설명하고 "어떻게 생겼나"를 보인 뒤 "각 프로세스가 뭘 하는가"로 내려간다.
 
+## Scope (SOT) — agent-delegated only
+
+> **Source of Truth**: Python `rune` v0.3.x 중 **agent-delegated 경로**만을 canonical로 삼는다. Go rune-mcp는 이 경로의 bit-identical 이식을 목표로 한다.
+
+**포팅 대상 (agent-delegated path)**:
+- 에이전트(Claude Code 등)가 내부 LLM으로 전체 추출·판정을 수행하여 `ExtractionResult` JSON을 조립 → `tool_capture(extracted=...)`로 rune-mcp에 전달
+- rune-mcp는 validation + embedding(external gRPC) + FHE 저장/검색 + AES envelope + DecisionRecord 조립만 수행
+- rune-mcp는 LLM client 보유하지 않음
+
+**명시적으로 scope 밖** (Python에 존재하나 Go에 포팅 안 함):
+
+| 영역 | Python 위치 | 이유 |
+|---|---|---|
+| **Legacy 3-tier pipeline** (tier1 detector · tier2 LLM filter · tier3 LLM extractor) | `agents/scribe/{detector,tier2_filter,llm_extractor,pattern_parser}.py`, `agents/common/pattern_cache.py` | 에이전트가 내부 LLM으로 tier1-3 역할 모두 수행하고 결과를 `extracted` JSON으로 한 번에 전달. `extracted.tier2.*`는 legacy tier2_filter의 결과 슬롯 이름만 재사용 (D14) |
+| Legacy regex capture fallback | `server.py:_legacy_standard_capture` (L1409-1486) | 위 3-tier pipeline을 호출하는 경로. `detector is not None` 조건부로만 실행 |
+| Multilingual query LLM path | `query_processor.py:_parse_multilingual` (L237-281) | 에이전트가 호출 전 영어로 번역 (D21) |
+| Server-side synthesizer | `agents/retriever/synthesizer.py` | 에이전트가 결과 합성 담당 (D28) |
+| Auto-provider reload | `server.py:_maybe_reload_for_auto_provider` (L451-488) | rune-mcp에 LLM client 없으므로 무의미 (D31) |
+| Local embedding backends | `agents/common/embedding_service.py`, `mcp/adapter/embeddings.py` | external embedder 프로세스로 분리 (D30) |
+| Scribe webhook 서버 · Slack/Notion handlers | `agents/scribe/server.py`, `handlers/*.py` | MCP tool 경로가 아닌 독립 데몬 (완전 drop) |
+| 전이 의존성 | `agents/common/{llm_client,llm_utils,language,envector_client}.py`, `agents/scribe/review_queue.py` | 위 항목들이 import하는 thin wrapper / utility |
+
+**Python 측 방향성**: Python 0.3.x도 장기적으로 agent-delegated 경로로 수렴 예정. Go 전환과 병행하여 위 legacy 경로들은 Python에서도 제거 대상. v0.3.x는 과도기이며 LLM key 설정 사용자는 현재 legacy를 쓰지만 Go 전환 시점에 맞춰 정리된다.
+
+이 SOT 전제 하에서 Python의 "live하지만 scope 밖"인 코드 경로(위 표)는 Go 포팅 대상이 **아니며**, decisions.md의 D14/D21/D28/D30/D31은 이 scope의 세부 근거다.
+
 ## 왜 이렇게 바꾸는가 (문제 배경)
 
 현재 Python 구조의 **단 하나의 본질적 문제**는 다음이다:

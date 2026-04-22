@@ -122,24 +122,31 @@ result, err := idx.Insert(ctx, envector.InsertRequest{
 
 ### Recall 경로 (Python bit-identical, 비대칭 복호화 책임)
 
-```go
-// Step 1: Score (encrypted similarity)
-blobs, err := idx.Score(ctx, queryVec)
-// blobs: [][]byte CiphertextScore protos (SDK raw bytes)
+> **SDK 책임 경계 명시 (중요)**: envector-go SDK의 `Score` · `GetMetadata`는 **암호화 상태 그대로** 반환한다 (`Data` 필드는 opaque string). Python `envector_sdk.py:call_remind` (L293-356) 역시 `Vault.decrypt_metadata`를 호출하지 **않고** 받은 그대로 반환한다. 복호화(Vault RPC 호출) 책임은 **상위 orchestration**(Python `agents/retriever/searcher.py:L444,L455` ↔ Go `internal/service/recall.go`)에 있다. SDK는 복호화에 관여하지 않는다.
 
-// Step 2: base64 encode 후 Vault.DecryptScores 호출
+아래 코드 샘플은 **recall flow 전체 orchestration** 예시로, envector SDK 호출과 Vault 호출을 함께 보여준다. envector adapter 레이어 자체는 Step 1·3만 수행하며, Step 2·4의 Vault 호출은 service 레이어에서 이루어진다.
+
+```go
+// === internal/service/recall.go 레벨 orchestration ===
+
+// Step 1 (envector adapter): Score → encrypted similarity blob
+blobs, err := idx.Score(ctx, queryVec)
+// blobs: [][]byte CiphertextScore protos (SDK raw bytes, opaque)
+
+// Step 2 (service → vault adapter): base64 encode 후 Vault.DecryptScores 호출
 // (Python envector_sdk.py:L283-284 bit-identical: base64.b64encode(serialized).decode('utf-8'))
 blob0B64 := base64.StdEncoding.EncodeToString(blobs[0])
 scoreEntries, err := vaultClient.DecryptScores(ctx, blob0B64, /*top_k=*/ 5)
 // scoreEntries: []{shard_idx int32, row_idx int32, score float64}
 
-// Step 3: top-k 선별 후 metadata 조회
+// Step 3 (envector adapter): top-k 선별 후 metadata 조회
 refs := buildRefs(scoreEntries)
 metas, err := idx.GetMetadata(ctx, refs, []string{"metadata"})
 // metas[i].Data = 저장된 AES envelope string "{"a":...,"c":...}" (envector opaque 보관)
+// ← 여기까지가 envector SDK가 하는 일. 복호화 개입 없음.
 
-// Step 4: AES envelope 목록을 Vault.DecryptMetadata로 위임 복호화
-// (Python searcher.py:L395-470 bit-identical — 로컬 복호화 안 함. Vault에 위임해서 audit trail 보존)
+// Step 4 (service → vault adapter): AES envelope 목록을 Vault.DecryptMetadata로 위임
+// (Python searcher.py:L444·L455 bit-identical — service 레이어가 vault 직접 호출)
 envelopes := make([]string, 0, len(metas))
 for _, m := range metas {
     envelopes = append(envelopes, string(m.Data))
@@ -149,7 +156,12 @@ plaintextJSONs, err := vaultClient.DecryptMetadata(ctx, envelopes)
 // rune-mcp는 json.Unmarshal만 수행 (로컬 AES 복호화 없음)
 ```
 
-> **비대칭 책임 분담** (중요): capture는 rune-mcp가 local `agent_dek`으로 직접 암호화 (Seal). recall은 Vault.DecryptMetadata에 위임. rune-mcp는 recall 경로에서 AES 복호화 하지 않음. 상세는 `spec/components/vault.md` DecryptMetadata · `spec/components/rune-mcp.md` AES envelope 섹션 참조.
+> **비대칭 책임 분담 (3-레이어 관점)**:
+> - **Capture**: rune-mcp service 레이어가 local `agent_dek`으로 AES-256-CTR 암호화 → envelope 생성 → envector SDK의 `Insert`에 opaque string으로 전달 (SDK는 그대로 저장)
+> - **Recall**: envector SDK의 `GetMetadata`가 opaque ciphertext 반환 → service 레이어가 Vault.DecryptMetadata 별도 호출 → plaintext 획득
+> - **SDK 불변 계약**: capture·recall 양쪽 모두 envector SDK는 metadata를 **opaque string으로만 취급**. 암호화·복호화 어느 쪽에도 관여 안 함
+> 
+> 상세는 `spec/components/vault.md` DecryptMetadata · `spec/components/rune-mcp.md` AES envelope · `spec/flows/recall.md` Phase 5 참조.
 
 ## ActivateKeys · Multi-MCP 경쟁 (Q3)
 

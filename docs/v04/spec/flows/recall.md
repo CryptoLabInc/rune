@@ -1328,22 +1328,27 @@ func calculateConfidence(results []SearchHit) float64 {
     n := min(5, len(results))
     for i := 0; i < n; i++ {
         r := results[i]
-        positionWeight := 1.0 / float64(i+1)
+        positionWeight := 1.0 / float64(i+1)          // 1.0, 1/2, 1/3, 1/4, 1/5
         certWeight := confidenceCertaintyWeights[r.Certainty]
-        if certWeight == 0 { certWeight = 0.3 }  // default (unknown)
+        if certWeight == 0 { certWeight = 0.3 }       // default (unknown)
         weight := positionWeight * certWeight * r.Score
         totalScore += weight
     }
     if totalScore == 0 {
         return 0.0
     }
+    // "/2.0" = top-5 position_weight 합(1+1/2+1/3+1/4+1/5 ≈ 2.283)의 근사 정규화 상수.
+    // Python server.py:L412 bit-identical. top-5 모두 cert=supported + score=1.0이면
+    // totalScore ≈ 2.283 → v ≈ 1.14 → clamp로 1.0 보정. 일반적으로 [0, 1] 범위 결과.
     v := totalScore / 2.0
     if v > 1.0 { v = 1.0 }
     return math.Round(v*100) / 100  // round to 2 decimal (Python round(x, 2))
 }
 ```
 
-> Python은 `total_weight`와 `total_score`가 같은 값이라 중복 변수로 보이지만 그대로 유지 — 동일한 총합에 대한 두 가지 의미(weight sum / score sum) 의도로 해석. Go에선 단일 `totalScore`만 사용해 간결화.
+> **Python 변수 중복 정리**: Python `server.py:L402-409`은 `total_weight`와 `total_score`를 별도 변수로 두지만 같은 값만 누적한다 (의미상 동일한 총합). Go에선 단일 `totalScore`로 간결화.
+> 
+> **"/2.0" 상수 재평가 트리거**: 실제 운영 confidence 분포가 극단에 치우치면 (거의 항상 ≥0.9 또는 ≤0.1) 정규화 상수 튜닝 검토. 단 Python과 bit-identical 유지가 기본 — A/B 비교 없이 바꾸지 말 것.
 
 ### 관련 결정
 - **D28**: agent-delegated 경로만 구현 (synthesized 필드 고정 false)

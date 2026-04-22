@@ -300,10 +300,10 @@ Python `agents/common/config.py:L13-18, L358-365` bit-identical:
 envector-go SDK는 metadata를 **opaque string**으로 취급.
 
 **비대칭 책임 분담** (Python 동작 bit-identical):
-- **Capture 경로**: rune-mcp가 local `agent_dek`으로 AES-256-CTR 암호화 → envelope 생성 (Python `envector_sdk.py:L227-234`)
-- **Recall 경로**: rune-mcp가 envector에서 받은 AES envelope를 **Vault.DecryptMetadata**로 전송 → Vault가 복호화해서 plaintext JSON 반환 (Python `vault_client.py:L263-299` · `searcher.py:L417-464`)
+- **Capture 경로**: rune-mcp service 레이어가 local `agent_dek`으로 AES-256-CTR 암호화 → envelope 생성 → envector SDK의 Insert에 opaque string으로 전달 (Python `envector_sdk.py:L227-234, L249-253`)
+- **Recall 경로**: envector SDK의 `GetMetadata`(=Python `call_remind`)는 **ciphertext를 opaque로 그대로 반환만 함** — SDK는 decrypt 안 함. service 레이어(Python `searcher.py:L444` batch / `L455` per-entry fallback; Go `internal/service/recall.go` Phase 5)가 **Vault.DecryptMetadata를 직접 호출**해서 plaintext 획득 (Python `vault_client.py:L263-299` 정의)
 
-즉 rune-mcp는 암호화만 local, 복호화는 Vault 위임 (audit trail 보존).
+즉 rune-mcp는 암호화만 local, 복호화는 Vault 위임 (audit trail 보존). envector SDK는 양쪽 모두에서 metadata를 opaque string으로만 취급.
 
 **포맷** (pyenvector `mcp/adapter/envector_sdk.py:L227-234` + `pyenvector/utils/aes.py:L52-58`과 bit-identical):
 ```
@@ -364,6 +364,8 @@ func Seal(dek []byte, agentID string, plaintext []byte) (string, error) {
 - 한 줄 atomic append (fsync 후)
 
 Rotation: 초기엔 없음. 실측 후 lumberjack 등 검토.
+
+> **Python 대비 divergence (의도적)**: Python `mcp/server/server.py:L115-138` `_append_capture_log`는 **`os.O_APPEND`만 사용, flock 없음**. POSIX `O_APPEND`는 `PIPE_BUF`(4KB) 이하 single write에 대해 kernel이 atomic append 보장하므로 JSON line 1개(보통 500-1000B) 수준에선 inter-process race가 실질적으로 발생하지 않는다. Go가 `flock(LOCK_EX)`을 추가하는 건 **보수적 안전장치** — multi-session이 본격 활성화되는 Go 환경에서 lumberjack rotation 등 향후 확장 대비. 순수 정합성 목적이라면 Python과 동일하게 `O_APPEND`만으로도 충분하나, Go 표준 관행(`sync.Mutex` + `flock`)을 채택.
 
 ## Observability
 

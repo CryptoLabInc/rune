@@ -211,7 +211,7 @@
 - AES envelope 3-way classify (D26)
 
 **🟢 Safe to skip**:
-- `get_related` (Python L569-576): **사용 안 됨** (grep 결과 dead code). Go 포팅 scope 아님
+- `get_related` (Python L569-576): **확정 dead code** (2026-04-22 재검증). 전역 `rg "get_related" --type py` 결과: definition 1곳(`agents/retriever/searcher.py:L569`), production caller **0곳**, 테스트에도 호출 없음. Go 포팅 scope 아님.
 
 ### 7. `agents/scribe/record_builder.py` ✅ (2026-04-22)
 

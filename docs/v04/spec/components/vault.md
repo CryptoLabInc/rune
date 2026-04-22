@@ -46,8 +46,9 @@ Python `vault_client.py`가 호출하는 3 RPC 그대로 유지. proto도 기존
 - **입력**: `token` (vault_token) + `encrypted_metadata_list: List[str]` (AES envelope 문자열 배열, 각각 `{"a": agent_id, "c": base64(IV||CT)}`)
 - **출력**: `decrypted_metadata: List[str]` — **Vault가 AES 복호화까지 수행**한 plaintext **JSON 문자열** 배열. rune-mcp는 각 문자열을 `json.Unmarshal`로 parse만
 - **호출 시점**: recall Phase 5에서 AES envelope 포맷으로 분류된 entries에 대해 일괄 호출
-- **중요**: Vault가 agent_dek을 내부 보유하고 AES-256-CTR 복호화 수행. rune-mcp는 로컬 복호화 **안 함** (Vault-delegated audit trail). capture 경로에서는 rune-mcp가 직접 암호화하지만 (local agent_dek), recall 복호화는 Vault에 위임
-- **Python 참조**: `vault_client.py:L263-299` + proto docstring "Decrypts a list of AES-encrypted metadata strings"
+- **호출 주체 (중요)**: **service 레이어가 직접 호출** — envector SDK는 이 호출에 관여하지 **않는다**. Python 실측: `agents/retriever/searcher.py:L444` (batch decrypt), `L455` (per-entry fallback)가 유일한 production caller. `envector_sdk.call_remind`는 ciphertext를 opaque로 그대로 반환만 한다. Go 대응: `internal/service/recall.go` Phase 5에서 `vaultClient.DecryptMetadata` 직접 호출
+- **중요**: Vault가 agent_dek을 내부 보유하고 AES-256-CTR 복호화 수행. rune-mcp는 로컬 복호화 **안 함** (Vault-delegated audit trail). capture 경로에서는 rune-mcp가 직접 암호화하지만 (local agent_dek), recall 복호화는 Vault에 위임 — **비대칭 책임 분담**
+- **Python 참조**: `vault_client.py:L263-299` (정의) · `searcher.py:L444,L455` (호출) · proto docstring "Decrypts a list of AES-encrypted metadata strings"
 
 ## Endpoint 파싱·정규화
 
@@ -299,6 +300,8 @@ if len(bundle.AgentDEK) != 32 {
 ```
 
 이 검증 실패는 retry 의미 없음 (`retryable=false`).
+
+> **Python 대비 보안 개선 (의도적 divergence)**: Python `mcp/adapter/envector_sdk.py:L139` `self._agent_dek = agent_dek`는 **길이 검증 없음**. Vault가 잘못된 크기(16B, 64B 등)를 반환하거나 `None`을 반환해도 silent 수락 → runtime cryptographic error 또는 `_app_encrypt_metadata`의 `if self._agent_dek and metadata:` guard에 의해 metadata plaintext 전송 위험 (`L249`). Go는 이 gap을 **부팅 시점에 fail-fast**로 막는다. Python 측도 차기 정비 대상.
 
 ## 메모리 관리
 

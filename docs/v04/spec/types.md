@@ -11,6 +11,7 @@
 1. Enums (8개: 6 schema + 2 query)
 2. Sub-models (9개)
 3. DecisionRecord v2.1 (main schema)
+3a. Agent extraction types (ExtractionResult hierarchy) — agent가 보내는 `extracted` JSON의 내부 구조
 4. MCP tool I/O (CaptureRequest/Response, RecallArgs/Result)
 5. Internal types (SearchHit, ParsedQuery, Detection, NoveltyInfo)
 6. capture_log.jsonl entry
@@ -422,12 +423,138 @@ func EmbeddingTextForRecord(r *DecisionRecord) string {
 
 ---
 
+## 3a. Agent extraction types (ExtractionResult hierarchy)
+
+**Python 원본**: `agents/scribe/llm_extractor.py:L28-70`  
+**Go 이관 위치**: `internal/domain/extraction.go`  
+**관련 결정**: D4 (extracted map[string]any), D13 (record_builder Option A), D14 (agent-delegated)
+
+### 배경
+
+에이전트(Claude Code 등)가 내부 LLM으로 Python legacy 3-tier pipeline(detector/tier2_filter/llm_extractor) 역할을 **전부 수행**한 뒤, 결과를 `CaptureRequest.Extracted` JSON으로 rune-mcp에 전달한다. rune-mcp는 이 JSON에서:
+
+1. `tier2.*` + `confidence` → `Detection` 객체 (§5.3) via `_detection_from_agent_data`
+2. 나머지 필드 → `ExtractionResult` 객체로 조립
+3. 두 객체를 `record_builder.BuildPhases(rawEvent, detection, preExtraction=extraction)`에 주입 (D13 Option A)
+
+**Python 참조**: `mcp/server/server.py:L1208-1333` `_capture_single`이 `extracted` dict에서 이 두 객체를 조립한다. Python은 `from agents.scribe.llm_extractor import ExtractionResult, ExtractedFields, PhaseExtractedFields` (L1226-1228)를 **type import만** 사용 — runtime LLMExtractor 호출 없음.
+
+### 3a.1 ExtractedFields — single-record extraction
+
+Python: `llm_extractor.py:L28-37`
+
+```go
+// ExtractedFields: "single" 형태 extraction 결과.
+// phases 없이 한 개의 decision record를 만들 때 사용.
+type ExtractedFields struct {
+    Title        string   `json:"title,omitempty"`         // 60-rune truncate (D3)
+    Rationale    string   `json:"rationale,omitempty"`
+    Problem      string   `json:"problem,omitempty"`
+    Alternatives []string `json:"alternatives,omitempty"`
+    TradeOffs    []string `json:"trade_offs,omitempty"`
+    StatusHint   string   `json:"status_hint,omitempty"`   // "proposed" | "accepted" | "rejected"
+    Tags         []string `json:"tags,omitempty"`
+}
+```
+
+### 3a.2 PhaseExtractedFields — phase chain / bundle 구성요소
+
+Python: `llm_extractor.py:L40-49`
+
+```go
+// PhaseExtractedFields: phase_chain 또는 bundle의 각 phase.
+// ExtractionResult.Phases 배열에 담긴다.
+type PhaseExtractedFields struct {
+    PhaseTitle     string   `json:"phase_title,omitempty"`       // 60-rune truncate
+    PhaseDecision  string   `json:"phase_decision,omitempty"`
+    PhaseRationale string   `json:"phase_rationale,omitempty"`
+    PhaseProblem   string   `json:"phase_problem,omitempty"`
+    Alternatives   []string `json:"alternatives,omitempty"`
+    TradeOffs      []string `json:"trade_offs,omitempty"`
+    Tags           []string `json:"tags,omitempty"`
+}
+```
+
+### 3a.3 ExtractionResult — 최상위 (single / phase_chain / bundle 3형태)
+
+Python: `llm_extractor.py:L52-70`
+
+```go
+// ExtractionResult: agent extraction 결과 최상위 객체.
+// Single / phase_chain / bundle 세 형태 중 하나.
+type ExtractionResult struct {
+    GroupTitle   string                 `json:"group_title,omitempty"`
+    GroupType    string                 `json:"group_type,omitempty"`    // "phase_chain" | "bundle" | "" (single)
+    GroupSummary string                 `json:"group_summary,omitempty"` // 모든 phase 공유 1-line semantic anchor
+    StatusHint   string                 `json:"status_hint,omitempty"`
+    Tags         []string               `json:"tags,omitempty"`
+    Confidence   *float64               `json:"confidence,omitempty"`    // agent-provided [0.0, 1.0]
+    Single       *ExtractedFields       `json:"single,omitempty"`
+    Phases       []PhaseExtractedFields `json:"phases,omitempty"`
+}
+
+// IsMultiPhase: Python property (llm_extractor.py:L64-66)
+func (r *ExtractionResult) IsMultiPhase() bool {
+    return len(r.Phases) > 1
+}
+
+// IsBundle: Python property (llm_extractor.py:L68-70)
+func (r *ExtractionResult) IsBundle() bool {
+    return r.GroupType == "bundle" && len(r.Phases) > 1
+}
+```
+
+**Phases 상한**: `phase_chain`은 **최대 7개** (Python `llm_extractor.py:L329` `phases_data[:7]`), `bundle`은 **최대 5개** (L388 `phases_data[:5]`). Go 포팅 시 동일 상한 적용.
+
+### 3a.4 Extracted JSON ↔ 내부 객체 매핑 (wire format vs internal)
+
+**Wire format** (에이전트가 보내는 `CaptureRequest.Extracted` JSON의 top-level — D4):
+
+```json
+{
+  "tier2": {"capture": true, "reason": "...", "domain": "architecture"},
+  "confidence": 0.85,
+  "title": "PostgreSQL 선택",
+  "reusable_insight": "...",
+  "phases": [ { "phase_title": "...", "phase_decision": "...", ... } ],
+  "group_summary": "DB selection rationale",
+  "payload": {"text": "..."},
+  "status_hint": "accepted",
+  "tags": ["database"]
+}
+```
+
+**Internal objects** (rune-mcp 내부에서 조립):
+
+| Extracted JSON field | → Internal destination |
+|---|---|
+| `tier2.capture/reason/domain` | `Detection` (§5.3) via `DetectionFromAgent` + early rejection path (flows/capture.md Phase 2) |
+| `confidence` | `Detection.Confidence` + `ExtractionResult.Confidence` 양쪽 |
+| `title` (single) | `ExtractionResult.Single.Title` |
+| `phases[]` (exists) | `ExtractionResult.Phases` → phase_chain 또는 bundle |
+| `group_type` | `ExtractionResult.GroupType` (`"phase_chain"` / `"bundle"` / `""`) |
+| `group_summary` | `ExtractionResult.GroupSummary` (phase_chain에서 모든 phase 공유) |
+| `status_hint` | `ExtractionResult.StatusHint` |
+| `tags` | `ExtractionResult.Tags` |
+| `payload.text`, `reusable_insight` | `CaptureRequest.Extracted` top-level 유지 (Phase 2 embed text 선택에서 직접 read — D4) |
+
+즉 wire JSON은 flat하지만 내부에서 두 object로 split된다. 이 조립 로직은 `internal/service/capture.go`의 Phase 2에서 수행. 자세한 dispatch 규칙은 `spec/flows/capture.md` Phase 2·5 참조.
+
+**주의**:
+- `phases` 배열이 **존재하면** phase_chain 또는 bundle, **비어있거나 없으면** single (`ExtractionResult.Single` 사용)
+- `group_type=""` + `phases=nil` + `single=*` → single record
+- `group_type="phase_chain"` + `phases=[...]` → phase chain (각 phase가 별도 DecisionRecord, `_p{seq}` suffix)
+- `group_type="bundle"` + `phases=[...]` → bundle (첫 phase가 Core Decision, `_b{seq}` suffix)
+
+---
+
 ## 4. MCP tool I/O
 
 ### 4.1 CaptureRequest / CaptureResponse
 
 **Python 핸들러**: `server.py:L698-806` (entry) · L1208-1407 (`_capture_single`)  
-**결정**: D4 (extracted=map[string]any) · D14 (agent-delegated)
+**결정**: D4 (extracted=map[string]any) · D13 (record_builder Option A) · D14 (agent-delegated)  
+**내부 객체 매핑**: `Extracted` dict는 wire format. rune-mcp 내부에서 `Detection` (§5.3) + `ExtractionResult` (§3a) 두 객체로 조립된다. 자세한 필드 매핑 표는 §3a.4 참조.
 
 ```go
 type CaptureRequest struct {
@@ -435,10 +562,10 @@ type CaptureRequest struct {
     Source    string         `json:"source"`
     User      string         `json:"user,omitempty"`
     Channel   string         `json:"channel,omitempty"`
-    Extracted map[string]any `json:"extracted"` // agent-delegated 전수 payload
+    Extracted map[string]any `json:"extracted"` // agent-delegated 전수 payload — §3a.4 매핑 참조
 }
 
-// extracted 내 계약 필드 (overview/decisions.md D4 참조):
+// extracted 내 계약 필드 (overview/decisions.md D4 + §3a.4 매핑 참조):
 //   tier2.capture:  bool (default true)  — false면 rejection path
 //   tier2.reason:   string                — rejection reason
 //   tier2.domain:   string (default "general")
@@ -750,7 +877,11 @@ func ValidateEvidenceCertainty(r *DecisionRecord) bool {
 
 ## 9. 참조
 
-- Python 원본: `agents/common/schemas/decision_record.py` (260 LoC) · `agents/retriever/query_processor.py:L22-54`
+- Python 원본:
+  - `agents/common/schemas/decision_record.py` (260 LoC) — §1-3, §7
+  - `agents/retriever/query_processor.py:L22-54` — §1.7, §1.8, §5.2
+  - `agents/scribe/llm_extractor.py:L28-70` — §3a (ExtractionResult hierarchy, **type only** in agent-delegated mode)
+  - `agents/scribe/detector.py:L14-23` — §5.3 Detection (fields subset; full Python struct has matched_pattern/category/priority/top_matches unused in agent-delegated)
 - 관련 flow: `spec/flows/capture.md` Phase 2·5 · `spec/flows/recall.md` Phase 2·6·7
 - 관련 컴포넌트: `spec/components/rune-mcp.md` (tool 정의)
 - 관련 결정: D3 (title 60자), D4 (extracted map), D13 (DecisionRecord 조립 책임), D14 (agent-delegated), D16 (batch embed), D20 (capture_log 포맷)
