@@ -240,14 +240,22 @@ metadata는 `map[string]any`로 라운드트립 보존.
 
 envector-go SDK는 metadata를 **opaque string**으로 취급. AES 암·복호화는 rune-mcp 책임.
 
-**포맷** (pyenvector와 bit-identical):
+**포맷** (pyenvector `mcp/adapter/envector_sdk.py:L227-234` + `pyenvector/utils/aes.py:L52-58`과 bit-identical):
 ```
 {"a": agent_id, "c": base64(IV||CT)}
 ```
-- AES-256-CTR
-- IV 16B `crypto/rand`
-- padding 없음 (CTR 모드)
-- Wire: base64.StdEncoding
+
+**필드 의미**:
+- **`"a"`** = **agent_id** (string). Vault 번들에서 받은 에이전트 식별자 (예: `"agent_xyz"`). 복호화 시 `agent_dek` lookup 키로 사용. envector는 이 값을 보지 않음 (opaque)
+- **`"c"`** = **ciphertext**. `base64(IV(16B) ‖ AES-256-CTR(agent_dek, metadata_json_utf8))` — IV를 ciphertext 앞에 concat 후 전체를 base64 encoding
+
+**세부**:
+- Algorithm: AES-256-**CTR** (pyenvector 내부 docstring에 "GCM" 표기 있으나 실제 코드는 CTR — pyenvector bug)
+- IV: 16B `crypto/rand` (Python `secrets.token_bytes(16)` 대응)
+- padding: 없음 (CTR 모드)
+- AAD: 없음 (CTR에서 무의미)
+- Wire: `base64.StdEncoding`
+- MAC: **없음** — malleability 있음. Q1에서 HMAC-SHA256 필드 `"m"` 추가 검토 중 (Deferred)
 
 **Go 구현** (`internal/adapters/envector/aes_ctr.go`):
 ```go

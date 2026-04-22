@@ -12,7 +12,7 @@
 
 | 영역 | 구현가능성 | 블로커 | 수정 필요 |
 |---|---|---|---|
-| **Recall flow** | ✅ 95% Full | 0 | AES envelope 필드 의미 footnote |
+| **Recall flow** | ✅ 100% Full | 0 | (D32 `payload_text` + AES envelope 설명 완료) |
 | **Lifecycle 6 tools** | ✅ 100% Full | 0 | 없음 |
 | **Vault/envector/embedder adapter** | ✅ 95% Full | 0 | Q3 ActivateKeys race, envector-go SDK PR (외부 대기) |
 | **Bootstrap · state machine · error** | ✅ 100% Full | 0 | (D31로 `_maybe_reload_for_auto_provider` drop 결정) |
@@ -133,13 +133,16 @@ detection = _detection_from_agent_data(
 
 **권고**: recall.md Phase 5 또는 SearchHit 변환 섹션에 4-step fallback 알고리즘 인라인.
 
-### 🟡 B.4 AES envelope 필드 의미 미설명
+### ✅ B.4 AES envelope 필드 의미 — **해소됨** (2026-04-22)
 
-**Python** (`searcher.py:L424`): `if "a" in parsed and "c" in parsed:` — 필드 의미 주석 없음  
-**Go `spec/flows/capture.md:L299`**: `{"a": "agent_xyz", "c": "base64(IV||CT)"}` — 예시로만 설명
+**Python 원본 확인**: 
+- `mcp/adapter/envector_sdk.py:L227-234` — `{"a": agent_id, "c": base64(IV||CT)}` 생성
+- `pyenvector/utils/aes.py:L52-58` — AES-256-CTR (docstring의 "GCM" 표기는 pyenvector bug)
 
-**권고**: `spec/flows/capture.md` Phase 5c와 `spec/flows/recall.md` Phase 5에 footnote:  
-> `"a"` = agent_id (16-32자), `"c"` = base64(IV(16B) ‖ AES-CTR ciphertext)
+**해소 방식**:
+- `spec/components/rune-mcp.md` "AES envelope" 섹션에 필드 의미 명시 (`"a"`=agent_id, `"c"`=AES-256-CTR ciphertext) + 알고리즘·IV·padding·MAC 미존재 정보 추가
+- `spec/flows/capture.md` Phase 5c: 짧은 설명 + rune-mcp.md link
+- `spec/flows/recall.md` Phase 5: 포맷 분류 설명에 필드 의미 1줄 추가
 
 ### 🟡 B.5 Phase 4 near_duplicate 응답 shape
 

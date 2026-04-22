@@ -698,7 +698,7 @@ Python `_search_via_vault`의 outer `try/except Exception: logger.error(...); re
 Phase 4의 `envector.Remind` 응답에 담긴 `encrypted_entries`를 plaintext DecisionRecord로 변환:
 
 1. 각 entry의 `data` 필드를 3가지 포맷으로 분류 (D26):
-   - **AES envelope**: `{"a": agent_id, "c": base64(IV||CT)}` — Vault 위임 대상
+   - **AES envelope**: `{"a": agent_id, "c": base64(IV||CT)}` — `"a"`=agent_id, `"c"`=AES-256-CTR ciphertext. Vault 위임 대상. 상세는 `spec/components/rune-mcp.md` "AES envelope" 섹션 참조
    - **Plain JSON**: envelope이 아닌 평범한 JSON dict — 그대로 사용
    - **Legacy base64 JSON**: base64 decode 후 JSON parse (과거 포맷)
    - **Unrecognized**: 로그 경고 후 빈 metadata로 처리

@@ -400,14 +400,16 @@ internal/policy/
 
 > **Go 개발자 노트**: payload.text는 embedding 대상이므로 Python과 1자라도 다르면 vector 공간이 달라져 recall이 다른 결과를 냄. 반드시 Python 원본을 펼쳐놓고 라인 단위 포팅할 것.
 
-### AES envelope 포맷 (bit-identical with pyenvector)
+### AES envelope 포맷
+
 ```json
 {"a": "agent_xyz", "c": "base64(IV(16B) || CT)"}
 ```
-- AES-256-CTR
-- IV 16B `crypto/rand`
-- padding 없음 (stream cipher)
-- Wire: base64.StdEncoding
+
+- **`"a"`** = agent_id (Vault 번들에서 받은 식별자)
+- **`"c"`** = `base64(IV ‖ AES-256-CTR(agent_dek, metadata_json_utf8))`
+
+상세 (알고리즘·Go 구현·MAC 미존재 등)는 `spec/components/rune-mcp.md` "AES envelope" 섹션 참조 (pyenvector `mcp/adapter/envector_sdk.py:L227-234` bit-identical).
 
 ### 관련 결정
 - **D13**: record_builder를 rune-mcp로 Option A 포팅 (B·C 미래 선택지)
