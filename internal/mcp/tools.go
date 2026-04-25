@@ -71,7 +71,7 @@ func ToolCaptureHistory(ctx context.Context, deps *Deps, limit int, domainFilter
 	return nil, nil
 }
 
-// ToolDeleteCapture — rune_delete_capture. Python: server.py:L1113-1206.
+// ToolDeleteCapture — rune_delete_capture. Python: server.py:L1123-1206.
 // Soft-delete: search_by_id → set status=reverted → re-embed → re-insert → log.
 func ToolDeleteCapture(ctx context.Context, deps *Deps, recordID string) (any, error) {
 	// TODO: soft-delete flow
