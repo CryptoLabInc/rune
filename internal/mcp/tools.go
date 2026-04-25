@@ -17,6 +17,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -24,83 +25,97 @@ import (
 	"github.com/envector/rune-go/internal/service"
 )
 
-// Deps — injected into all handlers.
+// Deps — injected into all 8 MCP handlers.
 //
 // Phase A: empty struct. Adapter clients · state machine · config will be
 // added as Phase 4 (adapters) and Phase 5 (service orchestration) land.
-// Concrete fields stay commented until each adapter has a real Client type;
-// the handlers below close over deps already so no signature change later.
-type Deps struct {
-	// Vault      vault.Client
-	// Envector   envector.Client
-	// Embedder   embedder.Client
-	// CaptureLog *logio.CaptureLog
-	// State      *lifecycle.Manager
-	// Cfg        *config.Config
-}
+// stubHandler already takes deps as an argument, so Phase 5 will only need
+// to swap the closure body, not the signature.
+//
+// Future fields (commented as a contract sketch — to be activated as the
+// owning adapter PR lands):
+//
+//	Vault      vault.Client
+//	Envector   envector.Client
+//	Embedder   embedder.Client
+//	CaptureLog *logio.CaptureLog
+//	State      *lifecycle.Manager
+//	Cfg        *config.Config
+type Deps struct{}
 
 // emptyArgs — input type for tools that take no arguments.
 type emptyArgs struct{}
 
 // Register binds all 8 MCP tools onto the provided SDK server.
 //
-// Tool naming + ordering are bit-identical to Python `mcp/server/server.py`.
-// Descriptions are intentionally short — Claude reads them in tool selection,
-// not the user, so they should be a single concrete capability sentence.
-func Register(srv *sdkmcp.Server, deps *Deps) {
+// Tool names are bit-identical to Python `mcp/server/server.py`. Order in
+// this Register call is for readability only; the SDK sorts tools
+// alphabetically in `tools/list` output.
+//
+// AddTool can panic on schema-inference failure (SDK behavior). Register
+// recovers so a misconfigured tool surfaces as a startup error instead of
+// taking the process down silently after binding.
+func Register(srv *sdkmcp.Server, deps *Deps) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("mcp.Register: AddTool panic: %v", r)
+		}
+	}()
+
 	// Write tools (state gate applies in Phase 5).
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        "rune_capture",
 		Description: "Capture a decision record (agent-delegated extraction required).",
-	}, stubHandler[domain.CaptureRequest, domain.CaptureResponse]("rune_capture"))
+	}, stubHandler[domain.CaptureRequest, domain.CaptureResponse](deps, "rune_capture"))
 
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        "rune_batch_capture",
 		Description: "Capture a batch of decision records (e.g. session-end sweep).",
-	}, stubHandler[service.BatchCaptureArgs, service.BatchCaptureResult]("rune_batch_capture"))
+	}, stubHandler[service.BatchCaptureArgs, service.BatchCaptureResult](deps, "rune_batch_capture"))
 
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        "rune_recall",
 		Description: "Query organizational memory by natural-language question.",
-	}, stubHandler[domain.RecallArgs, domain.RecallResult]("rune_recall"))
+	}, stubHandler[domain.RecallArgs, domain.RecallResult](deps, "rune_recall"))
 
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        "rune_delete_capture",
 		Description: "Soft-delete a record by ID (sets status=reverted, re-inserts).",
-	}, stubHandler[service.DeleteCaptureArgs, service.DeleteCaptureResult]("rune_delete_capture"))
+	}, stubHandler[service.DeleteCaptureArgs, service.DeleteCaptureResult](deps, "rune_delete_capture"))
 
 	// Read / diagnostic tools (state gate bypass).
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        "rune_capture_history",
 		Description: "List recent captures from local capture_log.jsonl (read-only).",
-	}, stubHandler[service.CaptureHistoryArgs, service.CaptureHistoryResult]("rune_capture_history"))
+	}, stubHandler[service.CaptureHistoryArgs, service.CaptureHistoryResult](deps, "rune_capture_history"))
 
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        "rune_vault_status",
 		Description: "Probe Vault connectivity and report secure-search mode.",
-	}, stubHandler[emptyArgs, service.VaultStatusResult]("rune_vault_status"))
+	}, stubHandler[emptyArgs, service.VaultStatusResult](deps, "rune_vault_status"))
 
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        "rune_diagnostics",
 		Description: "Collect a 7-section health snapshot (env / state / vault / keys / pipelines / embedding / envector).",
-	}, stubHandler[emptyArgs, service.DiagnosticsResult]("rune_diagnostics"))
+	}, stubHandler[emptyArgs, service.DiagnosticsResult](deps, "rune_diagnostics"))
 
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        "rune_reload_pipelines",
 		Description: "Re-initialize Vault + envector pipelines (BOOT replay) with envector warmup.",
-	}, stubHandler[emptyArgs, service.ReloadPipelinesResult]("rune_reload_pipelines"))
+	}, stubHandler[emptyArgs, service.ReloadPipelinesResult](deps, "rune_reload_pipelines"))
 
-	_ = deps // Phase A unused; closures will capture this in Phase 5.
+	return nil
 }
 
 // stubHandler returns a SDK ToolHandlerFor that always responds with a
 // not-yet-implemented isError result. Output type is preserved so tools/list
 // can still publish the inferred output schema.
-func stubHandler[In, Out any](toolName string) sdkmcp.ToolHandlerFor[In, Out] {
-	return func(ctx context.Context, req *sdkmcp.CallToolRequest, in In) (*sdkmcp.CallToolResult, Out, error) {
-		_ = ctx
-		_ = req
-		_ = in
+//
+// deps is captured but unused in Phase A. Phase 5 will dereference it for
+// CheckState / service dispatch — the closure shape stays the same.
+func stubHandler[In, Out any](deps *Deps, toolName string) sdkmcp.ToolHandlerFor[In, Out] {
+	_ = deps // captured for Phase 5; intentionally unused now
+	return func(_ context.Context, _ *sdkmcp.CallToolRequest, _ In) (*sdkmcp.CallToolResult, Out, error) {
 		var zero Out
 		return stubResult(toolName), zero, nil
 	}

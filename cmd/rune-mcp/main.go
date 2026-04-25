@@ -16,11 +16,9 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -56,26 +54,21 @@ func main() {
 		Version: version,
 	}, nil)
 
-	mcp.Register(srv, deps)
+	if err := mcp.Register(srv, deps); err != nil {
+		slog.Error("rune-mcp register failed", "err", err)
+		os.Exit(1)
+	}
 
 	if err := srv.Run(ctx, &sdkmcp.StdioTransport{}); err != nil && !isNormalShutdown(err) {
-		log.Printf("rune-mcp serve error: %v", err)
+		slog.Error("rune-mcp serve error", "err", err)
 		os.Exit(1)
 	}
 }
 
-// isNormalShutdown reports whether err corresponds to expected stdio teardown
-// (stdin EOF, ctx cancel from SIGINT/SIGTERM, or the SDK's internal
-// jsonrpc2.ErrServerClosing surfacing as "server is closing"). Those are not
-// failures and must not produce exit code 1.
+// isNormalShutdown reports whether err corresponds to expected stdio teardown.
+// The SDK's `Connection.Wait` filters io.EOF to nil before returning, so on
+// stdin EOF Run returns nil. The only other expected exit is ctx cancel from
+// SIGINT/SIGTERM, which surfaces as context.Canceled.
 func isNormalShutdown(err error) bool {
-	if err == nil {
-		return true
-	}
-	if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-		return true
-	}
-	// jsonrpc2.ErrServerClosing lives in an internal package, so we can't use
-	// errors.Is. The message is stable per the SDK source.
-	return strings.Contains(err.Error(), "server is closing")
+	return err == nil || errors.Is(err, context.Canceled)
 }

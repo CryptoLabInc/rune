@@ -75,6 +75,8 @@
 | 11 | `adapters/logio/capture_log.go::Append` | 3/10 | write tool 3개 (CAP·BAT·DEL) |
 
 > **TM** = teammate scope. 타입 시그니처는 팀원 확정에 의존하지만, 내 구현 코드의 거의 모든 경로가 이 에러 타입을 참조한다.
+>
+> **현재 상태 (2026-04-25, Phase A 합격 후)**: Tier S 1·2·4 (`Deps`, `obs/slog`, `lifecycle/boot`)는 본 매트릭스가 "stdlib-only로 즉시 시작 가능"이라 분류했지만, 실제로는 Phase A가 vertical slice 우선 (SDK 연결)로 진행되며 **셋 다 still skeleton 상태**다. `Deps`는 빈 struct, `obs/slog`은 `NewRequestID() == ""` stub, `lifecycle/boot.go::RunBootLoop`은 `_ = ctx`. Phase A.5 또는 Phase 4 진입 전에 보강 필요. 자세한 phase별 상태는 [`docs/v04/progress/`](../progress/).
 
 ---
 

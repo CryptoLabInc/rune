@@ -26,15 +26,18 @@ README의 7-Phase 로드맵(Phase 1 외부 deps → Phase 7 검증)이 **horizon
 | 마일스톤 | 상태 | 문서 | 관련 커밋 |
 |---|---|---|---|
 | Phase A — MCP boot (handshake + tools/list) | ✅ 합격 | [phase-a-mcp-boot.md](phase-a-mcp-boot.md) | `19b7bf6` (브랜치 `yg/first-mcp-boot`) |
+| Phase A.5 — smoke test 추가 (CI 회귀 방지) | ⏳ 예정 | — | — |
+| Phase B — `rune_diagnostics` environment 섹션 진짜 응답 (stdlib only) | ⏳ 예정 | — | — |
+| Phase 1 — `go.mod` 외부 deps 본격 추가 (gRPC · envector SDK · embedder proto) | ⏳ 예정 | — | — |
+| Phase 2 — `internal/domain` + `internal/policy` 순수 로직 (TM scope) | ⏳ 예정 | — | — |
+| Phase 3 — `record_builder` 703 LoC + `payload_text` 364 LoC 포팅 (TM scope) | ⏳ 예정 | — | — |
+| Phase 4a — Vault 클라이언트 + 부팅 시퀀스 연결 | ⏳ 예정 | — | — |
+| Phase 4b — envector SDK 연결 (Q4 PR 머지 후) | ⏳ 예정 | — | — |
+| Phase 4c — embedder 클라이언트 | ⏳ 예정 | — | — |
+| Phase 5 — service 레이어 오케스트레이션 (`stubHandler` → 실제 service 호출) | ⏳ 예정 | — | — |
+| Phase 7 — golden fixture 기반 bit-identical 검증 | ⏳ 예정 | — | — |
 
-이후 마일스톤 (예정):
-- Phase B — `rune_diagnostics` environment 섹션 진짜 응답 (stdlib only)
-- Phase 1 — `go.mod` 외부 deps 본격 추가 (gRPC · envector SDK · embedder proto)
-- Phase 4a — Vault 클라이언트 + 부팅 시퀀스 연결
-- Phase 4b — envector SDK 연결 (Q4 PR 머지 후)
-- Phase 4c — embedder 클라이언트
-- Phase 5 — service 레이어 오케스트레이션
-- Phase 7 — golden fixture 기반 bit-identical 검증
+> Phase 6 (MCP wiring)은 Phase A에서 부분 선행됐으므로 별도 마일스톤으로 빼지 않음. Phase 5의 service 호출 교체에 흡수됨.
 
 ## 사용 방식
 
