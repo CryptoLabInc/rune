@@ -4,6 +4,7 @@
 > **관련 커밋**: [`19b7bf6`](../../../) — `feat(go): first MCP boot — handshake + tools/list (Phase A)`
 > **브랜치**: `yg/first-mcp-boot` (origin/`yg/first-mcp-boot`)
 > **수정 파일 5개**: `cmd/rune-mcp/main.go` · `internal/mcp/tools.go` · `go.mod` · `go.sum` · `.gitignore`
+> **빠른 실행**: §3 (검증 절차) · **§4 (명령어 cookbook — 8 tool 호출, bash 헬퍼, jq 패턴 등)**
 
 ## 목적
 
@@ -320,7 +321,190 @@ npx -y @modelcontextprotocol/inspector ./bin/rune-mcp
 
 ---
 
-## 4. Troubleshooting
+## 4. 명령어 cookbook (재사용 가능한 패턴)
+
+§3는 "한 번 합격하기 위한" 시퀀스고, 이 절은 **반복 작업 시 그냥 복사해서 쓰는 명령어 모음**. Phase A뿐 아니라 Phase B/4/5에서도 같은 회로로 재사용된다.
+
+### 4.1. 서버 실행 — 4가지 변형
+
+```bash
+cd /Users/redcourage/cryptolab/rune-project/rune
+go build -o bin/rune-mcp ./cmd/rune-mcp     # 빌드 (Go 1.25+ 필요)
+```
+
+| 시나리오 | 명령어 |
+|---|---|
+| **foreground 단순 실행** (stdin 대화 흐름은 안 됨, EOF로 종료) | `./bin/rune-mcp` |
+| **stdin EOF 즉시 종료** | `./bin/rune-mcp < /dev/null` |
+| **stderr 분리** (디버그 로그 따로 저장) | `./bin/rune-mcp 2>/tmp/rune-stderr.log` |
+| **log 두 곳 동시** | `./bin/rune-mcp 2> >(tee /tmp/rune-stderr.log >&2)` |
+| **백그라운드 + named pipe로 양방향** | 아래 §4.6 참고 |
+| **Inspector(GUI) 띄우기** | `npx -y @modelcontextprotocol/inspector ./bin/rune-mcp` |
+
+### 4.2. 단발 JSON-RPC 요청 — 가장 짧은 형태
+
+`initialize` 응답만 받기:
+
+```bash
+{ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"x","version":"0.0.1"}}}'; sleep 0.3; } | ./bin/rune-mcp 2>/dev/null | jq .
+```
+
+`tools/list`까지 받기 (initialize → notifications/initialized → tools/list 순서 필수):
+
+```bash
+{
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"x","version":"0.0.1"}}}'
+  sleep 0.3
+  printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  sleep 0.1
+  printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  sleep 0.5
+} | ./bin/rune-mcp 2>/dev/null | jq -r 'select(.id==2) | .result.tools[].name'
+```
+
+> **MCP framing 핵심 3개**:
+> 1. **순서 필수**: `initialize` → `notifications/initialized` → `tools/*`. 순서 어기면 SDK가 거절
+> 2. **줄바꿈 framing**: 각 메시지는 `\n` 으로 끝나야 함 (LSP의 Content-Length는 미사용)
+> 3. **stdin 종료 = 세션 종료**: 마지막 메시지 후 sleep 없으면 응답 받기 전에 EOF로 닫힘. **0.3~0.5초** 정도 마지막 sleep 권장
+
+### 4.3. 8 tool 각각 호출 — minimum 인자
+
+각 tool의 **input schema에서 필수 필드만 채운** 최소 호출. 응답은 모두 Phase A에서는 `isError=true` + "not yet implemented".
+
+```bash
+# rune_diagnostics — 인자 없음
+mcp_call rune_diagnostics
+
+# rune_vault_status — 인자 없음
+mcp_call rune_vault_status
+
+# rune_reload_pipelines — 인자 없음
+mcp_call rune_reload_pipelines
+
+# rune_capture_history — 모두 optional
+mcp_call rune_capture_history
+
+# rune_recall — query 필수
+mcp_call rune_recall '{"query":"hello"}'
+
+# rune_capture — text + source + extracted 필수
+mcp_call rune_capture '{"text":"hi","source":"test","extracted":{}}'
+
+# rune_delete_capture — record_id 필수
+mcp_call rune_delete_capture '{"record_id":"dec_test"}'
+
+# rune_batch_capture — items (string) 필수
+mcp_call rune_batch_capture '{"items":"[]"}'
+```
+
+`mcp_call` 헬퍼는 §4.4에 정의. 위 8줄을 그대로 붙여넣으면 8개 모두 동일한 stub 응답이 나오는 것을 확인할 수 있다.
+
+### 4.4. `mcp_call` bash 헬퍼 함수
+
+다음 블록을 `~/.zshrc` / `~/.bashrc` 또는 현재 셸에 그대로 붙여넣으면 `mcp_call` 명령어 사용 가능:
+
+```bash
+mcp_call() {
+  local tool="$1"
+  local args="$2"
+  [ -z "$args" ] && args='{}'
+  {
+    printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"x","version":"0.0.1"}}}'
+    sleep 0.3
+    printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    sleep 0.1
+    printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}"
+    sleep 0.5
+  } | ./bin/rune-mcp 2>/dev/null | jq -c 'select(.id==2)'
+}
+```
+
+> ⚠️ **함정 주의**: `local args="${2:-{}}"` 처럼 default value에 `}` 를 쓰면 bash parameter expansion이 깨져서 닫는 brace가 한 개 추가됨 (`{"query":"hello"}}` 가 됨). 위 코드처럼 `[ -z ... ] && args='{}'` 패턴으로 우회하는 게 안전.
+
+사용 예 (§4.3과 동일):
+
+```bash
+cd /Users/redcourage/cryptolab/rune-project/rune
+mcp_call rune_recall '{"query":"hello world"}'
+# {"jsonrpc":"2.0","id":2,"result":{"content":[...],"isError":true,...}}
+```
+
+### 4.5. 응답 분석 — `jq` 패턴 모음
+
+| 목적 | 명령어 (헬퍼 출력 또는 raw 출력에 파이프) |
+|---|---|
+| 8개 tool 이름만 보기 | `jq -r 'select(.id==2) \| .result.tools[].name'` |
+| 특정 tool의 input schema | `jq 'select(.id==2) \| .result.tools[] \| select(.name=="rune_recall") \| .inputSchema'` |
+| 특정 tool의 output schema | `jq 'select(.id==2) \| .result.tools[] \| select(.name=="rune_recall") \| .outputSchema'` |
+| 모든 tool의 required 필드 매트릭스 | `jq -r 'select(.id==2) \| .result.tools[] \| "\(.name): \(.inputSchema.required \| join(","))"'` |
+| `tools/call` 응답에서 텍스트 메시지만 | `jq -r 'select(.id==2) \| .result.content[0].text'` |
+| `tools/call` 응답의 isError + structuredContent | `jq 'select(.id==2) \| {isError: .result.isError, structured: .result.structuredContent}'` |
+| serverInfo만 | `jq 'select(.id==1) \| .result.serverInfo'` |
+
+### 4.6. 디버깅 — stderr 분리, raw 메시지 dump
+
+```bash
+# stderr만 따로 보기 (정상이면 비어 있어야 함)
+{
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"x","version":"0.0.1"}}}'
+  sleep 0.5
+} | ./bin/rune-mcp 2>/tmp/rune-stderr.log >/dev/null
+cat /tmp/rune-stderr.log
+
+# JSON 응답을 한 줄씩 raw로 보기 (jq 없이)
+{ ... } | ./bin/rune-mcp 2>/dev/null
+# → 줄별 valid JSON. 각 줄을 jq에 따로 파이프해도 됨
+
+# 메시지 시퀀스 검증 (input과 output 비교)
+{ ... } | tee /tmp/rune-input.log | ./bin/rune-mcp 2>/dev/null | tee /tmp/rune-output.log | jq .
+# /tmp/rune-input.log : 보낸 메시지
+# /tmp/rune-output.log: 받은 응답
+```
+
+### 4.7. 양방향 stateful 세션 (named pipe / coproc)
+
+위 모든 명령어는 **단방향** (입력 한꺼번에 보내고 응답 모아서 종료). MCP는 양방향 stateful이라, 진짜 클라이언트처럼 동작하려면 다음이 가능:
+
+**bash coproc**:
+```bash
+coproc RUNE { ./bin/rune-mcp 2>/dev/null; }
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"x","version":"0.0.1"}}}' >&${RUNE[1]}
+read -r -u ${RUNE[0]} line; echo "$line" | jq .
+echo '{"jsonrpc":"2.0","method":"notifications/initialized"}' >&${RUNE[1]}
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' >&${RUNE[1]}
+read -r -u ${RUNE[0]} line; echo "$line" | jq -r '.result.tools[].name'
+exec {RUNE[1]}>&-   # stdin 닫음 → server 종료
+wait $COPROC_PID
+```
+
+대부분의 검증에는 §4.2~4.4의 단방향 패턴으로 충분. coproc은 응답 후 다음 요청을 동적으로 결정해야 할 때만 사용.
+
+### 4.8. Claude Code 등록 후 검증
+
+`~/.claude/mcp.json` 등록(§3 Level 2)이 끝난 뒤:
+
+```bash
+# JSON 문법 검증 (등록 직후 필수)
+cat ~/.claude/mcp.json | jq .
+
+# rune-go-dev entry 존재 확인
+jq '.mcpServers["rune-go-dev"]' ~/.claude/mcp.json
+
+# 바이너리 권한 확인
+ls -la /Users/redcourage/cryptolab/rune-project/rune/bin/rune-mcp
+# → -rwxr-xr-x ... 실행 권한 있어야 함
+
+# 바이너리 직접 실행해서 응답 오는지 1회 검증 (§3 1.3과 동일)
+cd /Users/redcourage/cryptolab/rune-project/rune && ./bin/rune-mcp < /dev/null; echo "exit=$?"
+
+# Claude Code 재시작 후 (수동), 새 세션에서:
+#   /mcp                      ← 등록된 서버 목록 표시
+#   "rune_diagnostics 호출해" ← Claude가 tool 인식하는지
+```
+
+---
+
+## 5. Troubleshooting
 
 | 증상 | 가능한 원인 | 해결 |
 |---|---|---|
@@ -334,7 +518,7 @@ npx -y @modelcontextprotocol/inspector ./bin/rune-mcp
 
 ---
 
-## 5. 코드 변경 요약
+## 6. 코드 변경 요약
 
 ### `cmd/rune-mcp/main.go` (rewrite, 80줄)
 
@@ -373,7 +557,7 @@ coverage.out
 
 ---
 
-## 6. 다음 마일스톤
+## 7. 다음 마일스톤
 
 이 문서가 통과되면 다음 둘 중 선택:
 
