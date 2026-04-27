@@ -41,9 +41,41 @@ const (
 )
 
 // ParseDomain — unknown → DomainGeneral (agent-delegated 관대함).
-// TODO: implement full 19-value map + customer_escalation alias (record_builder.py:L646).
+var domainList = []struct {
+	Key string
+	Val Domain
+}{
+	{"architecture", DomainArchitecture},
+	{"security", DomainSecurity},
+	{"product", DomainProduct},
+	{"exec", DomainExec},
+	{"ops", DomainOps},
+	{"design", DomainDesign},
+	{"data", DomainData},
+	{"hr", DomainHR},
+	{"marketing", DomainMarketing},
+	{"incident", DomainIncident},
+	{"debugging", DomainDebugging},
+	{"qa", DomainQA},
+	{"legal", DomainLegal},
+	{"finance", DomainFinance},
+	{"sales", DomainSales},
+	{"customer_success", DomainCustomerSuccess},
+	{"research", DomainResearch},
+	{"risk", DomainRisk},
+	{"general", DomainGeneral},
+}
+
 func ParseDomain(s string) Domain {
-	// TODO: bit-identical to _parse_domain in record_builder.py:L621-655
+	if s == "" {
+		return DomainGeneral
+	}
+	sLower := strings.ToLower(s)
+	for _, entry := range domainList {
+		if strings.Contains(sLower, entry.Key) {
+			return entry.Val
+		}
+	}
 	return DomainGeneral
 }
 

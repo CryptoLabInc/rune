@@ -4,6 +4,8 @@ package domain
 // Spec: docs/v04/spec/components/rune-mcp.md §에러 처리.
 // Python: mcp/server/errors.py (118 LoC).
 
+import "errors"
+
 // Code enum — 8 codes.
 const (
 	CodeInternal             = "INTERNAL_ERROR"
@@ -43,9 +45,28 @@ var (
 )
 
 // MakeError — Python make_error equivalent. Wraps an error as MCP response.
-// TODO: implement type-assertion chain (*RuneError → use its fields;
-//	otherwise fall back to INTERNAL_ERROR).
 func MakeError(err error) map[string]any {
-	// TODO: bit-identical to Python make_error (errors.py:L93-118)
-	return nil
+	var runeErr *RuneError
+	if errors.As(err, &runeErr) {
+		errMap := map[string]any{
+			"code":      runeErr.Code,
+			"message":   runeErr.Message,
+			"retryable": runeErr.Retryable,
+		}
+		if runeErr.RecoveryHint != "" {
+			errMap["recovery_hint"] = runeErr.RecoveryHint
+		}
+		return map[string]any{
+			"ok":    false,
+			"error": errMap,
+		}
+	}
+	return map[string]any{
+		"ok": false,
+		"error": map[string]any{
+			"code":      CodeInternal,
+			"message":   err.Error(),
+			"retryable": false,
+		},
+	}
 }
