@@ -26,7 +26,7 @@ README의 7-Phase 로드맵(Phase 1 외부 deps → Phase 7 검증)이 **horizon
 | 마일스톤 | 상태 | 문서 | 관련 커밋 |
 |---|---|---|---|
 | Phase A — MCP boot (handshake + tools/list) | ✅ 합격 | [phase-a-mcp-boot.md](phase-a-mcp-boot.md) | `19b7bf6` (브랜치 `yg/first-mcp-boot`) |
-| Phase A.5 — smoke test 추가 (CI 회귀 방지) | ⏳ 예정 | — | — |
+| Phase A.5 — smoke test 추가 (CI 회귀 방지) | ✅ 합격 | [phase-a5-smoke-test.md](phase-a5-smoke-test.md) | `c353926` (브랜치 `yg/phase-a5-smoke-test`, PR #87) |
 | Phase B — `rune_diagnostics` environment 섹션 진짜 응답 (stdlib only) | ⏳ 예정 | — | — |
 | Phase 1 — `go.mod` 외부 deps 본격 추가 (gRPC · envector SDK · embedder proto) | ⏳ 예정 | — | — |
 | Phase 2 — `internal/domain` + `internal/policy` 순수 로직 (TM scope) | ⏳ 예정 | — | — |
