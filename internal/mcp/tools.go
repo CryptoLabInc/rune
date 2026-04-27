@@ -1,107 +1,159 @@
-// Package mcp holds the 8 MCP tool handlers + stdio server wiring.
-// Spec:
-//   docs/v04/spec/flows/capture.md (7-phase capture)
-//   docs/v04/spec/flows/recall.md (7-phase recall)
-//   docs/v04/spec/flows/lifecycle.md (6 other tools)
-// Python: mcp/server/server.py (2002 LoC).
+// Package mcp wires the 8 MCP tool handlers onto the official Go SDK and
+// owns Deps injection + state-aware response shaping.
 //
-// MCP SDK: github.com/modelcontextprotocol/go-sdk v1.5.0+ (D2).
-// Stdio transport, tools/call dispatch. Input schema auto-generated from Go
-// structs with jsonschema tags.
+// Spec:
+//   docs/v04/spec/components/rune-mcp.md (MCP server 구현)
+//   docs/v04/spec/flows/{capture,recall,lifecycle}.md
+//
+// SDK: github.com/modelcontextprotocol/go-sdk v1.5.0+ (D2). Stdio transport.
+// Input schema is auto-inferred from the Go input struct (jsonschema tags
+// optional but recommended; will be tightened in Phase 5).
+//
+// Phase A (current): handshake + tools/list only. Every handler returns a
+// stubResult ("not yet implemented") so Claude Code can discover the catalog
+// without any adapter being wired. Phase 5 replaces each stub with a
+// service-layer call (CheckState → service.X.Handle → response wrap).
 package mcp
 
 import (
 	"context"
+	"fmt"
+
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/envector/rune-go/internal/domain"
+	"github.com/envector/rune-go/internal/service"
 )
 
-// Deps — injected into all handlers. TODO: fill as adapters stabilize.
-type Deps struct {
-	// Vault     vault.Client
-	// Envector  envector.Client
-	// Embedder  embedder.Client
-	// CaptureLog *logio.CaptureLog
-	// State     *lifecycle.Manager
-	// Cfg       *config.Config
+// Deps — injected into all 8 MCP handlers.
+//
+// Phase A: empty struct. Adapter clients · state machine · config will be
+// added as Phase 4 (adapters) and Phase 5 (service orchestration) land.
+// stubHandler already takes deps as an argument, so Phase 5 will only need
+// to swap the closure body, not the signature.
+//
+// Future fields (commented as a contract sketch — to be activated as the
+// owning adapter PR lands):
+//
+//	Vault      vault.Client
+//	Envector   envector.Client
+//	Embedder   embedder.Client
+//	CaptureLog *logio.CaptureLog
+//	State      *lifecycle.Manager
+//	Cfg        *config.Config
+type Deps struct{}
+
+// emptyArgs — input type for tools that take no arguments.
+type emptyArgs struct{}
+
+// Register binds all 8 MCP tools onto the provided SDK server.
+//
+// Tool names are bit-identical to Python `mcp/server/server.py`. SDK sorts
+// tools alphabetically in `tools/list` output, so order here is for readability.
+//
+// Failure modes that Register surfaces as a startup error (via panic +
+// recover):
+//  1. mustAddTool name validation (SDK's validateToolName has a log-only
+//     branch — server.go:238-241 — that we bypass by panicking up-front).
+//  2. SDK schema-inference panic (toolForErr).
+//  3. SDK schema-shape panic (Server.AddTool).
+//
+// Result: every registration either succeeds completely or returns an error.
+// No silent half-registrations.
+func Register(srv *sdkmcp.Server, deps *Deps) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("mcp.Register: %v", r)
+		}
+	}()
+
+	// Write tools (state gate applies in Phase 5).
+	mustAddTool[domain.CaptureRequest, domain.CaptureResponse](srv, deps,
+		"rune_capture",
+		"Capture a decision record (agent-delegated extraction required).")
+	mustAddTool[service.BatchCaptureArgs, service.BatchCaptureResult](srv, deps,
+		"rune_batch_capture",
+		"Capture a batch of decision records (e.g. session-end sweep).")
+	mustAddTool[domain.RecallArgs, domain.RecallResult](srv, deps,
+		"rune_recall",
+		"Query organizational memory by natural-language question.")
+	mustAddTool[service.DeleteCaptureArgs, service.DeleteCaptureResult](srv, deps,
+		"rune_delete_capture",
+		"Soft-delete a record by ID (sets status=reverted, re-inserts).")
+
+	// Read / diagnostic tools (state gate bypass).
+	mustAddTool[service.CaptureHistoryArgs, service.CaptureHistoryResult](srv, deps,
+		"rune_capture_history",
+		"List recent captures from local capture_log.jsonl (read-only).")
+	mustAddTool[emptyArgs, service.VaultStatusResult](srv, deps,
+		"rune_vault_status",
+		"Probe Vault connectivity and report secure-search mode.")
+	mustAddTool[emptyArgs, service.DiagnosticsResult](srv, deps,
+		"rune_diagnostics",
+		"Collect a 7-section health snapshot (env / state / vault / keys / pipelines / embedding / envector).")
+	mustAddTool[emptyArgs, service.ReloadPipelinesResult](srv, deps,
+		"rune_reload_pipelines",
+		"Re-initialize Vault + envector pipelines (BOOT replay) with envector warmup.")
+
+	return nil
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 8 MCP tools — Python bit-identical names/shapes
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ToolCapture — rune_capture. Python: server.py:L698-806 + L1208-1407 _capture_single.
-// 7-phase flow (spec/flows/capture.md).
-func ToolCapture(ctx context.Context, deps *Deps, req *domain.CaptureRequest) (*domain.CaptureResponse, error) {
-	// TODO Phase 1: state gate
-	// TODO Phase 2: validate + tier2 check + text_to_embed pick
-	// TODO Phase 3: embedder.EmbedSingle(text)
-	// TODO Phase 4: envector.Score + Vault.DecryptScores → novelty (D11 thresholds)
-	// TODO Phase 5: record_builder.BuildPhases + embedder.EmbedBatch + AES Seal
-	// TODO Phase 6: envector.Insert (batch)
-	// TODO Phase 7: capture_log append + respond
-	return nil, nil
+// mustAddTool wraps sdkmcp.AddTool with up-front name validation.
+//
+// The SDK's Server.AddTool only LOGS on invalid tool names
+// (go-sdk/mcp/server.go:238-241) — it does not panic, so Register's
+// defer recover() would miss it and the bad-named tool would silently
+// register. mustAddTool panics on invalid names, unifying the failure
+// path so recover() catches everything.
+func mustAddTool[In, Out any](srv *sdkmcp.Server, deps *Deps, name, description string) {
+	if !isValidToolName(name) {
+		panic(fmt.Errorf("mustAddTool: invalid tool name %q (allowed: [A-Za-z0-9_-], 1..128 chars)", name))
+	}
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{
+		Name:        name,
+		Description: description,
+	}, stubHandler[In, Out](deps, name))
 }
 
-// ToolRecall — rune_recall. Python: server.py:L910-1034. 7-phase.
-func ToolRecall(ctx context.Context, deps *Deps, args *domain.RecallArgs) (*domain.RecallResult, error) {
-	// TODO Phase 1: state gate + topk validation (max 10)
-	// TODO Phase 2: policy.Parse (English only — D21)
-	// TODO Phase 3: embedder.EmbedBatch(expansions[:3]) (D22/D23)
-	// TODO Phase 4: sequential 4-RPC per expansion (D25): Score → DecryptScores
-	//                → GetMetadata → DecryptMetadata (service layer calls Vault directly)
-	// TODO Phase 5: metadata 3-way classify (AES/plain/legacy base64 per D26)
-	// TODO Phase 6: phase_chain expansion (D27) + group assemble + filter
-	//                + recency weighting (half-life 90d, status mul)
-	// TODO Phase 7: build response (synthesized=false per D28)
-	return nil, nil
+// isValidToolName mirrors the SDK's validateToolName rules
+// (go-sdk/mcp/tool.go:109): non-empty, ≤128 chars, only [A-Za-z0-9_-].
+// Update this when bumping the SDK if its validation tightens.
+func isValidToolName(name string) bool {
+	if name == "" || len(name) > 128 {
+		return false
+	}
+	for _, r := range name {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
-// ToolBatchCapture — rune_batch_capture. Python: server.py:L810-896.
-// Per-item independent processing (skipped/captured/near_duplicate/error).
-func ToolBatchCapture(ctx context.Context, deps *Deps, items []domain.CaptureRequest) (any, error) {
-	// TODO: per-item _capture_single call + summary (captured/skipped/errors)
-	return nil, nil
+// stubHandler returns a SDK ToolHandlerFor that always responds with a
+// not-yet-implemented isError result. Output type is preserved so tools/list
+// can still publish the inferred output schema.
+//
+// deps is captured but unused in Phase A. Phase 5 will dereference it for
+// CheckState / service dispatch — the closure shape stays the same.
+func stubHandler[In, Out any](deps *Deps, toolName string) sdkmcp.ToolHandlerFor[In, Out] {
+	_ = deps // captured for Phase 5; intentionally unused now
+	return func(_ context.Context, _ *sdkmcp.CallToolRequest, _ In) (*sdkmcp.CallToolResult, Out, error) {
+		var zero Out
+		return stubResult(toolName), zero, nil
+	}
 }
 
-// ToolCaptureHistory — rune_capture_history. Python: server.py:L1092-1111.
-// Read ~/.rune/capture_log.jsonl reverse, filter by domain/since, limit (default 20, max 100).
-func ToolCaptureHistory(ctx context.Context, deps *Deps, limit int, domainFilter, since *string) (any, error) {
-	// TODO: logio.Tail
-	return nil, nil
-}
-
-// ToolDeleteCapture — rune_delete_capture. Python: server.py:L1123-1206.
-// Soft-delete: search_by_id → set status=reverted → re-embed → re-insert → log.
-func ToolDeleteCapture(ctx context.Context, deps *Deps, recordID string) (any, error) {
-	// TODO: soft-delete flow
-	return nil, nil
-}
-
-// ToolVaultStatus — rune_vault_status. Python: server.py:L496-528. Read-only.
-func ToolVaultStatus(ctx context.Context, deps *Deps) (any, error) {
-	// TODO: vault.HealthCheck + mode/endpoint response
-	return nil, nil
-}
-
-// ToolDiagnostics — rune_diagnostics. Python: server.py:L540-684.
-// 7 sections: environment / state / vault / keys / pipelines / embedding / envector.
-func ToolDiagnostics(ctx context.Context, deps *Deps) (any, error) {
-	// TODO: collect 7 sections + 5s envector timeout
-	return nil, nil
-}
-
-// ToolReloadPipelines — rune_reload_pipelines. Python: server.py:L1046-1089.
-// Re-init scribe/retriever pipelines + envector GetIndexList warmup (60s timeout).
-func ToolReloadPipelines(ctx context.Context, deps *Deps) (any, error) {
-	// TODO: AwaitInitDone + ReinitPipelines + 60s warmup
-	return nil, nil
-}
-
-// Register — called from main() to bind all 8 tools to the MCP SDK server.
-// TODO: uses github.com/modelcontextprotocol/go-sdk/mcp.AddTool for each.
-func Register(/* srv *mcp.Server, */ deps *Deps) {
-	// TODO:
-	//   mcp.AddTool(srv, &mcp.Tool{Name: "rune_capture", ...}, ToolCapture adapter)
-	//   ... 8 tools
+// stubResult composes the Phase-A "not implemented" response.
+func stubResult(toolName string) *sdkmcp.CallToolResult {
+	return &sdkmcp.CallToolResult{
+		IsError: true,
+		Content: []sdkmcp.Content{
+			&sdkmcp.TextContent{
+				Text: toolName + " is not yet implemented (skeleton phase A — MCP handshake + tools/list only).",
+			},
+		},
+	}
 }

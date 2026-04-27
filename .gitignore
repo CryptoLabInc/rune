@@ -55,3 +55,8 @@ __pycache__/
 
 # Internal Planning
 docs/planning/
+
+# Go build artifacts
+bin/
+*.test
+coverage.out

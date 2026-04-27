@@ -40,9 +40,14 @@ docs/v04/
 │   │   └── envector.md              # envector-go SDK
 │   └── python-mapping.md           # Python 파일/LoC → Go 구조 매핑
 │
-└── notes/                         # 내부 작업 노트 (참고용)
-    ├── verification-matrix.md      # Python↔Go bit-identical 대조 검증 로그
-    └── implementability-report.md  # Go 개발자 진입 가능성 검증 리포트
+├── notes/                         # 내부 작업 노트 (참고용)
+│   ├── verification-matrix.md      # Python↔Go bit-identical 대조 검증 로그
+│   ├── implementability-report.md  # Go 개발자 진입 가능성 검증 리포트
+│   └── flow-matrix.md               # 10 flow × 파일 매트릭스 + Tier S/A/B 공통 모듈
+│
+└── progress/                       # 실제 개발 진행 추적 (vertical slice 단위)
+    ├── README.md                    # 인덱스 + 마일스톤별 상태표
+    └── phase-a-mcp-boot.md          # MCP handshake + tools/list (`19b7bf6`)
 ```
 
 ## 읽는 순서
