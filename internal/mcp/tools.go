@@ -48,63 +48,88 @@ type emptyArgs struct{}
 
 // Register binds all 8 MCP tools onto the provided SDK server.
 //
-// Tool names are bit-identical to Python `mcp/server/server.py`. Order in
-// this Register call is for readability only; the SDK sorts tools
-// alphabetically in `tools/list` output.
+// Tool names are bit-identical to Python `mcp/server/server.py`. SDK sorts
+// tools alphabetically in `tools/list` output, so order here is for readability.
 //
-// AddTool can panic on schema-inference failure (SDK behavior). Register
-// recovers so a misconfigured tool surfaces as a startup error instead of
-// taking the process down silently after binding.
+// Failure modes that Register surfaces as a startup error (via panic +
+// recover):
+//  1. mustAddTool name validation (SDK's validateToolName has a log-only
+//     branch — server.go:238-241 — that we bypass by panicking up-front).
+//  2. SDK schema-inference panic (toolForErr).
+//  3. SDK schema-shape panic (Server.AddTool).
+//
+// Result: every registration either succeeds completely or returns an error.
+// No silent half-registrations.
 func Register(srv *sdkmcp.Server, deps *Deps) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("mcp.Register: AddTool panic: %v", r)
+			err = fmt.Errorf("mcp.Register: %v", r)
 		}
 	}()
 
 	// Write tools (state gate applies in Phase 5).
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{
-		Name:        "rune_capture",
-		Description: "Capture a decision record (agent-delegated extraction required).",
-	}, stubHandler[domain.CaptureRequest, domain.CaptureResponse](deps, "rune_capture"))
-
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{
-		Name:        "rune_batch_capture",
-		Description: "Capture a batch of decision records (e.g. session-end sweep).",
-	}, stubHandler[service.BatchCaptureArgs, service.BatchCaptureResult](deps, "rune_batch_capture"))
-
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{
-		Name:        "rune_recall",
-		Description: "Query organizational memory by natural-language question.",
-	}, stubHandler[domain.RecallArgs, domain.RecallResult](deps, "rune_recall"))
-
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{
-		Name:        "rune_delete_capture",
-		Description: "Soft-delete a record by ID (sets status=reverted, re-inserts).",
-	}, stubHandler[service.DeleteCaptureArgs, service.DeleteCaptureResult](deps, "rune_delete_capture"))
+	mustAddTool[domain.CaptureRequest, domain.CaptureResponse](srv, deps,
+		"rune_capture",
+		"Capture a decision record (agent-delegated extraction required).")
+	mustAddTool[service.BatchCaptureArgs, service.BatchCaptureResult](srv, deps,
+		"rune_batch_capture",
+		"Capture a batch of decision records (e.g. session-end sweep).")
+	mustAddTool[domain.RecallArgs, domain.RecallResult](srv, deps,
+		"rune_recall",
+		"Query organizational memory by natural-language question.")
+	mustAddTool[service.DeleteCaptureArgs, service.DeleteCaptureResult](srv, deps,
+		"rune_delete_capture",
+		"Soft-delete a record by ID (sets status=reverted, re-inserts).")
 
 	// Read / diagnostic tools (state gate bypass).
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{
-		Name:        "rune_capture_history",
-		Description: "List recent captures from local capture_log.jsonl (read-only).",
-	}, stubHandler[service.CaptureHistoryArgs, service.CaptureHistoryResult](deps, "rune_capture_history"))
-
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{
-		Name:        "rune_vault_status",
-		Description: "Probe Vault connectivity and report secure-search mode.",
-	}, stubHandler[emptyArgs, service.VaultStatusResult](deps, "rune_vault_status"))
-
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{
-		Name:        "rune_diagnostics",
-		Description: "Collect a 7-section health snapshot (env / state / vault / keys / pipelines / embedding / envector).",
-	}, stubHandler[emptyArgs, service.DiagnosticsResult](deps, "rune_diagnostics"))
-
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{
-		Name:        "rune_reload_pipelines",
-		Description: "Re-initialize Vault + envector pipelines (BOOT replay) with envector warmup.",
-	}, stubHandler[emptyArgs, service.ReloadPipelinesResult](deps, "rune_reload_pipelines"))
+	mustAddTool[service.CaptureHistoryArgs, service.CaptureHistoryResult](srv, deps,
+		"rune_capture_history",
+		"List recent captures from local capture_log.jsonl (read-only).")
+	mustAddTool[emptyArgs, service.VaultStatusResult](srv, deps,
+		"rune_vault_status",
+		"Probe Vault connectivity and report secure-search mode.")
+	mustAddTool[emptyArgs, service.DiagnosticsResult](srv, deps,
+		"rune_diagnostics",
+		"Collect a 7-section health snapshot (env / state / vault / keys / pipelines / embedding / envector).")
+	mustAddTool[emptyArgs, service.ReloadPipelinesResult](srv, deps,
+		"rune_reload_pipelines",
+		"Re-initialize Vault + envector pipelines (BOOT replay) with envector warmup.")
 
 	return nil
+}
+
+// mustAddTool wraps sdkmcp.AddTool with up-front name validation.
+//
+// The SDK's Server.AddTool only LOGS on invalid tool names
+// (go-sdk/mcp/server.go:238-241) — it does not panic, so Register's
+// defer recover() would miss it and the bad-named tool would silently
+// register. mustAddTool panics on invalid names, unifying the failure
+// path so recover() catches everything.
+func mustAddTool[In, Out any](srv *sdkmcp.Server, deps *Deps, name, description string) {
+	if !isValidToolName(name) {
+		panic(fmt.Errorf("mustAddTool: invalid tool name %q (allowed: [A-Za-z0-9_-], 1..128 chars)", name))
+	}
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{
+		Name:        name,
+		Description: description,
+	}, stubHandler[In, Out](deps, name))
+}
+
+// isValidToolName mirrors the SDK's validateToolName rules
+// (go-sdk/mcp/tool.go:109): non-empty, ≤128 chars, only [A-Za-z0-9_-].
+// Update this when bumping the SDK if its validation tightens.
+func isValidToolName(name string) bool {
+	if name == "" || len(name) > 128 {
+		return false
+	}
+	for _, r := range name {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // stubHandler returns a SDK ToolHandlerFor that always responds with a
