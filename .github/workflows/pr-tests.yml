@@ -95,3 +95,31 @@ jobs:
       - name: Fail if tests failed
         if: always() && steps.pytest.outputs.exit_code != '0'
         run: exit 1
+
+  run-go-tests:
+    name: Run Go tests
+    runs-on: [self-hosted, rune-ci]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Skip silently when go.mod is absent (Python-only branches before the
+      # Go migration lands on main). Subsequent steps gate on this output.
+      - name: Detect Go project
+        id: detect_go
+        run: |
+          if [ -f go.mod ]; then
+            echo "has_go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_go=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No go.mod found — skipping Go tests"
+          fi
+
+      - uses: actions/setup-go@v5
+        if: steps.detect_go.outputs.has_go == 'true'
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: go test
+        if: steps.detect_go.outputs.has_go == 'true'
+        run: go test ./...
