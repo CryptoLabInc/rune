@@ -120,6 +120,21 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
-      - name: go test
+      - name: gofmt
         if: steps.detect_go.outputs.has_go == 'true'
-        run: go test ./...
+        run: |
+          unformatted=$(gofmt -l -e .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            gofmt -d -e .
+            exit 1
+          fi
+
+      - name: go vet
+        if: steps.detect_go.outputs.has_go == 'true'
+        run: go vet ./...
+
+      - name: go test -race
+        if: steps.detect_go.outputs.has_go == 'true'
+        run: go test -race ./...
