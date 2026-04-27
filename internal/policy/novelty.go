@@ -3,7 +3,11 @@
 // No I/O, no external deps. Each file has a Python canonical reference.
 package policy
 
-import "github.com/envector/rune-go/internal/domain"
+import (
+	"math"
+
+	"github.com/envector/rune-go/internal/domain"
+)
 
 // NoveltyThresholds — runtime defaults per D11 (Python server.py:L102-104).
 // Module constants in embedding.py (0.4/0.7/0.93) are dead defaults — server.py
@@ -31,8 +35,16 @@ var DefaultNoveltyThresholds = NoveltyThresholds{
 //   - 0.7 ≤ sim <  0.95  → related
 //   - sim ≥ 0.95         → near_duplicate (capture blocked)
 func ClassifyNovelty(maxSimilarity float64, th NoveltyThresholds) (domain.NoveltyClass, float64) {
-	// TODO: implement per embedding.py:L49-56 + round(1.0-max, 4)
-	_ = maxSimilarity
-	_ = th
-	return domain.NoveltyClassNovel, 1.0
+	noveltyScore := 1.0 - maxSimilarity
+	score := math.Round(noveltyScore*10000) / 10000
+
+	if maxSimilarity >= th.NearDup {
+		return domain.NoveltyClassNearDuplicate, score
+	} else if maxSimilarity >= th.Related {
+		return domain.NoveltyClassRelated, score
+	} else if maxSimilarity >= th.Novel {
+		return domain.NoveltyClassEvolution, score
+	}
+
+	return domain.NoveltyClassNovel, score
 }
