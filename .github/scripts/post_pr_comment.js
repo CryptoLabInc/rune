@@ -7,6 +7,28 @@ module.exports = async ({ github, context }) => {
   const passed = exitCode === '0';
   const status = passed ? '✅ All tests passed' : '❌ Some tests failed';
 
+  const marker = '<!-- pr-tests-bot -->';
+
+  // Early exit on a clean run. pytest exits 0 iff no FAILED/ERROR (skips OK),
+  // so we suppress the success comment entirely and clean up any prior failure
+  // comment so the PR doesn't keep showing a stale red banner.
+  if (passed) {
+    const { data: comments } = await github.rest.issues.listComments({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      issue_number: parseInt(process.env.PR_NUMBER) || context.issue.number,
+    });
+    const existing = comments.find(c => c.body && c.body.includes(marker));
+    if (existing) {
+      await github.rest.issues.deleteComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        comment_id: existing.id,
+      });
+    }
+    return;
+  }
+
   // Parse pytest final summary line for authoritative counts
   // e.g. "4 failed, 261 passed, 2 skipped in 4.06s"
   function parsePytestSummary(output) {
@@ -159,7 +181,6 @@ module.exports = async ({ github, context }) => {
   const shortSha = headSha.slice(0, 7);
   const commitUrl = `https://github.com/${process.env.GITHUB_REPOSITORY}/commit/${headSha}`;
 
-  const marker = '<!-- pr-tests-bot -->';
   const bodyParts = [
     marker,
     '## ' + status,
