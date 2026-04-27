@@ -129,7 +129,7 @@ mcp_call() {
     sleep 0.3
     printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
     sleep 0.1
-    printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}"
+    printf '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"%s","arguments":%s}}\n' "$tool" "$args"
     sleep 0.5
   } | ./bin/rune-mcp 2>/dev/null | jq -c 'select(.id==2)'
 }
