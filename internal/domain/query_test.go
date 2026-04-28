@@ -1,8 +1,8 @@
+package domain_test
+
 // Tests for query/recall domain helpers — port of Python's SearchResult
 // is_reliable / is_phase predicates plus the v0.4-simplified payload
 // extraction. Python: agents/retriever/searcher.py.
-
-package domain_test
 
 import (
 	"testing"
@@ -10,9 +10,14 @@ import (
 	"github.com/envector/rune-go/internal/domain"
 )
 
-// SearchHit.IsReliable — supported / partially_supported map to true,
-// everything else (including empty string) is unreliable.
-// Python: searcher.py:SearchResult.is_reliable.
+// SearchHit.IsReliable — Python: searcher.py:SearchResult.is_reliable
+// (returns true iff certainty is "supported" or "partially_supported").
+//
+// Canonical Certainty values per Python schema (agents/common/schemas.py
+// Certainty enum): supported, partially_supported, unsupported, unknown.
+// Test covers all 4 + empty-string + an unrelated value to lock the
+// predicate against accidental broadening (e.g., "high" being added later
+// without owner intent).
 func TestSearchHit_IsReliable(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -21,10 +26,10 @@ func TestSearchHit_IsReliable(t *testing.T) {
 	}{
 		{"supported", "supported", true},
 		{"partially_supported", "partially_supported", true},
-		{"unknown", "unknown", false},
 		{"unsupported", "unsupported", false},
+		{"unknown", "unknown", false},
 		{"empty", "", false},
-		{"unrelated_string", "high", false},
+		{"unrelated_value_high", "high", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,38 +41,48 @@ func TestSearchHit_IsReliable(t *testing.T) {
 	}
 }
 
-// SearchHit.IsPhase — GroupID non-nil ⇔ true.
-// Python: searcher.py:SearchResult.is_phase.
+// SearchHit.IsPhase — Python: searcher.py:SearchResult.is_phase
+// (returns true iff group_id is not None). Go uses pointer presence.
 func TestSearchHit_IsPhase(t *testing.T) {
-	t.Run("group_id_nil_is_not_phase", func(t *testing.T) {
-		h := &domain.SearchHit{}
-		if h.IsPhase() {
-			t.Error("IsPhase with nil GroupID should be false")
-		}
-	})
+	gid := "grp_2026-01-01_arch_strategy"
+	empty := ""
 
-	t.Run("group_id_set_is_phase", func(t *testing.T) {
-		gid := "grp_2026-01-01_arch_strategy"
-		h := &domain.SearchHit{GroupID: &gid}
-		if !h.IsPhase() {
-			t.Error("IsPhase with non-nil GroupID should be true")
-		}
-	})
+	cases := []struct {
+		name    string
+		groupID *string
+		want    bool
+		// note documents intent for surprising cases.
+		note string
+	}{
+		{name: "group_id_nil", groupID: nil, want: false},
+		{name: "group_id_set", groupID: &gid, want: true},
+		// TODO(yg): confirm with team — should pointer-to-empty-string be
+		// treated as "no phase"? Current Go and Python both say "phase"
+		// (Python: `group_id = ""` is `not None` → True). Locking in current
+		// behavior; flip if the predicate is ever tightened.
+		{
+			name:    "group_id_pointer_to_empty_string",
+			groupID: &empty,
+			want:    true,
+			note:    "pointer presence drives the predicate; empty string still counts (matches Python `is not None`).",
+		},
+	}
 
-	t.Run("group_id_pointer_to_empty_string_is_phase", func(t *testing.T) {
-		// Documenting current behavior: pointer presence drives the predicate,
-		// not string contents. If empty string should also be "no phase",
-		// the predicate must change.
-		empty := ""
-		h := &domain.SearchHit{GroupID: &empty}
-		if !h.IsPhase() {
-			t.Error("IsPhase with pointer to empty string is currently true (predicate uses pointer presence)")
-		}
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &domain.SearchHit{GroupID: tc.groupID}
+			if got := h.IsPhase(); got != tc.want {
+				t.Errorf("IsPhase() = %v, want %v (%s)", got, tc.want, tc.note)
+			}
+		})
+	}
 }
 
-// ExtractPayloadText — strict v2.1 (D32). No v1/v2.0 fallback.
-// Python: searcher.py:L487-496 (v0.4 simplified to payload.text only).
+// ExtractPayloadText — strict v2.1 (D32). No v1/v2.0 fallback path.
+// This is an INTENTIONAL simplification of Python's _extract_payload_text
+// (searcher.py:L487-496), which has 3 fallback paths
+// (metadata.text → raw.text → decision.what). Go drops them; only
+// payload.text is read. See domain/query.go:121 for the design comment.
 func TestExtractPayloadText(t *testing.T) {
 	cases := []struct {
 		name string
