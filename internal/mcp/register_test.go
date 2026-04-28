@@ -44,9 +44,11 @@ func newSession(t *testing.T) *sdkmcp.ClientSession {
 	}
 
 	st, ct := sdkmcp.NewInMemoryTransports()
-	if _, err := srv.Connect(ctx, st, nil); err != nil {
+	ss, err := srv.Connect(ctx, st, nil)
+	if err != nil {
 		t.Fatalf("server.Connect: %v", err)
 	}
+	t.Cleanup(func() { _ = ss.Close() })
 
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{
 		Name:    "rune-mcp-test-client",
@@ -86,7 +88,7 @@ func TestRegister_All8ToolsListed(t *testing.T) {
 	}
 }
 
-func TestRegister_InputSchemaInferred(t *testing.T) {
+func TestRegister_SchemasInferred(t *testing.T) {
 	cs := newSession(t)
 
 	res, err := cs.ListTools(t.Context(), &sdkmcp.ListToolsParams{})
@@ -94,9 +96,15 @@ func TestRegister_InputSchemaInferred(t *testing.T) {
 		t.Fatalf("ListTools: %v", err)
 	}
 
+	// tools.go promises both input AND output schema are preserved
+	// (see Register / stubHandler comments). A nil on either side means
+	// schema inference broke for that tool.
 	for _, tool := range res.Tools {
 		if tool.InputSchema == nil {
-			t.Errorf("%s: InputSchema is nil — schema inference regressed", tool.Name)
+			t.Errorf("%s: InputSchema is nil — input schema inference regressed", tool.Name)
+		}
+		if tool.OutputSchema == nil {
+			t.Errorf("%s: OutputSchema is nil — output schema inference regressed", tool.Name)
 		}
 	}
 }
@@ -104,14 +112,20 @@ func TestRegister_InputSchemaInferred(t *testing.T) {
 func TestRegister_StubReturnsIsError(t *testing.T) {
 	cs := newSession(t)
 
+	// All 8 tools — each carries minimal schema-valid args so SDK input
+	// validation passes and the stubHandler fires. Order matches expectedTools.
 	cases := []struct {
 		name string
 		args map[string]any
 	}{
-		{"rune_diagnostics", nil},
-		{"rune_vault_status", nil},
-		{"rune_recall", map[string]any{"query": "hello"}},
+		{"rune_batch_capture", map[string]any{"items": "[]"}},
 		{"rune_capture", map[string]any{"text": "hi", "source": "test", "extracted": map[string]any{}}},
+		{"rune_capture_history", nil},
+		{"rune_delete_capture", map[string]any{"record_id": "test-id"}},
+		{"rune_diagnostics", nil},
+		{"rune_recall", map[string]any{"query": "hello"}},
+		{"rune_reload_pipelines", nil},
+		{"rune_vault_status", nil},
 	}
 
 	for _, tc := range cases {
