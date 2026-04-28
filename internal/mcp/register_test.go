@@ -8,7 +8,6 @@
 package mcp_test
 
 import (
-	"sort"
 	"strings"
 	"testing"
 
@@ -73,14 +72,16 @@ func TestRegister_All8ToolsListed(t *testing.T) {
 	for i, tool := range res.Tools {
 		got[i] = tool.Name
 	}
-	sort.Strings(got)
 
 	if len(got) != len(expectedTools) {
 		t.Fatalf("tool count: got %d, want %d (got=%v)", len(got), len(expectedTools), got)
 	}
+	// SDK contract: tools/list returns alphabetical order (go-sdk sorts on
+	// emit). Compare position-by-position so a regression in the SDK or
+	// in registration ordering surfaces here.
 	for i, name := range expectedTools {
 		if got[i] != name {
-			t.Errorf("tool[%d]: got %q, want %q", i, got[i], name)
+			t.Errorf("tool[%d]: got %q, want %q (full list: %v)", i, got[i], name, got)
 		}
 	}
 }
