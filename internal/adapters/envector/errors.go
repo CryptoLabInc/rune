@@ -22,9 +22,6 @@ func (e *Error) Error() string {
 func (e *Error) Unwrap() error { return e.Cause }
 
 // Sentinel errors — spec §에러 처리.
-//
-// Some map 1:1 from envector-go SDK typed errors (`ErrKeysAlreadyActivated`,
-// `ErrKeysNotFound`, etc.); others are adapter-level composites.
 var (
 	// Connection / transport.
 	ErrConnectionLost = &Error{Code: "ENVECTOR_CONNECTION_LOST", Retryable: true}
@@ -33,7 +30,6 @@ var (
 	ErrKeyActivationConflict = &Error{Code: "KEY_ACTIVATION_CONFLICT", Retryable: true}
 
 	// PR-conditional: SDK OpenKeysFromFile without SecKey.json (Q4).
-	// Surfaces only after SDK condition relaxation PR is merged.
 	ErrDecryptorUnavailable = &Error{Code: "DECRYPTOR_UNAVAILABLE", Retryable: false}
 
 	// Atomicity violation detected (len(ItemIDs) != len(Vectors)) — D17 probe trigger.
@@ -43,21 +39,75 @@ var (
 // MapSDKError converts an envector-go SDK error (or underlying gRPC status)
 // into an adapter-level Error. Service layer should subsequently wrap to domain.RuneError.
 //
-// Python 11 CONNECTION_ERROR_PATTERNS (envector_sdk.py:L89-101) are NOT ported.
 // Go relies on SDK typed errors (`errors.Is`) + gRPC status codes — see
 // spec/components/envector.md "Python 대비 (의도적 차이)".
-//
-// TODO: implement with errors.Is(err, envectorsdk.ErrKeysAlreadyActivated) etc.
-// + google.golang.org/grpc/status for code-based dispatch.
 func MapSDKError(err error) error {
 	if err == nil {
 		return nil
 	}
-	// TODO:
-	//   if errors.Is(err, sdk.ErrKeysAlreadyActivated) → ErrKeyActivationConflict
-	//   status.Code() switch:
-	//     Unavailable / DeadlineExceeded → ErrConnectionLost (retryable)
-	//     Unauthenticated → a non-retryable adapter error (auth)
-	//     ResourceExhausted → retryable
-	return err
+
+	// Try gRPC status extraction
+	st, ok := statusFromError(err)
+	if ok {
+		switch st.code {
+		case codeUnavailable, codeDeadlineExceeded:
+			return &Error{
+				Code:      ErrConnectionLost.Code,
+				Message:   st.message,
+				Retryable: true,
+				Cause:     err,
+			}
+		case codeResourceExhausted:
+			return &Error{
+				Code:      ErrConnectionLost.Code,
+				Message:   "resource exhausted: " + st.message,
+				Retryable: true,
+				Cause:     err,
+			}
+		case codeUnauthenticated:
+			return &Error{
+				Code:      "ENVECTOR_AUTH_FAILED",
+				Message:   st.message,
+				Retryable: false,
+				Cause:     err,
+			}
+		}
+	}
+
+	// Default: non-retryable internal error
+	return &Error{
+		Code:      "ENVECTOR_INTERNAL",
+		Message:   err.Error(),
+		Retryable: false,
+		Cause:     err,
+	}
+}
+
+type grpcStatus struct {
+	code    int
+	message string
+}
+
+// gRPC constants
+const (
+	codeUnauthenticated   = 16
+	codeUnavailable       = 14
+	codeDeadlineExceeded  = 4
+	codeResourceExhausted = 8
+)
+
+func statusFromError(err error) (grpcStatus, bool) {
+	type grpcStatuser interface {
+		GRPCStatus() interface {
+			Code() int
+			Message() string
+		}
+	}
+
+	if gs, ok := err.(grpcStatuser); ok {
+		st := gs.GRPCStatus()
+		return grpcStatus{code: st.Code(), message: st.Message()}, true
+	}
+
+	return grpcStatus{}, false
 }
