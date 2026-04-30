@@ -7,7 +7,13 @@
 //   (memory only) or external embedder process.
 package config
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
 
 // Config — top-level. Read-only by rune-mcp (write path: /rune:configure CLI).
 type Config struct {
@@ -29,30 +35,93 @@ type VaultConfig struct {
 // FilePerms — per rune-mcp.md §Config:
 //   ~/.rune/               0700
 //   ~/.rune/config.json    0600
-//   ~/.rune/logs/          0700
-//   ~/.rune/keys/          0700
-//   ~/.rune/keys/<id>/     0700
-//   ~/.rune/keys/.../*.json 0600
-//   ~/.rune/capture_log.jsonl 0600
 const (
 	DirPerm  = 0700
 	FilePerm = 0600
 )
 
-// DormantParsedSince parses DormantSince to time.Time (zero if empty/invalid).
 func DormantParsedSince(c *Config) time.Time {
 	if c.DormantSince == "" {
 		return time.Time{}
 	}
+
+	// DormantSince to time.Time
 	t, _ := time.Parse(time.RFC3339, c.DormantSince)
 	return t
 }
 
-// Load reads ~/.rune/config.json.
-// TODO: implement with os.UserHomeDir + os.Open + json.Decode.
-// TODO: EnsureDirectories (0700 force via os.Chmod, Python L358-365).
-// TODO: env var override RUNE_STATE (Python has 12+; Go drops 11, keeps this one).
+func (c *Config) IsActive() bool {
+	return c.State == "active"
+}
+
+func RuneDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("config: UserHomeDir: %w", err)
+	}
+	return filepath.Join(home, ".rune"), nil // ~/.rune
+}
+
+func DefaultConfigPath() (string, error) {
+	dir, err := RuneDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.json"), nil // ~/.rune/config.json
+}
+
 func Load() (*Config, error) {
-	// TODO
-	return nil, nil
+	configPath, err := DefaultConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	return LoadFromPath(configPath)
+}
+
+func LoadFromPath(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: read %s: %w", path, err)
+	}
+
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+
+	if stateOverride := os.Getenv("RUNE_STATE"); stateOverride != "" {
+		cfg.State = stateOverride
+	}
+
+	return &cfg, nil
+}
+
+func EnsureDirectories() error {
+	dir, err := RuneDir()
+	if err != nil {
+		return err
+	}
+
+	// Create directory if not exists
+	if err := os.MkdirAll(dir, DirPerm); err != nil {
+		return fmt.Errorf("config: mkdir %s: %w", dir, err)
+	}
+
+	// Force permissions
+	if err := os.Chmod(dir, DirPerm); err != nil {
+		return fmt.Errorf("config: chmod %s: %w", dir, err)
+	}
+
+	// Ensure subdirectories
+	for _, sub := range []string{"keys", "logs"} {
+		subDir := filepath.Join(dir, sub)
+		if err := os.MkdirAll(subDir, DirPerm); err != nil {
+			return fmt.Errorf("config: mkdir %s: %w", subDir, err)
+		}
+		if err := os.Chmod(subDir, DirPerm); err != nil {
+			return fmt.Errorf("config: chmod %s: %w", subDir, err)
+		}
+	}
+
+	return nil
 }
