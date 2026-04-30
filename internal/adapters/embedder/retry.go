@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // retry executes call() with the D7 backoff schedule [0, 500ms, 2s].
@@ -18,11 +21,6 @@ import (
 //	ResourceExhausted    — daemon overloaded
 //
 // Non-retryable errors (e.g., InvalidArgument) return immediately.
-//
-// Uses Go generics (Go 1.18+). Single helper reused across Embed / EmbedBatch /
-// Info / Health per the embedder.md §Client 구현 reference.
-//
-// TODO: requires google.golang.org/grpc/status + codes (external deps).
 func retry[R any](ctx context.Context, call func(context.Context) (R, error)) (R, error) {
 	var zero R
 	var lastErr error
@@ -50,17 +48,14 @@ func retry[R any](ctx context.Context, call func(context.Context) (R, error)) (R
 //
 //	Unavailable / DeadlineExceeded / ResourceExhausted → true
 //	other (including non-gRPC errors)                   → false
-//
-// TODO: implement with google.golang.org/grpc/{status,codes}.
-//
-//	st, ok := status.FromError(err)
-//	if !ok { return false }
-//	switch st.Code() {
-//	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
-//	    return true
-//	}
-//	return false
 func retryable(err error) bool {
-	_ = err
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	switch st.Code() {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		return true
+	}
 	return false
 }
