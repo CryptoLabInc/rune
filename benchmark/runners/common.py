@@ -147,3 +147,143 @@ def check_title_keywords(title: str, keywords: list[str]) -> bool:
     """Check if a title contains any of the expected keywords (case-insensitive)."""
     title_lower = title.lower()
     return any(kw.lower() in title_lower for kw in keywords)
+
+
+# ──────────────────────────────────────────────────────────
+# Latency benchmark data structures
+# ──────────────────────────────────────────────────────────
+
+@dataclass
+class PhaseLatency:
+    """Latency statistics for a single pipeline phase."""
+    name: str
+    samples_ms: list = field(default_factory=list)
+
+    def _pct(self, p: float) -> float:
+        import numpy as np
+        return float(np.percentile(self.samples_ms, p)) if self.samples_ms else 0.0
+
+    @property
+    def p50(self) -> float:
+        return self._pct(50)
+
+    @property
+    def p95(self) -> float:
+        return self._pct(95)
+
+    @property
+    def p99(self) -> float:
+        return self._pct(99)
+
+    @property
+    def mean(self) -> float:
+        import numpy as np
+        return float(np.mean(self.samples_ms)) if self.samples_ms else 0.0
+
+    @property
+    def min_ms(self) -> float:
+        return float(min(self.samples_ms)) if self.samples_ms else 0.0
+
+    @property
+    def max_ms(self) -> float:
+        return float(max(self.samples_ms)) if self.samples_ms else 0.0
+
+    @property
+    def n(self) -> int:
+        return len(self.samples_ms)
+
+    def to_dict(self) -> dict:
+        return {
+            "phase": self.name,
+            "n": self.n,
+            "p50_ms": round(self.p50, 2),
+            "p95_ms": round(self.p95, 2),
+            "p99_ms": round(self.p99, 2),
+            "mean_ms": round(self.mean, 2),
+            "min_ms": round(self.min_ms, 2),
+            "max_ms": round(self.max_ms, 2),
+            "samples_ms": [round(s, 2) for s in self.samples_ms],
+        }
+
+
+@dataclass
+class LatencyScenarioResult:
+    """Latency results for a single test scenario."""
+    scenario_id: str
+    feature: str        # "capture", "recall", "batch_capture", "vault_status"
+    phases: list = field(default_factory=list)   # list[PhaseLatency]
+    metadata: dict = field(default_factory=dict)
+    error: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "scenario_id": self.scenario_id,
+            "feature": self.feature,
+            "phases": [p.to_dict() for p in self.phases],
+            "metadata": self.metadata,
+            "error": self.error,
+        }
+
+
+@dataclass
+class LatencyBenchReport:
+    """Aggregated latency benchmark report."""
+    bench_type: str = "latency"
+    env: dict = field(default_factory=dict)
+    scenarios: list = field(default_factory=list)  # list[LatencyScenarioResult]
+
+    def add(self, result: "LatencyScenarioResult") -> None:
+        self.scenarios.append(result)
+
+    def to_dict(self) -> dict:
+        return {
+            "bench_type": self.bench_type,
+            "env": self.env,
+            "scenarios": [s.to_dict() for s in self.scenarios],
+        }
+
+    def save_json(self, path: Path) -> Path:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=False))
+        return path
+
+    def to_markdown(self) -> str:
+        lines: list[str] = []
+        lines.append("# Rune × envector-msa-1.4.0 Latency Report\n")
+        lines.append("## Environment\n")
+        for k, v in self.env.items():
+            lines.append(f"- **{k}**: {v}")
+        lines.append("")
+
+        by_feature: dict[str, list] = {}
+        for s in self.scenarios:
+            by_feature.setdefault(s.feature, []).append(s)
+
+        for feature, results in by_feature.items():
+            lines.append(f"\n## Feature: `{feature}`\n")
+            for res in results:
+                lines.append(f"### {res.scenario_id}")
+                if res.metadata:
+                    for k, v in res.metadata.items():
+                        lines.append(f"- {k}: {v}")
+                if res.error:
+                    lines.append(f"\n> **Error**: {res.error}\n")
+                    continue
+                lines.append("")
+                header = "| Phase | n | p50 ms | p95 ms | p99 ms | mean ms |"
+                sep    = "|-------|---|--------|--------|--------|---------|"
+                lines.append(header)
+                lines.append(sep)
+                for p in res.phases:
+                    lines.append(
+                        f"| {p.name} | {p.n} "
+                        f"| {p.p50:.1f} | {p.p95:.1f} | {p.p99:.1f} | {p.mean:.1f} |"
+                    )
+                lines.append("")
+
+        return "\n".join(lines)
+
+    def save_markdown(self, path: Path) -> Path:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.to_markdown(), encoding="utf-8")
+        return path

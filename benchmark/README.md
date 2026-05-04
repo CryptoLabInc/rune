@@ -13,8 +13,11 @@ This means **capture quality is determined by the scribe prompt**, not by Rune's
 | **scribe_bench** (capture) | Does the scribe prompt correctly guide capture/skip decisions? | Feed scribe prompt + scenario input to LLM, score the output JSON |
 | **scribe_bench** (extraction) | Is the extracted JSON well-structured? | Same LLM call, score field coverage and extraction type |
 | **retriever_bench** | Can stored decisions be retrieved with various queries? | Offline embedding similarity (FHE is transparent to scores) |
+| **latency_bench** | How long does each pipeline phase take? | Direct adapter calls against live envector-msa-1.4.0, per-phase timing |
 
 ## Running
+
+### Quality benchmarks (scribe / retriever)
 
 ```bash
 # Default: uses claude CLI (no API key needed)
@@ -42,6 +45,43 @@ python benchmark/runners/scribe_bench.py --report benchmark/reports/scribe.json
 python benchmark/runners/scribe_bench.py --api-key $ANTHROPIC_API_KEY --provider anthropic
 python benchmark/runners/scribe_bench.py --api-key $OPENAI_API_KEY --provider openai --model gpt-4o
 ```
+
+### Latency benchmark (envector-msa-1.4.0)
+
+Requires: Vault running (`tcp://localhost:50051`) and envector-msa-1.4.0 endpoint reachable.
+
+```bash
+# All scenarios (10 runs, 2 warmup)
+python benchmark/runners/latency_bench.py
+
+# Single feature
+python benchmark/runners/latency_bench.py --feature capture
+python benchmark/runners/latency_bench.py --feature recall
+python benchmark/runners/latency_bench.py --feature batch_capture
+python benchmark/runners/latency_bench.py --feature vault_status
+
+# Custom run count (20 total, 3 warmup → 17 effective)
+python benchmark/runners/latency_bench.py --runs 20 --warmup 3
+
+# Save Markdown report
+python benchmark/runners/latency_bench.py \
+    --report benchmark/reports/latency_results_v1.4.0.md \
+    --format md
+
+# Save JSON report
+python benchmark/runners/latency_bench.py \
+    --report benchmark/reports/latency_results_v1.4.0.json \
+    --format json
+```
+
+Pipeline phases measured per feature:
+
+| Feature | Phases |
+|---------|--------|
+| `capture` | embed → score (FHE search) → vault_topk → insert → total |
+| `recall` | embed → score → vault_topk → remind → total |
+| `batch_capture` | total_batch, per_item (embed+score per item) |
+| `vault_status` | vault_health_check |
 
 ## Scenarios (104 total)
 
