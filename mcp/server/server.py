@@ -1882,6 +1882,10 @@ if __name__ == "__main__":
                     _rune_config = json.load(_cf)
                 _vault_cfg = _rune_config.get("vault", {})
                 _envector_cfg = _rune_config.get("envector", {})
+                if not ENVECTOR_ENDPOINT and _envector_cfg.get("endpoint"):
+                    ENVECTOR_ENDPOINT = _envector_cfg["endpoint"]
+                if not ENVECTOR_API_KEY and _envector_cfg.get("api_key"):
+                    ENVECTOR_API_KEY = _envector_cfg["api_key"]
                 if ENVECTOR_SECURE is None:
                     ENVECTOR_SECURE = _parse_optional_bool(_envector_cfg.get("secure"))
                 if not os.getenv("RUNEVAULT_ENDPOINT") and (_vault_cfg.get("endpoint") or _vault_cfg.get("url")):
