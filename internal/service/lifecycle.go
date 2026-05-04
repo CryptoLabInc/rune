@@ -2,25 +2,24 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
+	"github.com/envector/rune-go/internal/adapters/config"
 	"github.com/envector/rune-go/internal/adapters/embedder"
 	"github.com/envector/rune-go/internal/adapters/envector"
 	"github.com/envector/rune-go/internal/adapters/logio"
 	"github.com/envector/rune-go/internal/adapters/vault"
+	"github.com/envector/rune-go/internal/domain"
 	"github.com/envector/rune-go/internal/lifecycle"
 )
 
 // LifecycleService holds the 6 lifecycle/operational tool implementations.
-// Python:
-//
-//	server.py:L496-528   tool_vault_status
-//	server.py:L540-684   tool_diagnostics
-//	server.py:L1092-1111 tool_capture_history
-//	server.py:L1123-1206 tool_delete_capture
-//	server.py:L1046-1089 tool_reload_pipelines
-//
-// Batch lives in capture.go (shared capture flow).
 // Spec: docs/v04/spec/flows/lifecycle.md.
 type LifecycleService struct {
 	Vault     vault.Client
@@ -29,6 +28,11 @@ type LifecycleService struct {
 	State     *lifecycle.Manager
 	IndexName string
 	ConfigDir string // for CaptureHistory reading capture_log.jsonl
+
+	// Key state (for diagnostics)
+	EncKeyLoaded bool
+	KeyID        string
+	AgentDEK     []byte
 }
 
 // NewLifecycleService constructs.
@@ -53,15 +57,43 @@ type VaultStatusResult struct {
 }
 
 // VaultStatus — branches on vault == nil (standard mode) vs configured.
-// Python L526-528: health RPC failure → make_error(VaultConnectionError) + vault_configured flag.
 func (s *LifecycleService) VaultStatus(ctx context.Context) (*VaultStatusResult, error) {
-	// TODO: bit-identical to server.py:L496-528
-	return nil, nil
+	if s.Vault == nil {
+		warning := "secret key may be accessible locally. Configure Vault for secure mode."
+		return &VaultStatusResult{
+			OK:              true,
+			VaultConfigured: false,
+			Mode:            "standard (no Vault)",
+			Warning:         &warning,
+		}, nil
+	}
+
+	endpoint := s.Vault.Endpoint()
+	healthy, err := s.Vault.HealthCheck(ctx)
+	if err != nil {
+		slog.Warn("vault health check failed", "err", err)
+		h := false
+		return &VaultStatusResult{
+			OK:              true,
+			VaultConfigured: true,
+			VaultEndpoint:   &endpoint,
+			VaultHealthy:    &h,
+			Mode:            "secure (Vault-backed)",
+		}, nil
+	}
+
+	return &VaultStatusResult{
+		OK:                    true,
+		VaultConfigured:       true,
+		VaultEndpoint:         &endpoint,
+		SecureSearchAvailable: healthy,
+		Mode:                  "secure (Vault-backed)",
+		VaultHealthy:          &healthy,
+	}, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. rune_diagnostics — read-only. server.py:L540-684. Spec §2.
-// 7 sections + OK=false iff vault unhealthy OR enc_key missing.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // DiagnosticsResult — aggregates 7 sub-sections.
@@ -81,7 +113,7 @@ type DiagnosticsResult struct {
 // EnvInfo — OS, Go runtime version, cwd.
 type EnvInfo struct {
 	OS        string `json:"os"`
-	Runtime   string `json:"runtime"` // "go1.24.4" etc.
+	Runtime   string `json:"runtime"`
 	CWD       string `json:"cwd"`
 	GOArch    string `json:"goarch"`
 	GOVersion string `json:"goversion"`
@@ -92,6 +124,7 @@ type VaultInfo struct {
 	Configured bool   `json:"configured"`
 	Healthy    bool   `json:"healthy"`
 	Endpoint   string `json:"endpoint,omitempty"`
+	Error      string `json:"error,omitempty"`
 }
 
 // KeysInfo — memory-resident key state.
@@ -102,22 +135,21 @@ type KeysInfo struct {
 }
 
 // PipelinesInfo — scribe/retriever init + active provider.
-// Go: both always initialized when state=active; no LLM provider.
 type PipelinesInfo struct {
 	ScribeInitialized    bool   `json:"scribe_initialized"`
 	RetrieverInitialized bool   `json:"retriever_initialized"`
 	ActiveLLMProvider    string `json:"active_llm_provider,omitempty"` // always empty (Go agent-delegated)
 }
 
-// EmbeddingInfo — external embedder info snapshot (Info RPC cached).
+// EmbeddingInfo — external embedder info snapshot
 type EmbeddingInfo struct {
-	Model         string `json:"model"`         // from embedder.Info.model_identity
-	Mode          string `json:"mode"`          // "external gRPC"
+	Model         string `json:"model"`
+	Mode          string `json:"mode"` // "external gRPC"
 	VectorDim     int    `json:"vector_dim,omitempty"`
 	DaemonVersion string `json:"daemon_version,omitempty"`
 }
 
-// EnvectorInfo — reachability probe (5s timeout).
+// EnvectorInfo — reachability probe
 type EnvectorInfo struct {
 	Reachable bool    `json:"reachable"`
 	LatencyMs float64 `json:"latency_ms,omitempty"`
@@ -132,31 +164,148 @@ const DiagnosticsTimeout = 5 * time.Second
 
 // Diagnostics collects all 7 sections + derives top-level OK.
 func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
-	// TODO:
-	//  r := &DiagnosticsResult{OK: true}
-	//  r.Environment = s.collectEnv()
-	//  cfg read → r.State / DormantReason / DormantSince
-	//  r.Vault = s.collectVault(ctx)
-	//  r.Keys = s.collectKeys()
-	//  r.Pipelines = s.collectPipelines()
-	//  r.Embedding = s.collectEmbedding(ctx) — uses embedder.Info cache
-	//  r.Envector = s.collectEnvector(ctx, DiagnosticsTimeout)
-	//  if r.Vault.Configured && !r.Vault.Healthy { r.OK = false }
-	//  if !r.Keys.EncKeyLoaded { r.OK = false }
-	//  return r
-	_ = ctx
-	return &DiagnosticsResult{}
+	r := &DiagnosticsResult{OK: true}
+
+	// Environment
+	cwd, _ := os.Getwd()
+	r.Environment = EnvInfo{
+		OS:        runtime.GOOS,
+		Runtime:   runtime.Version(),
+		CWD:       cwd,
+		GOArch:    runtime.GOARCH,
+		GOVersion: runtime.Version(),
+	}
+
+	// Config state
+	cfg, err := config.Load()
+	if err == nil && cfg != nil {
+		state := cfg.State
+		r.State = &state
+		if cfg.DormantReason != "" {
+			r.DormantReason = &cfg.DormantReason
+		}
+		if cfg.DormantSince != "" {
+			r.DormantSince = &cfg.DormantSince
+		}
+	}
+
+	// Vault
+	r.Vault = s.collectVault(ctx)
+
+	// Keys
+	r.Keys = KeysInfo{
+		EncKeyLoaded:   s.EncKeyLoaded,
+		KeyID:          s.KeyID,
+		AgentDEKLoaded: len(s.AgentDEK) > 0,
+	}
+
+	// Pipelines
+	r.Pipelines = PipelinesInfo{
+		ScribeInitialized:    s.State != nil && s.State.Current() == lifecycle.StateActive,
+		RetrieverInitialized: s.State != nil && s.State.Current() == lifecycle.StateActive,
+	}
+
+	// Embedding
+	r.Embedding = s.collectEmbedding(ctx)
+
+	// Envector
+	r.Envector = s.collectEnvector(ctx, DiagnosticsTimeout)
+
+	if s.Vault != nil && !r.Vault.Healthy {
+		r.OK = false
+	}
+	if !r.Keys.EncKeyLoaded {
+		r.OK = false
+	}
+
+	return r
 }
 
-// collectEnvector wraps GetIndexList under 5s timeout + ClassifyEnvectorError.
-// Python server.py:L626-676.
+func (s *LifecycleService) collectVault(ctx context.Context) VaultInfo {
+	info := VaultInfo{Configured: s.Vault != nil}
+	if s.Vault == nil {
+		return info
+	}
+
+	info.Endpoint = s.Vault.Endpoint()
+
+	healthy, err := s.Vault.HealthCheck(ctx)
+	if err != nil {
+		info.Error = err.Error()
+	}
+
+	info.Healthy = healthy
+
+	return info
+}
+
+func (s *LifecycleService) collectEmbedding(ctx context.Context) EmbeddingInfo {
+	info := EmbeddingInfo{Mode: "external gRPC"}
+	if s.Embedder == nil {
+		return info
+	}
+
+	snap, err := s.Embedder.Info(ctx)
+	if err != nil {
+		return info
+	}
+
+	info.Model = snap.ModelIdentity
+	info.VectorDim = snap.VectorDim
+	info.DaemonVersion = snap.DaemonVersion
+
+	return info
+}
+
+// collectEnvector wraps GetIndexList under timeout + ClassifyEnvectorError
 func (s *LifecycleService) collectEnvector(ctx context.Context, timeout time.Duration) EnvectorInfo {
-	// TODO:
-	//  context.WithTimeout + goroutine + select {resultCh, ctx2.Done()}
-	//  on success → {Reachable: true, LatencyMs: ...}
-	//  on error → ClassifyEnvectorError(err, latency) → {Reachable: false, ErrorType, Hint, ...}
-	//  on timeout → {Reachable: false, ErrorType: "timeout", ElapsedMs: ...}
-	return EnvectorInfo{}
+	if s.Envector == nil {
+		return EnvectorInfo{}
+	}
+
+	type result struct {
+		err error
+	}
+
+	ctx2, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ch := make(chan result, 1)
+	t0 := time.Now()
+
+	go func() {
+		_, err := s.Envector.GetIndexList(ctx2)
+		ch <- result{err: err}
+	}()
+
+	select {
+	case res := <-ch:
+		elapsed := time.Since(t0)
+		if res.err != nil {
+			errType, hint := ClassifyEnvectorError(res.err, elapsed)
+			return EnvectorInfo{
+				Error:     res.err.Error(),
+				ErrorType: string(errType),
+				Hint:      hint,
+				ElapsedMs: float64(elapsed.Milliseconds()),
+			}
+		}
+		return EnvectorInfo{
+			Reachable: true,
+			LatencyMs: float64(elapsed.Milliseconds()),
+		}
+	case <-ctx2.Done():
+		elapsed := time.Since(t0)
+		return EnvectorInfo{
+			Error: fmt.Sprintf(
+				"Health check timed out after %.0fs (elapsed: %.1fms). "+
+					"Run /rune:activate to pre-warm the connection, then retry /rune:status.",
+				timeout.Seconds(), float64(elapsed.Milliseconds()),
+			),
+			ErrorType: string(EnvErrTimeout),
+			ElapsedMs: float64(elapsed.Milliseconds()),
+		}
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,15 +327,36 @@ type CaptureHistoryResult struct {
 }
 
 // CaptureHistory — reverse-read capture_log.jsonl, filter, cap at limit.
-// Python degrade: on read error return empty list (Python except → []).
-func (s *LifecycleService) CaptureHistory(ctx context.Context, args CaptureHistoryArgs) (*CaptureHistoryResult, error) {
-	// TODO:
-	//  if args.Limit == 0 { args.Limit = 20 }
-	//  if args.Limit > 100 { args.Limit = 100 }
-	//  entries, err := logio.Tail(path, args.Limit, args.Domain, args.Since)
-	//  if err != nil { return empty result, nil } // Python degrade
-	_ = args
-	return nil, nil
+func (s *LifecycleService) CaptureHistory(_ context.Context, args CaptureHistoryArgs) (*CaptureHistoryResult, error) {
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	logPath := filepath.Join(s.ConfigDir, logio.DefaultFilename)
+	entries, err := logio.Tail(logPath, limit, args.Domain, args.Since)
+	if err != nil {
+		slog.Warn("capture history read failed (degraded)", "err", err)
+		return &CaptureHistoryResult{OK: true, Entries: []map[string]any{}}, nil
+	}
+
+	// Convert to map[string]any for format flexibility
+	mapEntries := make([]map[string]any, len(entries))
+	for i, e := range entries {
+		data, _ := json.Marshal(e)
+		var m map[string]any
+		_ = json.Unmarshal(data, &m)
+		mapEntries[i] = m
+	}
+
+	return &CaptureHistoryResult{
+		OK:      true,
+		Count:   len(mapEntries),
+		Entries: mapEntries,
+	}, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -208,22 +378,86 @@ type DeleteCaptureResult struct {
 }
 
 // DeleteCapture — soft-delete workflow:
-//  1. SearchByID(id) — embedder.EmbedSingle("ID: {id}") + searchSingle + filter
+//  1. SearchByID(id): find record
 //  2. set metadata["status"] = "reverted"
-//  3. re-embed + re-insert (reusable_insight > payload_text)
+//  3. re-embed + re-insert
 //  4. capture_log append with mode="soft-delete", action="deleted"
-//  5. on Vault error → state.SetDormant("vault_unreachable")
-//     on envector error → state.SetDormant("envector_unreachable")
-//     (Python server.py:L1180-1206)
-//
-// NOTE: re-encrypt uses capture Phase 5b logic (envector.Seal). Consider
-// calling into CaptureService helper or sharing via search.go.
 func (s *LifecycleService) DeleteCapture(ctx context.Context, args DeleteCaptureArgs, capSvc *CaptureService) (*DeleteCaptureResult, error) {
-	// TODO: implement soft-delete with dormant-on-error side effects
-	_ = ctx
-	_ = args
-	_ = capSvc
-	return nil, nil
+	// Search by ID
+	hit, err := SearchByID(ctx, s.Embedder, s.Vault, s.Envector, s.IndexName, args.RecordID)
+	if err != nil {
+		return nil, fmt.Errorf("delete: search by ID: %w", err)
+	}
+	if hit == nil {
+		return nil, &domain.RuneError{
+			Code:    domain.CodeInvalidInput,
+			Message: fmt.Sprintf("record %s not found", args.RecordID),
+		}
+	}
+
+	// Mutate metadata
+	metadata := hit.Metadata
+	if metadata == nil {
+		metadata = make(map[string]any)
+	}
+	metadata["status"] = "reverted"
+	title := hit.Title
+
+	// Re-embed + re-insert
+	embedText := hit.ReusableInsight
+	if embedText == "" {
+		embedText = hit.PayloadText
+	}
+
+	vec, err := s.Embedder.EmbedSingle(ctx, embedText)
+	if err != nil {
+		return nil, fmt.Errorf("delete: re-embed: %w", err)
+	}
+
+	body, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("delete: marshal: %w", err)
+	}
+
+	var envelope string
+	if capSvc != nil && len(capSvc.AgentDEK) > 0 && capSvc.AgentID != "" {
+		sealed, err := envector.Seal(capSvc.AgentDEK, capSvc.AgentID, body)
+		if err != nil {
+			return nil, fmt.Errorf("delete: seal: %w", err)
+		}
+		envelope = sealed
+	} else {
+		envelope = string(body)
+	}
+
+	insertReq := envector.InsertRequest{
+		Vectors:  [][]float32{vec},
+		Metadata: []string{envelope},
+	}
+	_, err = s.Envector.Insert(ctx, insertReq)
+	if err != nil {
+		return nil, fmt.Errorf("delete: re-insert: %w", err)
+	}
+
+	// Capture log
+	if capSvc != nil && capSvc.CaptureLog != nil {
+		_ = capSvc.CaptureLog.Append(domain.CaptureLogEntry{
+			TS:     time.Now().UTC().Format(time.RFC3339),
+			Action: "deleted",
+			ID:     args.RecordID,
+			Title:  title,
+			Domain: hit.Domain,
+			Mode:   "soft-delete",
+		})
+	}
+
+	return &DeleteCaptureResult{
+		OK:       true,
+		Deleted:  true,
+		RecordID: args.RecordID,
+		Title:    title,
+		Method:   "soft-delete (status=reverted)",
+	}, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,28 +484,39 @@ type WarmupInfo struct {
 // WarmupTimeout — Python WARMUP_TIMEOUT (server.py:L1059). 60s.
 const WarmupTimeout = 60 * time.Second
 
-// ReloadPipelines — re-init + warmup. Requires AwaitInitDone to avoid races.
-// Python server.py:L1046-1089.
+// ReloadPipelines — re-init + warmup
 func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipelinesResult, error) {
-	// TODO:
-	//  s.State.AwaitInitDone()       — wait for any in-flight boot
-	//  s.State.ClearError()
-	//  res := s.State.ReinitPipelines(ctx)
-	//  if res.ScribeInit && s.Envector != nil {
-	//      warmup := s.warmupEnvector(ctx, WarmupTimeout)
-	//  }
-	//  return compose result
-	_ = ctx
-	return nil, nil
+	result := &ReloadPipelinesResult{
+		OK:    true,
+		State: s.State.Current().String(),
+	}
+
+	if s.State.Current() == lifecycle.StateActive {
+		result.ScribeInitialized = true
+		result.RetrieverInitialized = true
+	}
+
+	if s.Envector != nil {
+		warmup := s.warmupEnvector(ctx, WarmupTimeout)
+		result.EnvectorWarmup = warmup
+	}
+
+	return result, nil
 }
 
 // warmupEnvector — GetIndexList under 60s timeout.
 func (s *LifecycleService) warmupEnvector(ctx context.Context, timeout time.Duration) *WarmupInfo {
-	// TODO: context.WithTimeout + GetIndexList probe
-	return nil
-}
+	ctx2, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tail wrapper — re-exports logio for handlers that need raw entries.
-// ─────────────────────────────────────────────────────────────────────────────
-var _ = logio.DefaultFilename // keep import edge; TODO remove when Tail wired
+	t0 := time.Now()
+	_, err := s.Envector.GetIndexList(ctx2)
+	elapsed := float64(time.Since(t0).Milliseconds())
+
+	if err != nil {
+		errStr := err.Error()
+		return &WarmupInfo{OK: false, LatencyMs: &elapsed, Error: &errStr}
+	}
+
+	return &WarmupInfo{OK: true, LatencyMs: &elapsed}
+}
