@@ -33,6 +33,7 @@ class EnVectorClient:
         key_path: str = "~/.rune/keys",
         key_id: str = None,
         access_token: Optional[str] = None,
+        secure: Optional[bool] = None,
         auto_key_setup: bool = True,
         agent_id: Optional[str] = None,
         agent_dek: Optional[bytes] = None,
@@ -53,6 +54,7 @@ class EnVectorClient:
         self._key_path = Path(key_path).expanduser()
         self._key_id = key_id
         self._access_token = access_token
+        self._secure = secure
         self._auto_key_setup = auto_key_setup
         self._agent_id = agent_id
         self._agent_dek = agent_dek
@@ -75,8 +77,9 @@ class EnVectorClient:
                 key_id=self._key_id,
                 key_path=str(self._key_path),
                 eval_mode="rmp",
-                query_encryption=False,  # Plain queries for simplicity
+                query_encryption="plain",  # Plain queries for simplicity
                 access_token=self._access_token,
+                secure=self._secure,
                 auto_key_setup=self._auto_key_setup,
                 agent_id=self._agent_id,
                 agent_dek=self._agent_dek,
@@ -217,4 +220,3 @@ class EnVectorClient:
             indices=indices,
             output_fields=output_fields,
         )
-

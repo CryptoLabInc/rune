@@ -1622,6 +1622,7 @@ class MCPServerApp:
                 key_path=key_path,
                 key_id=key_id,
                 access_token=self._envector_api_key or "",
+                secure=rune_config.envector.secure,
                 auto_key_setup=False,
                 agent_id=self._agent_id,
                 agent_dek=self._agent_dek,
@@ -1634,8 +1635,9 @@ class MCPServerApp:
                     key_id=key_id,
                     key_path=key_path,
                     eval_mode="rmp",
-                    query_encryption=False,
+                    query_encryption="plain",
                     access_token=self._envector_api_key or "",
+                    secure=rune_config.envector.secure,
                     auto_key_setup=False,
                     agent_id=self._agent_id,
                     agent_dek=self._agent_dek,
@@ -1854,8 +1856,23 @@ if __name__ == "__main__":
     ENVECTOR_EVAL_MODE = args.envector_eval_mode
     ENCRYPTED_QUERY = args.encrypted_query
 
+    def _parse_optional_bool(value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            return value
+        lowered = str(value).strip().lower()
+        if lowered in ("true", "1", "yes", "y", "on"):
+            return True
+        if lowered in ("false", "0", "no", "n", "off"):
+            return False
+        raise ValueError(f"invalid boolean value: {value!r}")
+
+    ENVECTOR_SECURE = _parse_optional_bool(os.getenv("ENVECTOR_SECURE"))
+
     # ── Load ~/.rune/config.json if ENVECTOR_CONFIG is set ──
     _vault_cfg = {}  # populated from config file if available
+    _envector_cfg = {}
     _config_path = os.getenv("ENVECTOR_CONFIG")
     if _config_path:
         _config_path = os.path.expanduser(_config_path)
@@ -1864,6 +1881,9 @@ if __name__ == "__main__":
                 with open(_config_path) as _cf:
                     _rune_config = json.load(_cf)
                 _vault_cfg = _rune_config.get("vault", {})
+                _envector_cfg = _rune_config.get("envector", {})
+                if ENVECTOR_SECURE is None:
+                    ENVECTOR_SECURE = _parse_optional_bool(_envector_cfg.get("secure"))
                 if not os.getenv("RUNEVAULT_ENDPOINT") and (_vault_cfg.get("endpoint") or _vault_cfg.get("url")):
                     os.environ["RUNEVAULT_ENDPOINT"] = _vault_cfg.get("endpoint") or _vault_cfg["url"]
                 if not os.getenv("RUNEVAULT_TOKEN") and _vault_cfg.get("token"):
@@ -1940,6 +1960,7 @@ if __name__ == "__main__":
             eval_mode=ENVECTOR_EVAL_MODE,
             query_encryption=ENCRYPTED_QUERY,
             access_token=ENVECTOR_API_KEY,
+            secure=ENVECTOR_SECURE,
             auto_key_setup=AUTO_KEY_SETUP,
         )
     except Exception as e:

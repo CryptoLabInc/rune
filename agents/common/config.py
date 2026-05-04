@@ -8,6 +8,7 @@ import os
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
+from typing import Optional
 
 # Default config paths
 CONFIG_DIR = Path.home() / ".rune"
@@ -59,6 +60,7 @@ class EnVectorConfig:
     """enVector Cloud credentials (cached from Vault bundle)"""
     endpoint: str = ""
     api_key: str = ""
+    secure: Optional[bool] = None  # None = pyenvector default; API key defaults to TLS
 
 
 @dataclass
@@ -146,7 +148,23 @@ def _parse_envector_config(data: dict) -> EnVectorConfig:
     return EnVectorConfig(
         endpoint=ev_data.get("endpoint", ""),
         api_key=ev_data.get("api_key", ""),
+        secure=_parse_optional_bool(ev_data.get("secure")),
     )
+
+
+def _parse_optional_bool(value) -> Optional[bool]:
+    """Parse bool-like config values while preserving None as 'use SDK default'."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "1", "yes", "y", "on"):
+            return True
+        if lowered in ("false", "0", "no", "n", "off"):
+            return False
+    raise ValueError(f"invalid boolean value: {value!r}")
 
 
 def _parse_llm_config(data: dict) -> LLMConfig:
@@ -252,6 +270,11 @@ def load_config() -> RuneConfig:
         config.scribe.slack_signing_secret = os.getenv("SLACK_SIGNING_SECRET")
     if os.getenv("NOTION_SIGNING_SECRET"):
         config.scribe.notion_signing_secret = os.getenv("NOTION_SIGNING_SECRET")
+    if os.getenv("ENVECTOR_SECURE"):
+        try:
+            config.envector.secure = _parse_optional_bool(os.getenv("ENVECTOR_SECURE"))
+        except ValueError:
+            print(f"[Config] Warning: invalid ENVECTOR_SECURE value: {os.getenv('ENVECTOR_SECURE')}")
 
     # LLM env var overrides (target config.llm, track env-sourced keys)
     _env_llm_map = {
@@ -318,6 +341,7 @@ def save_config(config: RuneConfig) -> None:
         "envector": {
             "endpoint": config.envector.endpoint,
             "api_key": config.envector.api_key,
+            "secure": config.envector.secure,
         },
         "embedding": {
             "mode": config.embedding.mode,

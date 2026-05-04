@@ -1,6 +1,6 @@
 # Summary of file: enVector SDK Adapter(enVector APIs Caller)
 
-from typing import Union, List, Dict, Any
+from typing import Union, List, Dict, Any, Optional
 import base64
 import json
 import logging
@@ -111,8 +111,9 @@ class EnVectorSDKAdapter:
             key_id: str,
             key_path: str,
             eval_mode: str,
-            query_encryption: bool,
+            query_encryption: Union[str, bool, None],
             access_token: str = None,
+            secure: Optional[bool] = None,
             auto_key_setup: bool = True,
             agent_id: str = None,
             agent_dek: bytes = None,
@@ -146,9 +147,22 @@ class EnVectorSDKAdapter:
             "eval_mode": eval_mode,
             "auto_key_setup": auto_key_setup,
             "access_token": access_token,
+            "secure": secure,
         }
 
+        normalized_query_encryption = self._normalize_query_encryption(query_encryption)
+        self._init_params["query_encryption"] = normalized_query_encryption
+
         ev.init(**self._init_params)
+
+    @staticmethod
+    def _normalize_query_encryption(value: Union[str, bool, None]) -> str:
+        """Normalize Rune's legacy bool flag to pyenvector 1.4 string values."""
+        if value is None:
+            return "plain"
+        if isinstance(value, bool):
+            return "cipher" if value else "plain"
+        return value
 
     #--------------- Get Index List --------------#
     def call_get_index_list(self) -> Dict[str, Any]:
