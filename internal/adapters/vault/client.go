@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 )
 
 // MaxMessageLength — 256MB for EvalKey (Python vault_client.py:L33).
@@ -93,6 +94,11 @@ func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
 			grpc.MaxCallRecvMsgSize(MaxMessageLength),
 			grpc.MaxCallSendMsgSize(MaxMessageLength),
 		),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                30 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 	}
 
 	if opts.TLSDisable {
