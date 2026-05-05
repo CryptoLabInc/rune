@@ -12,7 +12,13 @@
 envector-msa-1.4.0은 이전 버전(rmp)에서 크게 변경되었다:
 - **KMS**: 독립 서비스로 분리 (Port 50060)  
 - **Audit**: 독립 서비스로 분리 (Port 50052)  
-- **pyenvector 1.4.0**: `secure` 파라미터 추가, 암호화 최적화 (PPMM cache 1.31–1.40x)  
+- **pyenvector 1.4.0**:
+  - `secure` 파라미터 추가 — TLS 활성/비활성 토글, 기본 False(`access_token` 설정 시 True).
+    출처: `envector-msa-1.4.0/docs/architecture/components/sdk.md` Configuration 섹션.
+  - 검색(Search) 경로의 PPMM native 연산 cache-aware 최적화 추가 — query batch m=4–16에서
+    1.20–1.40x (V2: loop swap), 1.35–1.59x (V3: swap+j-tile) speedup. 단일 쿼리(m=1)에는 효과 없음.
+    출처: `envector-msa-1.4.0/docs/design/ppmm-cache-optimization-analysis.md`
+    (Solution Dev Team, 2026-03-09).
 - **gRPC-Gateway**: REST 전사(transcoding) 지원
 
 rune의 현재 config는 `envector.endpoint = 146.56.178.130:50050` (원격 클라우드)를 사용하고 있으며,  

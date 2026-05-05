@@ -37,7 +37,7 @@
 
 ### capture insert 단계가 압도적 (~4.5초)
 
-`insert` phase가 capture 전체 시간의 92%. 내부적으로 FHE 암호화 + 원격 envector insert가 합쳐진 구간이며, pyenvector 1.4.0의 PPMM cache (1.31–1.40x 가속) 가 적용된 후의 수치임에도 절대값은 4.2–5.0초 수준. 다음 측정 라운드에서:
+`insert` phase가 capture 전체 시간의 92%. 내부적으로 FHE 암호화 + 원격 envector insert가 합쳐진 구간이며, 절대값은 4.2–5.0초 수준. (참고: envector-msa-1.4.0의 PPMM cache 최적화는 Search 경로 전용이며 insert와 무관 — `envector-msa-1.4.0/docs/design/ppmm-cache-optimization-analysis.md`.) 다음 측정 라운드에서:
 1. FHE encrypt 단독 시간 (로컬 CPU)
 2. 원격 envector `insert_data` gRPC 시간 (네트워크 + 서버측 저장)
 을 분리 계측하면 병목 위치가 더 명확해질 것으로 보임.
