@@ -35,7 +35,7 @@
 
 **부수적으로 확인된 인프라 변경**: `mcp/adapter/vault_client.py:33`의 `MAX_MESSAGE_LENGTH`가 256 MB → ~1.95 GB로 상향되어야 했음. EvalKey 응답 크기가 약 1.18 GB에 달해 256 MB 한도에서 `RESOURCE_EXHAUSTED`로 실패하던 것을 동일 브랜치 내 plugin cache 버전과 일치시켜 해결.
 
-### capture insert 단계가 압도적 (~4.5초)
+### capture 시간 대부분이 insert에서 소비됨 (~4.5초, 전체의 92%)
 
 `insert` phase가 capture 전체 시간의 92%. 내부적으로 FHE 암호화 + 원격 envector insert가 합쳐진 구간이며, 절대값은 4.2–5.0초 수준. (참고: envector-msa-1.4.0의 PPMM cache 최적화는 Search 경로 전용이며 insert와 무관 — `envector-msa-1.4.0/docs/design/ppmm-cache-optimization-analysis.md`.) 다음 측정 라운드에서:
 1. FHE encrypt 단독 시간 (로컬 CPU)
