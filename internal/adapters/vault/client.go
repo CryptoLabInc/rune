@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	vaultpb "github.com/CryptoLabInc/rune-admin/vault/pkg/vaultpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
@@ -70,7 +71,7 @@ type client struct {
 	endpoint string
 	token    string
 	conn     *grpc.ClientConn
-	// TODO: vault pb2_grpc stub (needs proto codegen)
+	pb       vaultpb.VaultServiceClient
 }
 
 // See spec/components/vault.md §TLS + §Keepalive.
@@ -107,7 +108,12 @@ func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
 	}
 
 	slog.Info("vault: connected", "endpoint", normalized)
-	return &client{endpoint: normalized, token: token, conn: conn}, nil
+	return &client{
+		endpoint: normalized,
+		token:    token,
+		conn:     conn,
+		pb:       vaultpb.NewVaultServiceClient(conn),
+	}, nil
 }
 
 // ValidateAgentDEK — Go-specific safety check (Python missing — see vault.md §agent_dek).

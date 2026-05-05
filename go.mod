@@ -11,9 +11,15 @@ go 1.25.9
 //
 // go 1.25.0 + toolchain pin required by the MCP SDK.
 
-require github.com/modelcontextprotocol/go-sdk v1.5.0
+require (
+	github.com/modelcontextprotocol/go-sdk v1.5.0
+	google.golang.org/grpc v1.80.0
+)
+
+require buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1 // indirect
 
 require (
+	github.com/CryptoLabInc/rune-admin/vault v0.0.0
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
@@ -23,6 +29,7 @@ require (
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
-	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/CryptoLabInc/rune-admin/vault => ../rune-admin/vault
