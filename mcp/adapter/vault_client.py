@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 from .vault_proto import vault_service_pb2 as pb2
 from .vault_proto import vault_service_pb2_grpc as pb2_grpc
 
-MAX_MESSAGE_LENGTH = 256 * 1024 * 1024  # 256 MB (EvalKey can be tens of MB)
+MAX_MESSAGE_LENGTH = 2000 * 1024 * 1024  # ~1.95 GB (kept under INT32_MAX; EvalKey in pyenvector >= 1.4.0 reaches ~1.2 GB)
 
 
 @dataclass
