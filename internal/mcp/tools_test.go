@@ -4,6 +4,7 @@
 package mcp
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -25,14 +26,17 @@ func TestIsValidToolName(t *testing.T) {
 	}
 }
 
-func TestMustAddTool_PanicsOnInvalidName(t *testing.T) {
+func TestMustAdd_PanicsOnInvalidName(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("mustAddTool with invalid name did not panic")
+			t.Error("mustAdd with invalid name did not panic")
 		}
 	}()
 	srv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "x", Version: "0"}, nil)
-	mustAddTool[emptyArgs, emptyArgs](srv, &Deps{}, "rune capture", "test")
+	noopHandler := func(_ context.Context, _ *sdkmcp.CallToolRequest, _ emptyArgs) (*sdkmcp.CallToolResult, emptyArgs, error) {
+		return nil, emptyArgs{}, nil
+	}
+	mustAdd[emptyArgs, emptyArgs](srv, "rune capture", "test", noopHandler)
 }
 
 func TestRegister_AllHardcodedNamesValid(t *testing.T) {

@@ -16,12 +16,10 @@
 package mcp
 
 import (
-	"context"
 	"fmt"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/envector/rune-go/internal/domain"
 	"github.com/envector/rune-go/internal/lifecycle"
 	"github.com/envector/rune-go/internal/service"
 )
@@ -50,8 +48,8 @@ type emptyArgs struct{}
 //
 // Failure modes that Register surfaces as a startup error (via panic +
 // recover):
-//  1. mustAddTool name validation (SDK's validateToolName has a log-only
-//     branch — server.go:238-241 — that we bypass by panicking up-front).
+//  1. mustAdd name validation (SDK's validateToolName has a log-only branch —
+//     server.go:238-241 — that we bypass by panicking up-front).
 //  2. SDK schema-inference panic (toolForErr).
 //  3. SDK schema-shape panic (Server.AddTool).
 //
@@ -64,52 +62,52 @@ func Register(srv *sdkmcp.Server, deps *Deps) (err error) {
 		}
 	}()
 
-	// Write tools (state gate applies in Phase 5).
-	mustAddTool[domain.CaptureRequest, domain.CaptureResponse](srv, deps,
-		"rune_capture",
-		"Capture a decision record (agent-delegated extraction required).")
-	mustAddTool[service.BatchCaptureArgs, service.BatchCaptureResult](srv, deps,
-		"rune_batch_capture",
-		"Capture a batch of decision records (e.g. session-end sweep).")
-	mustAddTool[domain.RecallArgs, domain.RecallResult](srv, deps,
-		"rune_recall",
-		"Query organizational memory by natural-language question.")
-	mustAddTool[service.DeleteCaptureArgs, service.DeleteCaptureResult](srv, deps,
-		"rune_delete_capture",
-		"Soft-delete a record by ID (sets status=reverted, re-inserts).")
+	// Write tools — state-gated.
+	mustAdd(srv, "rune_capture",
+		"Capture a decision record (agent-delegated extraction required).",
+		handleCapture(deps))
+	mustAdd(srv, "rune_batch_capture",
+		"Capture a batch of decision records (e.g. session-end sweep).",
+		handleBatchCapture(deps))
+	mustAdd(srv, "rune_recall",
+		"Query organizational memory by natural-language question.",
+		handleRecall(deps))
+	mustAdd(srv, "rune_delete_capture",
+		"Soft-delete a record by ID (sets status=reverted, re-inserts).",
+		handleDeleteCapture(deps))
 
-	// Read / diagnostic tools (state gate bypass).
-	mustAddTool[service.CaptureHistoryArgs, service.CaptureHistoryResult](srv, deps,
-		"rune_capture_history",
-		"List recent captures from local capture_log.jsonl (read-only).")
-	mustAddTool[emptyArgs, service.VaultStatusResult](srv, deps,
-		"rune_vault_status",
-		"Probe Vault connectivity and report secure-search mode.")
-	mustAddTool[emptyArgs, service.DiagnosticsResult](srv, deps,
-		"rune_diagnostics",
-		"Collect a 7-section health snapshot (env / state / vault / keys / pipelines / embedding / envector).")
-	mustAddTool[emptyArgs, service.ReloadPipelinesResult](srv, deps,
-		"rune_reload_pipelines",
-		"Re-initialize Vault + envector pipelines (BOOT replay) with envector warmup.")
+	// Read / diagnostic tools — bypass state gate.
+	mustAdd(srv, "rune_capture_history",
+		"List recent captures from local capture_log.jsonl (read-only).",
+		handleCaptureHistory(deps))
+	mustAdd(srv, "rune_vault_status",
+		"Probe Vault connectivity and report secure-search mode.",
+		handleVaultStatus(deps))
+	mustAdd(srv, "rune_diagnostics",
+		"Collect a 7-section health snapshot (env / state / vault / keys / pipelines / embedding / envector).",
+		handleDiagnostics(deps))
+	mustAdd(srv, "rune_reload_pipelines",
+		"Re-initialize Vault + envector pipelines (BOOT replay) with envector warmup.",
+		handleReloadPipelines(deps))
 
 	return nil
 }
 
-// mustAddTool wraps sdkmcp.AddTool with up-front name validation.
+// mustAdd wraps sdkmcp.AddTool with up-front name validation.
 //
 // The SDK's Server.AddTool only LOGS on invalid tool names
 // (go-sdk/mcp/server.go:238-241) — it does not panic, so Register's
 // defer recover() would miss it and the bad-named tool would silently
-// register. mustAddTool panics on invalid names, unifying the failure
+// register. mustAdd panics on invalid names, unifying the failure
 // path so recover() catches everything.
-func mustAddTool[In, Out any](srv *sdkmcp.Server, deps *Deps, name, description string) {
+func mustAdd[In, Out any](srv *sdkmcp.Server, name, description string, h sdkmcp.ToolHandlerFor[In, Out]) {
 	if !isValidToolName(name) {
-		panic(fmt.Errorf("mustAddTool: invalid tool name %q (allowed: [A-Za-z0-9_-], 1..128 chars)", name))
+		panic(fmt.Errorf("mustAdd: invalid tool name %q (allowed: [A-Za-z0-9_-], 1..128 chars)", name))
 	}
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{
 		Name:        name,
 		Description: description,
-	}, stubHandler[In, Out](deps, name))
+	}, h)
 }
 
 // isValidToolName mirrors the SDK's validateToolName rules
@@ -129,28 +127,3 @@ func isValidToolName(name string) bool {
 	return true
 }
 
-// stubHandler returns a SDK ToolHandlerFor that always responds with a
-// not-yet-implemented isError result. Output type is preserved so tools/list
-// can still publish the inferred output schema.
-//
-// deps is captured but unused in Phase A. Phase 5 will dereference it for
-// CheckState / service dispatch — the closure shape stays the same.
-func stubHandler[In, Out any](deps *Deps, toolName string) sdkmcp.ToolHandlerFor[In, Out] {
-	_ = deps // captured for Phase 5; intentionally unused now
-	return func(_ context.Context, _ *sdkmcp.CallToolRequest, _ In) (*sdkmcp.CallToolResult, Out, error) {
-		var zero Out
-		return stubResult(toolName), zero, nil
-	}
-}
-
-// stubResult composes the Phase-A "not implemented" response.
-func stubResult(toolName string) *sdkmcp.CallToolResult {
-	return &sdkmcp.CallToolResult{
-		IsError: true,
-		Content: []sdkmcp.Content{
-			&sdkmcp.TextContent{
-				Text: toolName + " is not yet implemented (skeleton phase A — MCP handshake + tools/list only).",
-			},
-		},
-	}
-}

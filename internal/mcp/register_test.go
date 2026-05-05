@@ -1,5 +1,5 @@
 // Phase A.5 smoke tests — in-memory MCP server/client to assert that the
-// 8-tool catalog and stub responses survive future refactors.
+// 8-tool catalog and state-gated handlers survive future refactors.
 //
 // These mirror the bash/jq cookbook in docs/v04/progress/phase-a-mcp-boot.md
 // §4.2 (tools/list) and §4.3 (tools/call). Replacing the cookbook with Go
@@ -13,7 +13,9 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/envector/rune-go/internal/lifecycle"
 	"github.com/envector/rune-go/internal/mcp"
+	"github.com/envector/rune-go/internal/service"
 )
 
 // expectedTools — alphabetical order matches what the SDK advertises in
@@ -31,6 +33,12 @@ var expectedTools = []string{
 
 // newSession spins up an in-memory MCP server with all 8 tools registered
 // and returns a connected client session ready for tools/list and tools/call.
+//
+// Deps mirrors a "boot has not progressed past starting" state: the Manager
+// is freshly constructed (StateStarting) and services are zero-valued. With
+// State == StateStarting, write tools return PIPELINE_NOT_READY through the
+// CheckState gate. Read-only tools (vault_status / diagnostics /
+// capture_history) bypass the gate but their service nil-checks must hold.
 func newSession(t *testing.T) *sdkmcp.ClientSession {
 	t.Helper()
 	ctx := t.Context()
@@ -39,7 +47,18 @@ func newSession(t *testing.T) *sdkmcp.ClientSession {
 		Name:    "rune-mcp-test",
 		Version: "0.0.0-test",
 	}, nil)
-	if err := mcp.Register(srv, &mcp.Deps{}); err != nil {
+	mgr := lifecycle.NewManager()
+	cap := service.NewCaptureService()
+	cap.State = mgr
+	life := service.NewLifecycleService()
+	life.State = mgr
+	deps := &mcp.Deps{
+		State:     mgr,
+		Capture:   cap,
+		Recall:    service.NewRecallService(),
+		Lifecycle: life,
+	}
+	if err := mcp.Register(srv, deps); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
@@ -109,23 +128,24 @@ func TestRegister_SchemasInferred(t *testing.T) {
 	}
 }
 
-func TestRegister_StubReturnsIsError(t *testing.T) {
+// TestRegister_WriteToolsGated — write tools (capture, batch_capture, recall,
+// delete_capture) must surface PIPELINE_NOT_READY when Deps.State is in
+// StateStarting. Confirms the CheckState gate fires before service dispatch.
+//
+// reload_pipelines is intentionally NOT gated (it is the dormant→active
+// unblocker / `/rune:activate` handler per rune-mcp.md). Smoke tests for it
+// live in the diagnostic suite once an envector mock is in place.
+func TestRegister_WriteToolsGated(t *testing.T) {
 	cs := newSession(t)
 
-	// All 8 tools — each carries minimal schema-valid args so SDK input
-	// validation passes and the stubHandler fires. Order matches expectedTools.
 	cases := []struct {
 		name string
 		args map[string]any
 	}{
 		{"rune_batch_capture", map[string]any{"items": "[]"}},
 		{"rune_capture", map[string]any{"text": "hi", "source": "test", "extracted": map[string]any{}}},
-		{"rune_capture_history", nil},
 		{"rune_delete_capture", map[string]any{"record_id": "test-id"}},
-		{"rune_diagnostics", nil},
 		{"rune_recall", map[string]any{"query": "hello"}},
-		{"rune_reload_pipelines", nil},
-		{"rune_vault_status", nil},
 	}
 
 	for _, tc := range cases {
@@ -138,7 +158,7 @@ func TestRegister_StubReturnsIsError(t *testing.T) {
 				t.Fatalf("CallTool transport error: %v", err)
 			}
 			if !res.IsError {
-				t.Errorf("IsError: got false, want true (Phase A stub)")
+				t.Errorf("IsError: got false, want true (state gate should reject)")
 			}
 			if len(res.Content) == 0 {
 				t.Fatalf("Content: empty")
@@ -147,11 +167,8 @@ func TestRegister_StubReturnsIsError(t *testing.T) {
 			if !ok {
 				t.Fatalf("Content[0]: got %T, want *TextContent", res.Content[0])
 			}
-			if !strings.Contains(tc0.Text, "not yet implemented") {
-				t.Errorf("Content[0].Text: %q does not contain stub marker", tc0.Text)
-			}
-			if !strings.Contains(tc0.Text, tc.name) {
-				t.Errorf("Content[0].Text: %q does not name the tool", tc0.Text)
+			if !strings.Contains(tc0.Text, "PIPELINE_NOT_READY") {
+				t.Errorf("Content[0].Text: %q does not contain PIPELINE_NOT_READY marker", tc0.Text)
 			}
 		})
 	}
