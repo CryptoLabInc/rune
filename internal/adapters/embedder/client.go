@@ -94,7 +94,7 @@ func (c *client) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 	return nil, nil
 }
 
-func (c *client) Info(ctx context.Context) (InfoSnapshot, error)     { return InfoSnapshot{}, nil }
+func (c *client) Info(ctx context.Context) (InfoSnapshot, error) { return c.info.Get(ctx) }
 func (c *client) Health(ctx context.Context) (HealthSnapshot, error) { return HealthSnapshot{}, nil }
 func (c *client) Close() error {
 	if c.conn != nil {

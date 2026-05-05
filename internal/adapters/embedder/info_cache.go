@@ -27,31 +27,26 @@ type infoCache struct {
 	svc  runedv1.RunedServiceClient
 }
 
-// Get returns the cached snapshot, populating on first call.
-//
-// TODO: implement once gRPC stub types are generated:
-//
-//	ic.once.Do(func() {
-//	    resp, err := ic.svc.Info(ctx, &embedderv1.InfoRequest{})
-//	    if err != nil { ic.err = err; return }
-//	    ic.snap = InfoSnapshot{
-//	        DaemonVersion: resp.DaemonVersion,
-//	        ModelIdentity: resp.ModelIdentity,
-//	        VectorDim:     int(resp.VectorDim),
-//	        MaxTextLength: int(resp.MaxTextLength),
-//	        MaxBatchSize:  int(resp.MaxBatchSize),
-//	    }
-//	    slog.Info("embedder info loaded",
-//	        "daemon_version", ic.snap.DaemonVersion,
-//	        "model_identity", ic.snap.ModelIdentity,
-//	        "vector_dim", ic.snap.VectorDim,
-//	        "max_batch_size", ic.snap.MaxBatchSize,
-//	    )
-//	})
 func (ic *infoCache) Get(ctx context.Context) (InfoSnapshot, error) {
 	ic.once.Do(func() {
-		// TODO: ic.svc.Info(ctx, ...) then populate snap / err
-		_ = ctx
+		resp, err := ic.svc.Info(ctx, &runedv1.InfoRequest{})
+		if err != nil {
+			ic.err = err
+			return
+		}
+		ic.snap = InfoSnapshot{
+			DaemonVersion: resp.GetDaemonVersion(),
+			ModelIdentity: resp.GetModelIdentity(),
+			VectorDim:     int(resp.GetVectorDim()),
+			MaxTextLength: int(resp.GetMaxTextLength()),
+			MaxBatchSize:  int(resp.GetMaxBatchSize()),
+		}
+		slog.Info("embedder info loaded",
+			"daemon_version", ic.snap.DaemonVersion,
+			"model_identity", ic.snap.ModelIdentity,
+			"vector_dim", ic.snap.VectorDim,
+			"max_batch_size", ic.snap.MaxBatchSize,
+		)
 	})
 	return ic.snap, ic.err
 }
@@ -59,6 +54,3 @@ func (ic *infoCache) Get(ctx context.Context) (InfoSnapshot, error) {
 // Snapshot returns the cached value without triggering load.
 // Returns zero InfoSnapshot if Get() has never been called.
 func (ic *infoCache) Snapshot() InfoSnapshot { return ic.snap }
-
-// Enforce slog reference so import survives lint.
-var _ = slog.Info
