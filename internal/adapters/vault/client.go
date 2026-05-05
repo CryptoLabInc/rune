@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 // MaxMessageLength — 256MB for EvalKey (Python vault_client.py:L33).
@@ -33,6 +34,9 @@ const MaxMessageLength = 256 * 1024 * 1024
 
 // DefaultTimeout — Python vault_client.py:L84 (all RPCs: 30s; health 5s override).
 const DefaultTimeout = 30 * time.Second
+
+// HealthTimeout — Python vault_client.py:L315 (grpc_health.v1 Check: 5s).
+const HealthTimeout = 5 * time.Second
 
 // Bundle returned by GetPublicKey.
 type Bundle struct {
@@ -74,6 +78,7 @@ type client struct {
 	token    string
 	conn     *grpc.ClientConn
 	pb       vaultpb.VaultServiceClient
+	health   healthpb.HealthClient
 }
 
 // See spec/components/vault.md §TLS + §Keepalive.
@@ -115,6 +120,7 @@ func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
 		token:    token,
 		conn:     conn,
 		pb:       vaultpb.NewVaultServiceClient(conn),
+		health:   healthpb.NewHealthClient(conn),
 	}, nil
 }
 
@@ -222,9 +228,20 @@ func (c *client) DecryptMetadata(ctx context.Context, list []string) ([]string, 
 	return resp.GetDecryptedMetadata(), nil
 }
 
+// HealthCheck issues a Tier 1 grpc_health.v1 Check (service="" = whole
+// server). 5s timeout matches Python vault_client.py:L315.
+//
+// Tier 2 (HTTP /health on http(s):// endpoints) lives in health.go and is
+// only useful as a diagnostic when Tier 1 fails — it is NOT a substitute.
 func (c *client) HealthCheck(ctx context.Context) (bool, error) {
-	// TODO: call grpc.health.v1.Health/Check
-	return false, fmt.Errorf("vault: HealthCheck not yet implemented")
+	ctx, cancel := context.WithTimeout(ctx, HealthTimeout)
+	defer cancel()
+
+	resp, err := c.health.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
+	if err != nil {
+		return false, fmt.Errorf("vault: health check: %w", err)
+	}
+	return resp.GetStatus() == healthpb.HealthCheckResponse_SERVING, nil
 }
 
 func (c *client) Endpoint() string { return c.endpoint }
