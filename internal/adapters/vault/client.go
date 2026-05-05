@@ -15,6 +15,8 @@ package vault
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -125,11 +127,55 @@ func ValidateAgentDEK(dek []byte) error {
 	return nil
 }
 
-// Stub implementations - TODO: wire to generated protobuf stubs
+// keyBundleJSON mirrors the map produced by Vault's buildBundle
+// (rune-admin/vault/internal/server/grpc.go:131-153). EncKey and EvalKey
+// are file-content strings (raw JSON of the FHE key files).
+type keyBundleJSON struct {
+	EncKey           string `json:"EncKey.json"`
+	EvalKey          string `json:"EvalKey.json"`
+	KeyID            string `json:"key_id"`
+	IndexName        string `json:"index_name"`
+	AgentID          string `json:"agent_id"`
+	AgentDEK         string `json:"agent_dek"` // base64 of 32B
+	EnvectorEndpoint string `json:"envector_endpoint"`
+	EnvectorAPIKey   string `json:"envector_api_key"`
+}
 
 func (c *client) GetPublicKey(ctx context.Context) (*Bundle, error) {
-	// TODO: call VaultService.GetPublicKey RPC
-	return nil, fmt.Errorf("vault: GetPublicKey not yet implemented (needs proto codegen)")
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	resp, err := c.pb.GetPublicKey(ctx, &vaultpb.GetPublicKeyRequest{Token: c.token})
+	if err != nil {
+		return nil, fmt.Errorf("vault: GetPublicKey rpc: %w", err)
+	}
+	if resp.GetError() != "" {
+		return nil, fmt.Errorf("vault: GetPublicKey: %s", resp.GetError())
+	}
+
+	var b keyBundleJSON
+	if err := json.Unmarshal([]byte(resp.GetKeyBundleJson()), &b); err != nil {
+		return nil, fmt.Errorf("vault: parse key bundle json: %w", err)
+	}
+
+	dek, err := base64.StdEncoding.DecodeString(b.AgentDEK)
+	if err != nil {
+		return nil, fmt.Errorf("vault: decode agent_dek: %w", err)
+	}
+	if err := ValidateAgentDEK(dek); err != nil {
+		return nil, err
+	}
+
+	return &Bundle{
+		EncKey:           []byte(b.EncKey),
+		EvalKey:          []byte(b.EvalKey),
+		EnvectorEndpoint: b.EnvectorEndpoint,
+		EnvectorAPIKey:   b.EnvectorAPIKey,
+		AgentID:          b.AgentID,
+		AgentDEK:         dek,
+		KeyID:            b.KeyID,
+		IndexName:        b.IndexName,
+	}, nil
 }
 
 func (c *client) DecryptScores(ctx context.Context, blob string, topK int) ([]ScoreEntry, error) {
