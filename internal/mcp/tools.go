@@ -22,26 +22,23 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/envector/rune-go/internal/domain"
+	"github.com/envector/rune-go/internal/lifecycle"
 	"github.com/envector/rune-go/internal/service"
 )
 
 // Deps — injected into all 8 MCP handlers.
 //
-// Phase A: empty struct. Adapter clients · state machine · config will be
-// added as Phase 4 (adapters) and Phase 5 (service orchestration) land.
-// stubHandler already takes deps as an argument, so Phase 5 will only need
-// to swap the closure body, not the signature.
-//
-// Future fields (commented as a contract sketch — to be activated as the
-// owning adapter PR lands):
-//
-//	Vault      vault.Client
-//	Envector   envector.Client
-//	Embedder   embedder.Client
-//	CaptureLog *logio.CaptureLog
-//	State      *lifecycle.Manager
-//	Cfg        *config.Config
-type Deps struct{}
+// State + 3 services drive request handling. cmd/rune-mcp/main.go constructs
+// Deps after the boot loop has populated adapter clients on the services.
+// Until boot completes, write tools fail with PIPELINE_NOT_READY through
+// CheckState; read-only tools (vault_status, diagnostics, capture_history)
+// can run pre-active for diagnostics.
+type Deps struct {
+	State     *lifecycle.Manager
+	Capture   *service.CaptureService
+	Recall    *service.RecallService
+	Lifecycle *service.LifecycleService
+}
 
 // emptyArgs — input type for tools that take no arguments.
 type emptyArgs struct{}
