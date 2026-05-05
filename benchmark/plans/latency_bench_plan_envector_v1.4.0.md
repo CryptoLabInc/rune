@@ -12,7 +12,7 @@
 envector-msa-1.4.0은 이전 버전(rmp)에서 크게 변경되었다:
 - **KMS**: 독립 서비스로 분리 (Port 50060)  
 - **Audit**: 독립 서비스로 분리 (Port 50052)  
-- **pyenvector 1.4.0a5**: `secure` 파라미터 추가, 암호화 최적화 (PPMM cache 1.31–1.40x)  
+- **pyenvector 1.4.0**: `secure` 파라미터 추가, 암호화 최적화 (PPMM cache 1.31–1.40x)  
 - **gRPC-Gateway**: REST 전사(transcoding) 지원
 
 rune의 현재 config는 `envector.endpoint = 146.56.178.130:50050` (원격 클라우드)를 사용하고 있으며,  
