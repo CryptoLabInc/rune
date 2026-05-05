@@ -142,7 +142,40 @@ func (c *client) embedBatchOnce(ctx context.Context, texts []string) ([][]float3
 }
 
 func (c *client) Info(ctx context.Context) (InfoSnapshot, error) { return c.info.Get(ctx) }
-func (c *client) Health(ctx context.Context) (HealthSnapshot, error) { return HealthSnapshot{}, nil }
+
+// Health issues a Health RPC. Status maps proto enum (STATUS_OK / STATUS_LOADING /
+// STATUS_DEGRADED / STATUS_SHUTTING_DOWN / STATUS_UNSPECIFIED) to the
+// "STATUS_"-stripped string the spec documents (OK / LOADING / DEGRADED /
+// SHUTTING_DOWN / UNSPECIFIED).
+//
+// Health is NOT retried — D8 says first embed call drives connectivity; Health
+// is a diagnostic tool surface (vault_status, diagnostics).
+func (c *client) Health(ctx context.Context) (HealthSnapshot, error) {
+	resp, err := c.pb.Health(ctx, &runedv1.HealthRequest{})
+	if err != nil {
+		return HealthSnapshot{}, err
+	}
+	return HealthSnapshot{
+		Status:        statusName(resp.GetStatus()),
+		UptimeSeconds: resp.GetUptimeSeconds(),
+		TotalRequests: resp.GetTotalRequests(),
+	}, nil
+}
+
+func statusName(s runedv1.HealthResponse_Status) string {
+	switch s {
+	case runedv1.HealthResponse_STATUS_OK:
+		return "OK"
+	case runedv1.HealthResponse_STATUS_LOADING:
+		return "LOADING"
+	case runedv1.HealthResponse_STATUS_DEGRADED:
+		return "DEGRADED"
+	case runedv1.HealthResponse_STATUS_SHUTTING_DOWN:
+		return "SHUTTING_DOWN"
+	default:
+		return "UNSPECIFIED"
+	}
+}
 func (c *client) Close() error {
 	if c.conn != nil {
 		return c.conn.Close()
