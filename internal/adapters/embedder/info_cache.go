@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+
+	runedv1 "github.com/CryptoLabInc/runed/gen/runed/v1"
 )
 
 // infoCache caches the embedder Info RPC response.
@@ -22,7 +24,7 @@ type infoCache struct {
 	once sync.Once
 	snap InfoSnapshot
 	err  error
-	// TODO: svc embedderv1.EmbedderServiceClient — wired at NewClient time
+	svc  runedv1.RunedServiceClient
 }
 
 // Get returns the cached snapshot, populating on first call.

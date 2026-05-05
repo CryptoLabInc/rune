@@ -14,7 +14,12 @@ package embedder
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	runedv1 "github.com/CryptoLabInc/runed/gen/runed/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // RetryBackoffs — D7 (Python server.py timeout equivalent).
@@ -51,28 +56,49 @@ type Client interface {
 
 type client struct {
 	sockPath string
-	// TODO: grpc.ClientConn + embedder.v1.EmbedderServiceClient stub (external dep)
-	// TODO: infoCache sync.Once + InfoSnapshot
+	conn     *grpc.ClientConn
+	pb       runedv1.RunedServiceClient
+	info     *infoCache
 }
 
-// New — dials unix socket. TODO: grpc.NewClient("unix:"+sockPath, insecure creds).
+// New dials the runed daemon over unix socket. The caller resolves sockPath
+// (env RUNE_EMBEDDER_SOCKET > config.embedder.socket_path > default
+// ~/.runed/embedding.sock per embedder.md §소켓 경로).
+//
+// grpc-go natively resolves "unix://" targets; no custom dialer is needed.
+// TLS is unnecessary for UDS (kernel-mediated, same machine — embedder.md §Dial).
 func New(sockPath string) (Client, error) {
-	// TODO
-	return &client{sockPath: sockPath}, nil
+	conn, err := grpc.NewClient(
+		"unix://"+sockPath,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("embedder: grpc dial %s: %w", sockPath, err)
+	}
+	pb := runedv1.NewRunedServiceClient(conn)
+	return &client{
+		sockPath: sockPath,
+		conn:     conn,
+		pb:       pb,
+		info:     &infoCache{svc: pb},
+	}, nil
 }
 
-// Stub implementations.
+// Stub implementations — replaced in subsequent commits.
 
 func (c *client) EmbedSingle(ctx context.Context, text string) ([]float32, error) {
-	// TODO: call Embed RPC with retry
 	return nil, nil
 }
 
 func (c *client) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
-	// TODO: call EmbedBatch with Info.MaxBatchSize split + retry
 	return nil, nil
 }
 
 func (c *client) Info(ctx context.Context) (InfoSnapshot, error)     { return InfoSnapshot{}, nil }
 func (c *client) Health(ctx context.Context) (HealthSnapshot, error) { return HealthSnapshot{}, nil }
-func (c *client) Close() error                                       { return nil }
+func (c *client) Close() error {
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
+}
