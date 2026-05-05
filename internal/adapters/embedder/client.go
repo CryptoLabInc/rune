@@ -75,13 +75,24 @@ func New(sockPath string) (Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("embedder: grpc dial %s: %w", sockPath, err)
 	}
+	return newWithConn(sockPath, conn), nil
+}
+
+// NewBufconnClient wraps an existing *grpc.ClientConn (e.g., from
+// google.golang.org/grpc/test/bufconn) so tests can exercise the same RPC
+// path without needing a real unix socket / runed daemon.
+func NewBufconnClient(conn *grpc.ClientConn) Client {
+	return newWithConn("bufconn", conn)
+}
+
+func newWithConn(sockPath string, conn *grpc.ClientConn) *client {
 	pb := runedv1.NewRunedServiceClient(conn)
 	return &client{
 		sockPath: sockPath,
 		conn:     conn,
 		pb:       pb,
 		info:     &infoCache{svc: pb},
-	}, nil
+	}
 }
 
 func (c *client) EmbedSingle(ctx context.Context, text string) ([]float32, error) {
