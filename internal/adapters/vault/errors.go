@@ -1,6 +1,11 @@
 package vault
 
-import "errors"
+import (
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
 
 // Error — vault adapter's typed error. Wraps a cause (gRPC error or IO error).
 // Service layer catches these and converts to domain.RuneError for MCP responses.
@@ -51,7 +56,7 @@ func MapGRPCError(err error) error {
 		return nil
 	}
 
-	st, ok := statusFromError(err)
+	st, ok := status.FromError(err)
 	if !ok {
 		return &Error{
 			Code:      ErrVaultInternal.Code,
@@ -61,70 +66,41 @@ func MapGRPCError(err error) error {
 		}
 	}
 
-	switch st.code {
-	case codeUnauthenticated:
+	switch st.Code() {
+	case codes.Unauthenticated:
 		return &Error{
 			Code:      ErrVaultAuthFailed.Code,
-			Message:   st.message,
+			Message:   st.Message(),
 			Retryable: false,
 			Cause:     err,
 		}
-	case codeNotFound:
+	case codes.NotFound:
 		return &Error{
 			Code:      ErrVaultKeyNotFound.Code,
-			Message:   st.message,
+			Message:   st.Message(),
 			Retryable: false,
 			Cause:     err,
 		}
-	case codeUnavailable:
+	case codes.Unavailable:
 		return &Error{
 			Code:      ErrVaultUnavailable.Code,
-			Message:   st.message,
+			Message:   st.Message(),
 			Retryable: true,
 			Cause:     err,
 		}
-	case codeDeadlineExceeded:
+	case codes.DeadlineExceeded:
 		return &Error{
 			Code:      ErrVaultTimeout.Code,
-			Message:   st.message,
+			Message:   st.Message(),
 			Retryable: true,
 			Cause:     err,
 		}
 	default:
 		return &Error{
 			Code:      ErrVaultInternal.Code,
-			Message:   st.message,
+			Message:   st.Message(),
 			Retryable: true,
 			Cause:     err,
 		}
 	}
-}
-
-type grpcStatus struct {
-	code    int
-	message string
-}
-
-// ref: google.golang.org/grpc/codes
-const (
-	codeUnauthenticated  = 16
-	codeNotFound         = 5
-	codeUnavailable      = 14
-	codeDeadlineExceeded = 4
-)
-
-func statusFromError(err error) (grpcStatus, bool) {
-	type grpcStatuser interface {
-		GRPCStatus() interface {
-			Code() int
-			Message() string
-		}
-	}
-
-	if gs, ok := err.(grpcStatuser); ok {
-		st := gs.GRPCStatus()
-		return grpcStatus{code: st.Code(), message: st.Message()}, true
-	}
-
-	return grpcStatus{}, false
 }
