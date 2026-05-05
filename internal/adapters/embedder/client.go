@@ -84,14 +84,61 @@ func New(sockPath string) (Client, error) {
 	}, nil
 }
 
-// Stub implementations — replaced in subsequent commits.
-
 func (c *client) EmbedSingle(ctx context.Context, text string) ([]float32, error) {
-	return nil, nil
+	resp, err := retry(ctx, func(ctx context.Context) (*runedv1.EmbedResponse, error) {
+		return c.pb.Embed(ctx, &runedv1.EmbedRequest{Text: text})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetVector(), nil
 }
 
+// EmbedBatch splits len(texts) > Info.MaxBatchSize into chunks and submits
+// each chunk via embedBatchOnce. Order is preserved.
 func (c *client) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
-	return nil, nil
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	info, err := c.info.Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("embedder: load Info before EmbedBatch: %w", err)
+	}
+
+	if info.MaxBatchSize <= 0 || len(texts) <= info.MaxBatchSize {
+		return c.embedBatchOnce(ctx, texts)
+	}
+
+	out := make([][]float32, 0, len(texts))
+	for i := 0; i < len(texts); i += info.MaxBatchSize {
+		end := i + info.MaxBatchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		chunk, err := c.embedBatchOnce(ctx, texts[i:end])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, chunk...)
+	}
+	return out, nil
+}
+
+func (c *client) embedBatchOnce(ctx context.Context, texts []string) ([][]float32, error) {
+	resp, err := retry(ctx, func(ctx context.Context) (*runedv1.EmbedBatchResponse, error) {
+		return c.pb.EmbedBatch(ctx, &runedv1.EmbedBatchRequest{Texts: texts})
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.GetEmbeddings()) != len(texts) {
+		return nil, fmt.Errorf("embedder: expected %d embeddings, got %d", len(texts), len(resp.GetEmbeddings()))
+	}
+	out := make([][]float32, len(resp.GetEmbeddings()))
+	for i, e := range resp.GetEmbeddings() {
+		out[i] = e.GetVector()
+	}
+	return out, nil
 }
 
 func (c *client) Info(ctx context.Context) (InfoSnapshot, error) { return c.info.Get(ctx) }
