@@ -179,13 +179,47 @@ func (c *client) GetPublicKey(ctx context.Context) (*Bundle, error) {
 }
 
 func (c *client) DecryptScores(ctx context.Context, blob string, topK int) ([]ScoreEntry, error) {
-	// TODO: call VaultService.DecryptScores RPC
-	return nil, fmt.Errorf("vault: DecryptScores not yet implemented (needs proto codegen)")
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	resp, err := c.pb.DecryptScores(ctx, &vaultpb.DecryptScoresRequest{
+		Token:            c.token,
+		EncryptedBlobB64: blob,
+		TopK:             int32(topK),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("vault: DecryptScores rpc: %w", err)
+	}
+	if resp.GetError() != "" {
+		return nil, fmt.Errorf("vault: DecryptScores: %s", resp.GetError())
+	}
+
+	out := make([]ScoreEntry, len(resp.GetResults()))
+	for i, e := range resp.GetResults() {
+		out[i] = ScoreEntry{
+			ShardIdx: e.GetShardIdx(),
+			RowIdx:   e.GetRowIdx(),
+			Score:    e.GetScore(),
+		}
+	}
+	return out, nil
 }
 
 func (c *client) DecryptMetadata(ctx context.Context, list []string) ([]string, error) {
-	// TODO: call VaultService.DecryptMetadata RPC
-	return nil, fmt.Errorf("vault: DecryptMetadata not yet implemented (needs proto codegen)")
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	resp, err := c.pb.DecryptMetadata(ctx, &vaultpb.DecryptMetadataRequest{
+		Token:                 c.token,
+		EncryptedMetadataList: list,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("vault: DecryptMetadata rpc: %w", err)
+	}
+	if resp.GetError() != "" {
+		return nil, fmt.Errorf("vault: DecryptMetadata: %s", resp.GetError())
+	}
+	return resp.GetDecryptedMetadata(), nil
 }
 
 func (c *client) HealthCheck(ctx context.Context) (bool, error) {
