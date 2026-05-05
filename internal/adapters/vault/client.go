@@ -159,10 +159,10 @@ func (c *client) GetPublicKey(ctx context.Context) (*Bundle, error) {
 
 	resp, err := c.pb.GetPublicKey(ctx, &vaultpb.GetPublicKeyRequest{Token: c.token})
 	if err != nil {
-		return nil, fmt.Errorf("vault: GetPublicKey rpc: %w", err)
+		return nil, MapGRPCError(err)
 	}
 	if resp.GetError() != "" {
-		return nil, fmt.Errorf("vault: GetPublicKey: %s", resp.GetError())
+		return nil, &Error{Code: ErrVaultInternal.Code, Message: resp.GetError(), Retryable: true}
 	}
 
 	var b keyBundleJSON
@@ -200,10 +200,10 @@ func (c *client) DecryptScores(ctx context.Context, blob string, topK int) ([]Sc
 		TopK:             int32(topK),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("vault: DecryptScores rpc: %w", err)
+		return nil, MapGRPCError(err)
 	}
 	if resp.GetError() != "" {
-		return nil, fmt.Errorf("vault: DecryptScores: %s", resp.GetError())
+		return nil, &Error{Code: ErrVaultInternal.Code, Message: resp.GetError(), Retryable: true}
 	}
 
 	out := make([]ScoreEntry, len(resp.GetResults()))
@@ -226,10 +226,10 @@ func (c *client) DecryptMetadata(ctx context.Context, list []string) ([]string, 
 		EncryptedMetadataList: list,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("vault: DecryptMetadata rpc: %w", err)
+		return nil, MapGRPCError(err)
 	}
 	if resp.GetError() != "" {
-		return nil, fmt.Errorf("vault: DecryptMetadata: %s", resp.GetError())
+		return nil, &Error{Code: ErrVaultInternal.Code, Message: resp.GetError(), Retryable: true}
 	}
 	return resp.GetDecryptedMetadata(), nil
 }
@@ -245,7 +245,7 @@ func (c *client) HealthCheck(ctx context.Context) (bool, error) {
 
 	resp, err := c.health.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
 	if err != nil {
-		return false, fmt.Errorf("vault: health check: %w", err)
+		return false, MapGRPCError(err)
 	}
 	return resp.GetStatus() == healthpb.HealthCheckResponse_SERVING, nil
 }
