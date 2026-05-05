@@ -121,13 +121,27 @@ func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
 	}
 
 	slog.Info("vault: connected", "endpoint", normalized)
+	return newWithConn(normalized, token, conn), nil
+}
+
+// NewBufconnClient wraps an existing *grpc.ClientConn (e.g., from
+// google.golang.org/grpc/test/bufconn) so tests can exercise the same
+// RPC path without going through DNS / TLS / endpoint normalization.
+//
+// Production callers should prefer NewClient — this constructor
+// intentionally trusts whatever creds + options the conn was built with.
+func NewBufconnClient(conn *grpc.ClientConn, token string) Client {
+	return newWithConn("bufconn", token, conn)
+}
+
+func newWithConn(endpoint, token string, conn *grpc.ClientConn) *client {
 	return &client{
-		endpoint: normalized,
+		endpoint: endpoint,
 		token:    token,
 		conn:     conn,
 		pb:       vaultpb.NewVaultServiceClient(conn),
 		health:   healthpb.NewHealthClient(conn),
-	}, nil
+	}
 }
 
 // ValidateAgentDEK — Go-specific safety check (Python missing — see vault.md §agent_dek).
