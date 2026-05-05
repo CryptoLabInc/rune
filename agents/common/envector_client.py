@@ -7,6 +7,7 @@ Avoids MCP protocol overhead by importing adapters directly.
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -76,7 +77,7 @@ class EnVectorClient:
                 address=self._address,
                 key_id=self._key_id,
                 key_path=str(self._key_path),
-                eval_mode="rmp",
+                eval_mode=os.getenv("ENVECTOR_EVAL_MODE", "mm"),
                 query_encryption="plain",  # Plain queries for simplicity
                 access_token=self._access_token,
                 secure=self._secure,

@@ -1634,7 +1634,7 @@ class MCPServerApp:
                     address=self._envector_endpoint or "",
                     key_id=key_id,
                     key_path=key_path,
-                    eval_mode="rmp",
+                    eval_mode=os.getenv("ENVECTOR_EVAL_MODE", "mm"),
                     query_encryption="plain",
                     access_token=self._envector_api_key or "",
                     secure=rune_config.envector.secure,
@@ -1832,8 +1832,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--envector-eval-mode",
-        default=os.getenv("ENVECTOR_EVAL_MODE", "rmp"),
-        help="enVector evaluation mode (e.g., 'rmp', 'mm').",
+        default=os.getenv("ENVECTOR_EVAL_MODE", "mm"),
+        help="enVector evaluation mode (e.g., 'mm', 'rmp').",
     )
     parser.add_argument(
         "--encrypted-query",
