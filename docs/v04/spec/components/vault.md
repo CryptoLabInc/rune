@@ -163,7 +163,7 @@ conn, err := grpc.NewClient(
     grpc.WithKeepaliveParams(keepaliveParams),
 )
 defer conn.Close()
-client := vaultpb.NewRuneVaultServiceClient(conn)
+client := vaultpb.NewVaultServiceClient(conn)
 ```
 
 - 세션 3개 = Vault 연결 3개
@@ -324,12 +324,11 @@ internal/adapters/vault/
 └── client_test.go    # bufconn 기반 unit test
 ```
 
-Proto는 기존 `mcp/adapter/vault_proto/vault_service.proto`를 Go stub으로 재생성:
-```bash
-protoc --go_out=. --go-grpc_out=. vault_service.proto
-```
+Proto stub은 **`github.com/CryptoLabInc/rune-admin/vault/pkg/vaultpb`**를 그대로 import — rune-go에서 별도 generate 불필요. rune-admin이 proto의 single source of truth (`package rune.vault.v1`, `service VaultService`); Python rune의 `mcp/adapter/vault_proto/vault_service_pb2.py`도 같은 schema에서 generate된 것.
 
-생성된 stub은 `internal/adapters/vault/pb/` 에 위치.
+```go
+import vaultpb "github.com/CryptoLabInc/rune-admin/vault/pkg/vaultpb"
+```
 
 ## 테스트 전략
 
@@ -340,7 +339,7 @@ protoc --go_out=. --go-grpc_out=. vault_service.proto
 func TestGetPublicKey_BufconnHappyPath(t *testing.T) {
     lis := bufconn.Listen(1024*1024)
     server := grpc.NewServer()
-    vaultpb.RegisterRuneVaultServiceServer(server, &mockVault{...})
+    vaultpb.RegisterVaultServiceServer(server, &mockVault{...})
     go server.Serve(lis)
 
     conn, _ := grpc.DialContext(ctx, "bufconn",

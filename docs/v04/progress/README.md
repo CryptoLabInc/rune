@@ -25,10 +25,13 @@ README의 7-Phase 로드맵(Phase 1 외부 deps → Phase 7 검증)이 **horizon
 
 | 마일스톤 | 상태 | 문서 | 관련 커밋 |
 |---|---|---|---|
-| Phase A — MCP boot (handshake + tools/list) | ✅ 합격 | [phase-a-mcp-boot.md](phase-a-mcp-boot.md) | `19b7bf6` (브랜치 `yg/first-mcp-boot`) |
+| Phase A — MCP boot (handshake + tools/list) | ✅ 합격 | [phase-a-mcp-boot.md](phase-a-mcp-boot.md) | `19b7bf6` (브랜치 `yg/first-mcp-boot`, PR #86) |
 | Phase A.5 — smoke test 추가 (CI 회귀 방지) | ✅ 합격 | [phase-a5-smoke-test.md](phase-a5-smoke-test.md) | `c353926` (브랜치 `yg/phase-a5-smoke-test`, PR #87) |
+| Phase A.6 — `query.Parse` + `SearchHit/ExtractPayloadText` 단위 테스트 | ✅ 합격 | — | `1efe251` (브랜치 `yg/phase-a6-policy-query-tests`, PR #91) |
+| Phase A.7 — policy rerank + novelty 테스트 (19 fn / 77 subtest) | ✅ 합격 | — | `38b29c5` (브랜치 `yg/phase-a7-policy-rerank-novelty-tests`, PR #92) |
+| Phase A.8 — domain schema + errors 테스트 (Python parity + UTC/customer_escalation divergence locks) | 🟡 OPEN | — | `74e5285` (브랜치 `yg/phase-a8-domain-schema-errors-tests`, PR #94) |
 | Phase B — `rune_diagnostics` environment 섹션 진짜 응답 (stdlib only) | ⏳ 예정 | — | — |
-| Phase 1 — `go.mod` 외부 deps 본격 추가 (gRPC · envector SDK · embedder proto) | ⏳ 예정 | — | — |
+| Phase 1 — `go.mod` 외부 deps 추가 (`github.com/CryptoLabInc/runed`, `rune-admin/vault/pkg/vaultpb`, `envector-go-sdk`, `grpc`/`protobuf`). Go toolchain 1.25.9 → 1.26 bump 동반 (`runed` 요구) | ⏳ 예정 | — | — |
 | Phase 2 — `internal/domain` + `internal/policy` 순수 로직 (TM scope) | ⏳ 예정 | — | — |
 | Phase 3 — `record_builder` 703 LoC + `payload_text` 364 LoC 포팅 (TM scope) | ⏳ 예정 | — | — |
 | Phase 4a — Vault 클라이언트 + 부팅 시퀀스 연결 | ⏳ 예정 | — | — |

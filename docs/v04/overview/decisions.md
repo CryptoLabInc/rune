@@ -2049,7 +2049,7 @@ POST http://127.0.0.1:<llama-port>/v1/embeddings
 
 ### Proto 계약 (embedder-provided)
 
-> Proto 파일은 embedder 프로젝트가 정의·관리. 서비스·패키지 이름은 embedder 팀이 최종 결정. 아래는 rune-mcp가 **사용하는** 인터페이스의 placeholder.
+> Proto 파일은 `runed` 프로젝트(`github.com/CryptoLabInc/runed`)가 정의·관리. 서비스·패키지 이름은 ✅ Resolved — `runed.v1` / `RunedService` / 소켓 `~/.runed/embedding.sock`. 아래는 rune-mcp가 **사용하는** 인터페이스 (placeholder 이름이지만 RPC 시그니처는 `runed/proto/runed/v1/runed.proto`와 일치).
 
 ```
 service EmbedderService {

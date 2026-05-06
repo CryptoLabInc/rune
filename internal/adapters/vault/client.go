@@ -15,7 +15,13 @@ package vault
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // MaxMessageLength — 256MB for EvalKey (Python vault_client.py:L33).
@@ -54,36 +60,92 @@ type Client interface {
 	Close() error
 }
 
+type ClientOpts struct {
+	CACertPath string // path to PEM; empty = system CA bundle
+	TLSDisable bool
+}
+
 // client is the gRPC implementation.
 type client struct {
 	endpoint string
 	token    string
-	// TODO: grpc.ClientConn + RuneVaultServiceClient stub (needs external dep)
+	conn     *grpc.ClientConn
+	// TODO: vault pb2_grpc stub (needs proto codegen)
 }
 
-// NewClient — TODO: grpc.NewClient with MaxMessageLength opts + TLS creds
-// (see spec/components/vault.md §TLS + §Keepalive).
-func NewClient(endpoint, token string) (Client, error) {
-	// TODO: implement
-	return &client{endpoint: endpoint, token: token}, nil
+// See spec/components/vault.md §TLS + §Keepalive.
+func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
+	normalized, err := NormalizeEndpoint(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("vault: invalid endpoint: %w", err)
+	}
+
+	dialOpts := []grpc.DialOption{
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(MaxMessageLength),
+			grpc.MaxCallSendMsgSize(MaxMessageLength),
+		),
+	}
+
+	if opts.TLSDisable {
+		slog.Warn("vault: TLS disabled — gRPC traffic is unencrypted. Only use for local development.")
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	} else if opts.CACertPath != "" {
+		creds, err := credentials.NewClientTLSFromFile(opts.CACertPath, "")
+		if err != nil {
+			return nil, fmt.Errorf("vault: failed to load CA cert %s: %w", opts.CACertPath, err)
+		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
+	} else {
+		// System CA bundle
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
+	}
+
+	conn, err := grpc.NewClient(normalized, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("vault: grpc dial failed: %w", err)
+	}
+
+	slog.Info("vault: connected", "endpoint", normalized)
+	return &client{endpoint: normalized, token: token, conn: conn}, nil
 }
 
 // ValidateAgentDEK — Go-specific safety check (Python missing — see vault.md §agent_dek).
 // Returns error if DEK length != 32. Non-retryable.
 func ValidateAgentDEK(dek []byte) error {
-	// TODO: return fmt.Errorf("vault: invalid agent_dek size %d (expected 32)", len(dek))
+	if len(dek) != 32 {
+		return fmt.Errorf("vault: invalid agent_dek size %d (expected 32)", len(dek))
+	}
 	return nil
 }
 
-// Stub implementations — all TODO.
+// Stub implementations - TODO: wire to generated protobuf stubs
 
-func (c *client) GetPublicKey(ctx context.Context) (*Bundle, error) { return nil, nil }
+func (c *client) GetPublicKey(ctx context.Context) (*Bundle, error) {
+	// TODO: call VaultService.GetPublicKey RPC
+	return nil, fmt.Errorf("vault: GetPublicKey not yet implemented (needs proto codegen)")
+}
+
 func (c *client) DecryptScores(ctx context.Context, blob string, topK int) ([]ScoreEntry, error) {
-	return nil, nil
+	// TODO: call VaultService.DecryptScores RPC
+	return nil, fmt.Errorf("vault: DecryptScores not yet implemented (needs proto codegen)")
 }
+
 func (c *client) DecryptMetadata(ctx context.Context, list []string) ([]string, error) {
-	return nil, nil
+	// TODO: call VaultService.DecryptMetadata RPC
+	return nil, fmt.Errorf("vault: DecryptMetadata not yet implemented (needs proto codegen)")
 }
-func (c *client) HealthCheck(ctx context.Context) (bool, error) { return false, nil }
-func (c *client) Endpoint() string                              { return c.endpoint }
-func (c *client) Close() error                                  { return nil }
+
+func (c *client) HealthCheck(ctx context.Context) (bool, error) {
+	// TODO: call grpc.health.v1.Health/Check
+	return false, fmt.Errorf("vault: HealthCheck not yet implemented")
+}
+
+func (c *client) Endpoint() string { return c.endpoint }
+
+func (c *client) Close() error {
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
+}
