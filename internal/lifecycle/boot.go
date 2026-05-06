@@ -16,9 +16,24 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"sync/atomic"
 	"time"
+
+	"github.com/envector/rune-go/internal/adapters/config"
+	"github.com/envector/rune-go/internal/adapters/embedder"
+	"github.com/envector/rune-go/internal/adapters/envector"
+	"github.com/envector/rune-go/internal/adapters/keymanager"
+	"github.com/envector/rune-go/internal/adapters/vault"
 )
+
+// BootAdapterInjector — breaks import cycle with mcp.Deps.
+type BootAdapterInjector interface {
+	InjectVault(client vault.Client)
+	InjectEmbedder(client embedder.Client)
+	InjectEnvector(client envector.Client)
+}
 
 // State — atomic-safe enum.
 type State int32
@@ -79,18 +94,120 @@ var BootBackoffs = []time.Duration{
 	60 * time.Second,
 }
 
-// RunBootLoop — background goroutine. Calls Vault.GetPublicKey with exp backoff
-// until success, then SetState(Active). Stays alive for entire process to
-// re-enter waiting_for_vault if Vault dies.
-//
-// TODO:
-//  1. state = Starting
-//  2. loop: call deps.vault.GetPublicKey
-//     success → cache keys (disk + memory), init envector, state = Active, return
-//     fail → state = WaitingForVault, log, sleep backoff[min(attempt, len-1)], retry
-//  3. every attempt=20, log "persistent failure — check config"
-func RunBootLoop(ctx context.Context, m *Manager /*, deps *Deps*/) {
-	// TODO: bit-identical to rune-mcp.md runBootLoop pseudocode
-	_ = ctx
-	_ = m
+func RunBootLoop(ctx context.Context, m *Manager, deps BootAdapterInjector) {
+	m.SetState(StateStarting)
+
+	attempt := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		cfg, err := config.Load()
+		if err != nil {
+			slog.Error("boot: failed to load config", "err", err)
+			time.Sleep(BootBackoffs[0])
+			continue
+		}
+
+		if cfg.Vault.Endpoint == "" || cfg.Vault.Token == "" {
+			m.SetState(StateWaitingForVault)
+			slog.Warn("boot: vault endpoint or token is empty, waiting...")
+			time.Sleep(BootBackoffs[len(BootBackoffs)-1])
+			continue
+		}
+
+		vaultOpts := vault.ClientOpts{
+			CACertPath: cfg.Vault.CACert,
+			TLSDisable: cfg.Vault.TLSDisable,
+		}
+
+		vaultClient, err := vault.NewClient(cfg.Vault.Endpoint, cfg.Vault.Token, vaultOpts)
+		if err != nil {
+			slog.Error("boot: failed to connect to vault", "err", err)
+			sleepBackoff(ctx, attempt)
+			attempt++
+			continue
+		}
+
+		bundle, err := vaultClient.GetAgentManifest(ctx)
+		if err != nil {
+			m.SetState(StateWaitingForVault)
+			m.lastError.Store(fmt.Sprintf("vault get manifest: %v", err))
+
+			if attempt > 0 && attempt%20 == 0 {
+				slog.Error("boot: persistent failure to reach vault - check config or network", "attempt", attempt)
+			} else {
+				slog.Warn("boot: waiting for vault...", "err", err)
+			}
+			sleepBackoff(ctx, attempt)
+			attempt++
+
+			continue
+		}
+
+		if err := keymanager.SaveKeys(bundle.KeyID, bundle.EncKey); err != nil {
+			slog.Error("boot: failed to save keys to disk", "err", err)
+			sleepBackoff(ctx, attempt)
+			attempt++
+			continue
+		}
+
+		// Embedder
+		embedderClient, err := embedder.New("") // TODO: config resolution
+		if err != nil {
+			slog.Error("boot: failed to connect to embedder", "err", err)
+			sleepBackoff(ctx, attempt)
+			attempt++
+			continue
+		}
+
+		// enVector SDK
+		runedir, _ := config.RuneDir()
+		envectorClient, err := envector.NewClient(envector.ClientConfig{
+			Endpoint:  bundle.EnvectorEndpoint,
+			APIKey:    bundle.EnvectorAPIKey,
+			KeyPath:   runedir + "/keys",
+			KeyID:     bundle.KeyID,
+			IndexName: bundle.IndexName,
+		})
+		if err != nil {
+			slog.Error("boot: failed to connect to envector", "err", err)
+			sleepBackoff(ctx, attempt)
+			attempt++
+			continue
+		}
+
+		if err := envectorClient.OpenIndex(ctx); err != nil {
+			slog.Error("boot: envector index activation failed", "err", err)
+			sleepBackoff(ctx, attempt)
+			attempt++
+			continue
+		}
+
+		deps.InjectVault(vaultClient)
+		deps.InjectEmbedder(embedderClient)
+		deps.InjectEnvector(envectorClient)
+
+		m.lastError.Store("")
+		m.attempts.Store(int32(attempt))
+		m.SetState(StateActive)
+
+		slog.Info("boot: pipelines initialized and active")
+		return
+	}
+}
+
+func sleepBackoff(ctx context.Context, attempt int) {
+	idx := attempt
+	if idx >= len(BootBackoffs) {
+		idx = len(BootBackoffs) - 1
+	}
+	
+	select {
+	case <-time.After(BootBackoffs[idx]):
+	case <-ctx.Done():
+	}
 }
