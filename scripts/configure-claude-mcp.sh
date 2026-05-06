@@ -24,25 +24,21 @@ print_warn() {
 CONFIGURED=0
 
 # ============================================================================
-# 1. Claude Code — explicit `claude mcp add` registration
+# 1. Claude Code — purge legacy user-scope MCP entries
+#
+# Claude Code auto-registers the enVector MCP server from the plugin manifest
+# (plugin:rune:envector). Older Rune installs added a duplicate user-scope
+# `envector` entry via `claude mcp add`, which competes with the plugin-scope
+# registration during stdio handshake and causes both to fail to connect.
+# This block only removes those legacy entries; registration is owned by the
+# plugin manifest.
 # ============================================================================
 CLAUDE_CMD=$(CLAUDECODE= command -v claude 2>/dev/null || true)
 if [ -n "$CLAUDE_CMD" ]; then
     for name in envector rune-vault envector-mcp-server; do
         CLAUDECODE= "$CLAUDE_CMD" mcp remove --scope user "$name" 2>/dev/null || true
     done
-    print_info "Cleaned stale Claude Code MCP entries"
-
-    CLAUDECODE= "$CLAUDE_CMD" mcp add --scope user envector -- \
-        env \
-        ENVECTOR_CONFIG="$HOME/.rune/config.json" \
-        ENVECTOR_AUTO_KEY_SETUP=false \
-        PYTHONPATH="$PLUGIN_DIR/mcp" \
-        "$PLUGIN_DIR/scripts/bootstrap-mcp.sh" >/dev/null
-    print_info "MCP server registered in Claude Code user scope"
-    CONFIGURED=$((CONFIGURED + 1))
-else
-    print_warn "Claude Code CLI not found; skipping Claude Code MCP registration"
+    print_info "Cleaned legacy Claude Code user-scope MCP entries (plugin scope owns registration)"
 fi
 
 # ============================================================================
@@ -230,7 +226,7 @@ fi
 # Summary
 # ============================================================================
 if [ "$CONFIGURED" -eq 0 ]; then
-    print_warn "No Claude Code CLI or Claude Desktop configuration found"
+    print_warn "No Claude Desktop configuration found (Claude Code uses plugin-scope MCP registration)"
 fi
 
 echo ""
