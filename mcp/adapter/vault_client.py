@@ -82,6 +82,7 @@ class VaultClient:
         vault_endpoint: str,
         vault_token: str,
         timeout: float = 30.0,
+        public_key_timeout: float = 90.0,
         ca_cert: Optional[str] = None,
         tls_disable: bool = False,
     ):
@@ -93,7 +94,11 @@ class VaultClient:
                 "host:port" (direct), "tcp://host:port", or legacy
                 "http://host:50080/mcp". RUNEVAULT_GRPC_TARGET overrides.
             vault_token: Authentication token for Vault
-            timeout: Request timeout in seconds
+            timeout: Request timeout in seconds for standard RPCs.
+            public_key_timeout: Deadline for GetPublicKey, which streams
+                the multi-GiB EvalKey bundle (pyenvector 1.4 EvalKey is
+                ~1.1 GiB). Measured baseline ~38s on a 30 MiB/s link;
+                default tolerates down to ~12.5 MiB/s networks.
             ca_cert: Path to CA certificate PEM file for self-signed certs.
                 None or empty string uses system CA bundle.
             tls_disable: If True, use insecure plaintext channel (dev only).
@@ -101,6 +106,7 @@ class VaultClient:
         self.vault_endpoint = vault_endpoint.rstrip("/")
         self.vault_token = vault_token
         self.timeout = timeout
+        self.public_key_timeout = public_key_timeout
         self._ca_cert = ca_cert
         self._tls_disable = tls_disable
 
@@ -203,7 +209,7 @@ class VaultClient:
         try:
             request = pb2.GetPublicKeyRequest(token=self.vault_token)
             response = await self._stub.GetPublicKey(
-                request, timeout=self.timeout
+                request, timeout=self.public_key_timeout
             )
             if response.error:
                 raise VaultError(f"GetPublicKey failed: {response.error}")
