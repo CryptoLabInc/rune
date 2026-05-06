@@ -8,12 +8,12 @@ Since v0.2.0, Rune operates in **agent-delegated mode**: the calling agent (Clau
 
 This means **capture quality is determined by the scribe prompt**, not by Rune's internal modules. The benchmark reflects this:
 
-| Benchmark | What it tests | Method |
-|-----------|---------------|--------|
-| **scribe_bench** (capture) | Does the scribe prompt correctly guide capture/skip decisions? | Feed scribe prompt + scenario input to LLM, score the output JSON |
-| **scribe_bench** (extraction) | Is the extracted JSON well-structured? | Same LLM call, score field coverage and extraction type |
-| **retriever_bench** | Can stored decisions be retrieved with various queries? | Offline embedding similarity (FHE is transparent to scores) |
-| **latency_bench** | How long does each pipeline phase take? | Direct adapter calls against live envector-msa-1.4.0, per-phase timing |
+| Benchmark                     | What it tests                                                  | Method                                                                 |
+| ----------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **scribe_bench** (capture)    | Does the scribe prompt correctly guide capture/skip decisions? | Feed scribe prompt + scenario input to LLM, score the output JSON      |
+| **scribe_bench** (extraction) | Is the extracted JSON well-structured?                         | Same LLM call, score field coverage and extraction type                |
+| **retriever_bench**           | Can stored decisions be retrieved with various queries?        | Offline embedding similarity (FHE is transparent to scores)            |
+| **latency_bench**             | How long does each pipeline phase take?                        | Direct adapter calls against live envector-msa-1.4.0, per-phase timing |
 
 ## Running
 
@@ -76,12 +76,12 @@ python benchmark/runners/latency_bench.py \
 
 Pipeline phases measured per feature:
 
-| Feature | Phases |
-|---------|--------|
-| `capture` | embed → score (FHE search) → vault_topk → insert → total |
-| `recall` | embed → score → vault_topk → remind → total |
-| `batch_capture` | total_batch, per_item (embed+score per item) |
-| `vault_status` | vault_health_check |
+| Feature         | Phases                                                   |
+| --------------- | -------------------------------------------------------- |
+| `capture`       | embed → score (FHE search) → vault_topk → insert → total |
+| `recall`        | embed → score → vault_topk → remind → total              |
+| `batch_capture` | total_batch, per_item (embed+score per item)             |
+| `vault_status`  | vault_health_check                                       |
 
 ## Scenarios (104 total)
 
@@ -140,49 +140,49 @@ When Rune doesn't behave as expected — a decision was missed, noise was captur
 
 #### Capture scenario fields
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `id` | yes | Unique identifier. Format: `{category}-{description}-{number}` (e.g., `debug-grpc-timeout-009`) |
-| `category` | yes | Directory path under `scenarios/`. Must match where the file lives (e.g., `capture/should_capture/debugging`) |
-| `language` | yes | Language of the input: `en`, `ko`, `ja`, or `mixed` |
-| `input` | yes | The actual conversation text to evaluate. Paste the real message as-is |
-| `expected_capture` | yes | `true` if this should be captured, `false` if it should be skipped |
-| `expected_fields` | no | Expected metadata when captured (see below). Use `{}` for should_not_capture scenarios |
-| `expected_fields.domain` | no | Expected domain classification: `architecture`, `security`, `product`, `debugging`, `incident`, `ops`, `process`, `qa`, `hr`, `data`, `finance`, `general`, etc. |
-| `expected_fields.status_hint` | no | Expected decision status: `accepted`, `proposed`, or `rejected` |
-| `expected_fields.title_keywords` | no | List of keywords that should appear in the extracted title (case-insensitive, any match passes) |
-| `recall_queries` | no | Optional queries that should (or should not) retrieve this decision after capture |
-| `notes` | no | Free-text annotation explaining why this scenario is interesting or tricky |
+| Field                            | Required | Description                                                                                                                                                      |
+| -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                             | yes      | Unique identifier. Format: `{category}-{description}-{number}` (e.g., `debug-grpc-timeout-009`)                                                                  |
+| `category`                       | yes      | Directory path under `scenarios/`. Must match where the file lives (e.g., `capture/should_capture/debugging`)                                                    |
+| `language`                       | yes      | Language of the input: `en`, `ko`, `ja`, or `mixed`                                                                                                              |
+| `input`                          | yes      | The actual conversation text to evaluate. Paste the real message as-is                                                                                           |
+| `expected_capture`               | yes      | `true` if this should be captured, `false` if it should be skipped                                                                                               |
+| `expected_fields`                | no       | Expected metadata when captured (see below). Use `{}` for should_not_capture scenarios                                                                           |
+| `expected_fields.domain`         | no       | Expected domain classification: `architecture`, `security`, `product`, `debugging`, `incident`, `ops`, `process`, `qa`, `hr`, `data`, `finance`, `general`, etc. |
+| `expected_fields.status_hint`    | no       | Expected decision status: `accepted`, `proposed`, or `rejected`                                                                                                  |
+| `expected_fields.title_keywords` | no       | List of keywords that should appear in the extracted title (case-insensitive, any match passes)                                                                  |
+| `recall_queries`                 | no       | Optional queries that should (or should not) retrieve this decision after capture                                                                                |
+| `notes`                          | no       | Free-text annotation explaining why this scenario is interesting or tricky                                                                                       |
 
 #### Retriever scenario fields
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `id` | yes | Format: `recall-{subcategory}-{description}-{number}` |
-| `category` | yes | One of: `recall/exact_match`, `recall/semantic_match`, `recall/cross_domain`, `recall/temporal` |
-| `language` | yes | Language of the query |
-| `seed_records` | yes | Array of records to index before querying. Each has `title`, `domain`, `content`, and optionally `tags` |
-| `query` | yes | The recall query to test |
-| `expected_match_titles` | yes | Titles of seed records that should appear in results above `min_score` |
-| `min_score` | no | Minimum cosine similarity threshold (default: 0.35). Lower for semantic/cross-domain tests |
-| `notes` | no | Free-text annotation |
+| Field                   | Required | Description                                                                                             |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `id`                    | yes      | Format: `recall-{subcategory}-{description}-{number}`                                                   |
+| `category`              | yes      | One of: `recall/exact_match`, `recall/semantic_match`, `recall/cross_domain`, `recall/temporal`         |
+| `language`              | yes      | Language of the query                                                                                   |
+| `seed_records`          | yes      | Array of records to index before querying. Each has `title`, `domain`, `content`, and optionally `tags` |
+| `query`                 | yes      | The recall query to test                                                                                |
+| `expected_match_titles` | yes      | Titles of seed records that should appear in results above `min_score`                                  |
+| `min_score`             | no       | Minimum cosine similarity threshold (default: 0.35). Lower for semantic/cross-domain tests              |
+| `notes`                 | no       | Free-text annotation                                                                                    |
 
 #### Extraction scenario fields
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `id` | yes | Format: `extract-{type}-{description}-{number}` |
-| `category` | yes | One of: `extraction/single`, `extraction/phase_chain`, `extraction/bundle` |
-| `language` | yes | Language of the input |
-| `input` | yes | The conversation text to extract from |
-| `expected_extraction_type` | yes | Expected extraction mode: `single`, `phase_chain`, or `bundle` |
-| `expected_fields.title_keywords` | no | Keywords expected in extracted title |
-| `expected_fields.status_hint` | no | Expected status: `accepted`, `proposed`, `rejected` |
-| `expected_fields.min_alternatives` | no | Minimum number of alternatives that should be extracted |
-| `expected_fields.min_trade_offs` | no | Minimum number of trade-offs that should be extracted |
-| `expected_fields.min_phases` | no | Minimum phase count (for phase_chain/bundle) |
-| `expected_fields.max_phases` | no | Maximum phase count (for phase_chain/bundle) |
-| `notes` | no | Free-text annotation |
+| Field                              | Required | Description                                                                |
+| ---------------------------------- | -------- | -------------------------------------------------------------------------- |
+| `id`                               | yes      | Format: `extract-{type}-{description}-{number}`                            |
+| `category`                         | yes      | One of: `extraction/single`, `extraction/phase_chain`, `extraction/bundle` |
+| `language`                         | yes      | Language of the input                                                      |
+| `input`                            | yes      | The conversation text to extract from                                      |
+| `expected_extraction_type`         | yes      | Expected extraction mode: `single`, `phase_chain`, or `bundle`             |
+| `expected_fields.title_keywords`   | no       | Keywords expected in extracted title                                       |
+| `expected_fields.status_hint`      | no       | Expected status: `accepted`, `proposed`, `rejected`                        |
+| `expected_fields.min_alternatives` | no       | Minimum number of alternatives that should be extracted                    |
+| `expected_fields.min_trade_offs`   | no       | Minimum number of trade-offs that should be extracted                      |
+| `expected_fields.min_phases`       | no       | Minimum phase count (for phase_chain/bundle)                               |
+| `expected_fields.max_phases`       | no       | Maximum phase count (for phase_chain/bundle)                               |
+| `notes`                            | no       | Free-text annotation                                                       |
 
 ### 1. Capture Scenarios
 
@@ -225,6 +225,8 @@ Extraction produced the wrong structure (e.g., single decision extracted as phas
 - **Paste real conversations** as input — real-world data makes better benchmarks than synthetic examples
 - **Redact sensitive data**: mask API keys, passwords, and PII before adding
 - Verify immediately after adding:
+
   ```bash
   python benchmark/runners/scribe_bench.py --category debugging -v
+
   ```
