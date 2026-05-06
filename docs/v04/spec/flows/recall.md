@@ -479,7 +479,7 @@ Phase 2는 **에러 반환 없음**. 빈 쿼리도 `Parsed{}` 구조체로 downs
 ### 책임
 - Phase 2 `ExpandedQueries` 중 **상위 3개**를 외부 `embedder` 프로세스에 batch 임베딩 요청 (D22, D23, D30)
 - 3 (혹은 그 이하) × `[1024]float32` 벡터 수신
-- Capture Phase 3/6의 embedder 클라이언트와 동일 (`EmbedderService.EmbedBatch`)
+- Capture Phase 4 (`EmbedSingle` for novelty) · Phase 5 (`EmbedBatch` for storage)와 동일 클라이언트
 
 ### Python 대비
 

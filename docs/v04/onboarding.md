@@ -75,7 +75,7 @@ go test ./...       # 테스트 (Phase 2 이후부터 실효성)
 | Phase | 필수 읽기 |
 |---|---|
 | **2** (domain/policy 구현) | [spec/types.md](spec/types.md) · [decisions.md](overview/decisions.md) D11 / D21 / D22 / D23 |
-| **3** (record_builder + payload_text 포팅) | [spec/flows/capture.md](spec/flows/capture.md) Phase 5 canonical section · [decisions.md](overview/decisions.md) D13 / D14 / D15 · `agents/common/schemas/templates.py` (**canonical**) · `agents/scribe/record_builder.py` |
+| **3** (record_builder + payload_text 포팅) | [spec/flows/capture.md](spec/flows/capture.md) Phase 3 canonical section · [decisions.md](overview/decisions.md) D13 / D14 / D15 · `agents/common/schemas/templates.py` (**canonical**) · `agents/scribe/record_builder.py` |
 | **4** (adapter 실 클라이언트) | [spec/components/vault.md](spec/components/vault.md) · [envector.md](spec/components/envector.md) · [embedder.md](spec/components/embedder.md) · [decisions.md](overview/decisions.md) D26 / D30 |
 | **5** (service orchestration) | [spec/flows/capture.md](spec/flows/capture.md) · [recall.md](spec/flows/recall.md) · [lifecycle.md](spec/flows/lifecycle.md) |
 | **6** (MCP SDK 연결) | [spec/components/rune-mcp.md §MCP 서버 구현](spec/components/rune-mcp.md) · [decisions.md](overview/decisions.md) D2 |
