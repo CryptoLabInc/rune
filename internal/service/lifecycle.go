@@ -116,7 +116,6 @@ type EnvInfo struct {
 	Runtime   string `json:"runtime"`
 	CWD       string `json:"cwd"`
 	GOArch    string `json:"goarch"`
-	GOVersion string `json:"goversion"`
 }
 
 // VaultInfo — subset exposed in diagnostics.
@@ -173,7 +172,6 @@ func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 		Runtime:   runtime.Version(),
 		CWD:       cwd,
 		GOArch:    runtime.GOARCH,
-		GOVersion: runtime.Version(),
 	}
 
 	// Config state
@@ -419,15 +417,13 @@ func (s *LifecycleService) DeleteCapture(ctx context.Context, args DeleteCapture
 		return nil, fmt.Errorf("delete: marshal: %w", err)
 	}
 
-	var envelope string
-	if capSvc != nil && len(capSvc.AgentDEK) > 0 && capSvc.AgentID != "" {
-		sealed, err := envector.Seal(capSvc.AgentDEK, capSvc.AgentID, body)
-		if err != nil {
-			return nil, fmt.Errorf("delete: seal: %w", err)
-		}
-		envelope = sealed
-	} else {
-		envelope = string(body)
+	if capSvc == nil || len(capSvc.AgentDEK) == 0 || capSvc.AgentID == "" {
+		return nil, fmt.Errorf("delete: missing agent DEK or ID for encryption")
+	}
+
+	envelope, err := envector.Seal(capSvc.AgentDEK, capSvc.AgentID, body)
+	if err != nil {
+		return nil, fmt.Errorf("delete: seal: %w", err)
 	}
 
 	insertReq := envector.InsertRequest{
@@ -485,6 +481,16 @@ type WarmupInfo struct {
 const WarmupTimeout = 60 * time.Second
 
 // ReloadPipelines — re-init + warmup
+//
+// TODO: currently a no-op for state recovery — only envector warmup probe runs.
+// Full re-init requires:
+//   1. internal/lifecycle/boot.go::RunBootLoop body (Vault.GetAgentManifest + bundle setup
+//      + envector.NewClient + state=Active transition)
+//   2. wiring here to re-trigger boot logic on call (state.SetState(Starting) +
+//      RunBootLoop re-invoke, or a shared _init_pipelines helper called from both
+//      startup and this function)
+// Until both land, /rune:activate cannot recover from dormant or trigger first-time
+// pipeline init.
 func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipelinesResult, error) {
 	result := &ReloadPipelinesResult{
 		OK:    true,
