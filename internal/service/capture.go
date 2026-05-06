@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/envector/rune-go/internal/adapters/embedder"
@@ -107,6 +108,7 @@ func (s *CaptureService) Handle(ctx context.Context, req *domain.CaptureRequest)
 	}
 
 	// Phase 3, 4
+	// TODO: reconsider per-record handling vs records[0] representative
 	embeddingText := pickEmbedText(&records[0])
 	var noveltyInfo *domain.NoveltyInfo
 
@@ -182,8 +184,14 @@ func (s *CaptureService) Handle(ctx context.Context, req *domain.CaptureRequest)
 	return resp, nil
 }
 
-// Batch — rune_batch_capture. Python: server.py:L810-896.
+// Batch — call Handle sequentially N times
 // Per-item independent processing; one item's failure does not abort others.
+// Each item classified: captured / skipped / near_duplicate / error.
+//
+// Future optimizations:
+//   - Phase 3/5 embed: runed.EmbedBatch (N to 1 call)
+//   - Phase 4 score: envector native multi-vector query
+//   - Phase 6 insert: envector.Insert is already batch-native (N to 1 call)
 func (s *CaptureService) Batch(ctx context.Context, args BatchCaptureArgs) (*BatchCaptureResult, error) {
 	var rawItems []map[string]any
 	if err := json.Unmarshal([]byte(args.Items), &rawItems); err != nil {
@@ -248,7 +256,6 @@ func (s *CaptureService) Batch(ctx context.Context, args BatchCaptureArgs) (*Bat
 
 // runNoveltyCheck — Phase 4 helper. Returns novelty info + nil if proceed,
 // or a pre-built response if near_duplicate (caller short-circuits).
-// Python: server.py:L1335-1369.
 func (s *CaptureService) runNoveltyCheck(ctx context.Context, embeddingText string) (*domain.NoveltyInfo, *domain.CaptureResponse, error) {
 	if s.Embedder == nil || s.Envector == nil || s.Vault == nil {
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil
@@ -281,15 +288,16 @@ func (s *CaptureService) runNoveltyCheck(ctx context.Context, embeddingText stri
 
 	class, score := policy.ClassifyNovelty(maxSim, policy.DefaultNoveltyThresholds)
 	noveltyInfo := &domain.NoveltyInfo{
-		Score: score,
-		Class: class,
+		Score:   score,
+		Class:   class,
+		Related: buildRelatedTop3(entries),
 	}
 
 	if class == domain.NoveltyClassNearDuplicate {
 		return noveltyInfo, &domain.CaptureResponse{
 			OK:       true,
 			Captured: false,
-			Reason:   "Near-duplicate — virtually identical insight already stored",
+			Reason:   "Near-duplicate - virtually identical insight already stored",
 			Novelty:  noveltyInfo,
 		}, nil
 	}
@@ -313,6 +321,7 @@ func (s *CaptureService) sealMetadata(records []domain.DecisionRecord) ([]string
 			if err != nil {
 				return nil, fmt.Errorf("seal record %d: %w", i, err)
 			}
+
 			envelopes[i] = sealed
 		} else {
 			envelopes[i] = string(body) // no DEK
@@ -326,6 +335,23 @@ func pickEmbedText(r *domain.DecisionRecord) string {
 		return r.ReusableInsight
 	}
 	return r.Payload.Text // fallback
+}
+
+func buildRelatedTop3(entries []vault.ScoreEntry) []domain.RelatedRecord {
+	n := len(entries)
+	if n > 3 {
+		n = 3
+	}
+
+	records := make([]domain.RelatedRecord, n)
+	for i := 0; i < n; i++ {
+		records[i] = domain.RelatedRecord{
+			ID:         fmt.Sprintf("shard:%d/row:%d", entries[i].ShardIdx, entries[i].RowIdx),
+			Similarity: math.Round(entries[i].Score*1000) / 1000,
+		}
+	}
+
+	return records
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
