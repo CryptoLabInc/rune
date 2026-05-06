@@ -37,6 +37,9 @@ func NewRecallService() *RecallService {
 }
 
 // Handle — Python: server.py:L910-1034 tool_recall + searcher.search().
+//
+// TODO: External IO calls (Embedder, Envector, Vault) do not have explicit timeouts.
+// We should add context timeouts (context.WithTimeout) for these operations after we determine optimal duration
 func (s *RecallService) Handle(ctx context.Context, args *domain.RecallArgs) (*domain.RecallResult, error) {
 	// Phase 2: parse query
 	parsed := policy.Parse(args.Query)
