@@ -21,7 +21,11 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/envector/rune-go/internal/adapters/embedder"
+	"github.com/envector/rune-go/internal/adapters/envector"
+	"github.com/envector/rune-go/internal/adapters/vault"
 	"github.com/envector/rune-go/internal/domain"
+	"github.com/envector/rune-go/internal/lifecycle"
 	"github.com/envector/rune-go/internal/service"
 )
 
@@ -35,13 +39,37 @@ import (
 // Future fields (commented as a contract sketch — to be activated as the
 // owning adapter PR lands):
 //
-//	Vault      vault.Client
-//	Envector   envector.Client
-//	Embedder   embedder.Client
-//	CaptureLog *logio.CaptureLog
-//	State      *lifecycle.Manager
-//	Cfg        *config.Config
-type Deps struct{}
+type Deps struct {
+	Vault      vault.Client
+	Envector   envector.Client
+	Embedder   embedder.Client
+	State      *lifecycle.Manager
+	
+	Capture   *service.CaptureService
+	Recall    *service.RecallService
+	Lifecycle *service.LifecycleService
+}
+
+func (d *Deps) InjectVault(client vault.Client) {
+	d.Vault = client
+	if d.Capture != nil { d.Capture.Vault = client }
+	if d.Recall != nil { d.Recall.Vault = client }
+	if d.Lifecycle != nil { d.Lifecycle.Vault = client }
+}
+
+func (d *Deps) InjectEmbedder(client embedder.Client) {
+	d.Embedder = client
+	if d.Capture != nil { d.Capture.Embedder = client }
+	if d.Recall != nil { d.Recall.Embedder = client }
+	if d.Lifecycle != nil { d.Lifecycle.Embedder = client }
+}
+
+func (d *Deps) InjectEnvector(client envector.Client) {
+	d.Envector = client
+	if d.Capture != nil { d.Capture.Envector = client }
+	if d.Recall != nil { d.Recall.Envector = client }
+	if d.Lifecycle != nil { d.Lifecycle.Envector = client }
+}
 
 // emptyArgs — input type for tools that take no arguments.
 type emptyArgs struct{}
