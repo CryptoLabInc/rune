@@ -188,7 +188,7 @@ func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 	}
 
 	// Vault
-	r.Vault = s.collectVault(ctx)
+	r.Vault = s.collectVault(ctx, DiagnosticsTimeout)
 
 	// Keys
 	r.Keys = KeysInfo{
@@ -204,7 +204,7 @@ func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 	}
 
 	// Embedding
-	r.Embedding = s.collectEmbedding(ctx)
+	r.Embedding = s.collectEmbedding(ctx, DiagnosticsTimeout)
 
 	// Envector
 	r.Envector = s.collectEnvector(ctx, DiagnosticsTimeout)
@@ -219,7 +219,7 @@ func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 	return r
 }
 
-func (s *LifecycleService) collectVault(ctx context.Context) VaultInfo {
+func (s *LifecycleService) collectVault(ctx context.Context, timeout time.Duration) VaultInfo {
 	info := VaultInfo{Configured: s.Vault != nil}
 	if s.Vault == nil {
 		return info
@@ -227,7 +227,10 @@ func (s *LifecycleService) collectVault(ctx context.Context) VaultInfo {
 
 	info.Endpoint = s.Vault.Endpoint()
 
-	healthy, err := s.Vault.HealthCheck(ctx)
+	ctx2, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	healthy, err := s.Vault.HealthCheck(ctx2)
 	if err != nil {
 		info.Error = err.Error()
 	}
@@ -237,13 +240,16 @@ func (s *LifecycleService) collectVault(ctx context.Context) VaultInfo {
 	return info
 }
 
-func (s *LifecycleService) collectEmbedding(ctx context.Context) EmbeddingInfo {
+func (s *LifecycleService) collectEmbedding(ctx context.Context, timeout time.Duration) EmbeddingInfo {
 	info := EmbeddingInfo{Mode: "external gRPC"}
 	if s.Embedder == nil {
 		return info
 	}
 
-	snap, err := s.Embedder.Info(ctx)
+	ctx2, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	snap, err := s.Embedder.Info(ctx2)
 	if err != nil {
 		return info
 	}
