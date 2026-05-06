@@ -536,9 +536,9 @@ func (r *ExtractionResult) IsBundle() bool {
 | `group_summary` | `ExtractionResult.GroupSummary` (phase_chain에서 모든 phase 공유) |
 | `status_hint` | `ExtractionResult.StatusHint` |
 | `tags` | `ExtractionResult.Tags` |
-| `payload.text`, `reusable_insight` | `CaptureRequest.Extracted` top-level 유지 (Phase 2 embed text 선택에서 직접 read — D4) |
+| `payload.text`, `reusable_insight` | `CaptureRequest.Extracted` top-level 유지 (Phase 3 record_builder가 read · Phase 4·5 embed 텍스트는 records[0]/records[i]에서 선택 — D4) |
 
-즉 wire JSON은 flat하지만 내부에서 두 object로 split된다. 이 조립 로직은 `internal/service/capture.go`의 Phase 2에서 수행. 자세한 dispatch 규칙은 `spec/flows/capture.md` Phase 2·5 참조.
+즉 wire JSON은 flat하지만 내부에서 두 object로 split된다. 이 조립 로직은 `internal/service/capture.go`의 Phase 2에서 수행. 자세한 dispatch 규칙은 `spec/flows/capture.md` Phase 2·3 참조.
 
 **주의**:
 - `phases` 배열이 **존재하면** phase_chain 또는 bundle, **비어있거나 없으면** single (`ExtractionResult.Single` 사용)
@@ -882,7 +882,7 @@ func ValidateEvidenceCertainty(r *DecisionRecord) bool {
   - `agents/retriever/query_processor.py:L22-54` — §1.7, §1.8, §5.2
   - `agents/scribe/llm_extractor.py:L28-70` — §3a (ExtractionResult hierarchy, **type only** in agent-delegated mode)
   - `agents/scribe/detector.py:L14-23` — §5.3 Detection (fields subset; full Python struct has matched_pattern/category/priority/top_matches unused in agent-delegated)
-- 관련 flow: `spec/flows/capture.md` Phase 2·5 · `spec/flows/recall.md` Phase 2·6·7
+- 관련 flow: `spec/flows/capture.md` Phase 2·3·5 · `spec/flows/recall.md` Phase 2·6·7
 - 관련 컴포넌트: `spec/components/rune-mcp.md` (tool 정의)
 - 관련 결정: D3 (title 60자), D4 (extracted map), D13 (DecisionRecord 조립 책임), D14 (agent-delegated), D16 (batch embed), D20 (capture_log 포맷)
 - Embedding 텍스트 선택: `agents/common/schemas/embedding.py` `embedding_text_for_record`

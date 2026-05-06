@@ -2125,7 +2125,7 @@ service EmbedderService {
 ### 이관 위치
 
 - `spec/components/embedder.md` — 클라이언트 사용법 · proto 요약 · Info 캐시 정책
-- `spec/flows/capture.md` Phase 3 · `spec/flows/recall.md` Phase 3 — 호출 코드 샘플 (HTTP → gRPC)
+- `spec/flows/capture.md` Phase 4 (single, novelty용) · Phase 5 (batch, 저장용) · `spec/flows/recall.md` Phase 3 — 호출 코드 샘플 (HTTP → gRPC)
 - `overview/architecture.md` — 3-프로세스 그림에 "embedder는 외부 프로세스" 명시
 
 ---

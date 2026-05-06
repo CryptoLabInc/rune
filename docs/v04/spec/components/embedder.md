@@ -52,7 +52,7 @@ service RunedService {
 | RPC | 용도 | rune-mcp 사용 |
 |---|---|---|
 | `Embed(text) → vector` | 단일 텍스트 임베딩 | recall `searchByID` helper 등 단건 경로 |
-| `EmbedBatch(texts) → embeddings` | 배치 임베딩 | capture Phase 6 · recall Phase 3 (D16 · D23) |
+| `EmbedBatch(texts) → embeddings` | 배치 임베딩 | capture Phase 5 · recall Phase 3 (D16 · D23) |
 | `Info() → {daemon_version, model_identity, vector_dim, max_text_length, max_batch_size}` | 메타데이터 | 기동 후 1회 조회, 메모리 캐시 |
 | `Health() → {status, uptime, total_requests}` | 상태 체크 | 장애 분류(LOADING vs DEGRADED) |
 | `Shutdown(grace_seconds)` | 종료 요청 | **호출 안 함** (rune-mcp는 embedder 수명 관리 책임 없음) |
@@ -292,4 +292,4 @@ func (ic *infoCache) Get(ctx context.Context) (InfoSnapshot, error) {
 - Proto 파일: `github.com/CryptoLabInc/runed/proto/runed/v1/runed.proto` (rune-go는 `go.mod`로 import만)
 - 클라이언트 라이브러리: `github.com/CryptoLabInc/runed/client` (Plan A alpha — gRPC dial + Health 사전체크 wrapping)
 - 결정 이력: `overview/decisions.md` D6 · D9 · D29 (Archived; 'runed'라는 이름은 embedder의 정식 이름으로 부활), D30 (Current — `runed.v1` / `RunedService` 확정)
-- 관련 flow: `spec/flows/capture.md` Phase 3 · 6, `spec/flows/recall.md` Phase 3
+- 관련 flow: `spec/flows/capture.md` Phase 4 (single, novelty용) · Phase 5 (batch, 저장용), `spec/flows/recall.md` Phase 3
