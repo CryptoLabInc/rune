@@ -1,5 +1,9 @@
+buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1 h1:s6hzCXtND/ICdGPTMGk7C+/BFlr2Jg5GyH0NKf4XGXg=
+buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1/go.mod h1:tvtbpgaVXZX4g6Pn+AnzFycuRK3MOz5HJfEGeEllXYM=
 github.com/CryptoLabInc/envector-go-sdk v0.1.0 h1:EaPiFtvLh33mrS1Nfjb/sF5tmDlOIHpjj3TJ6QIIFgM=
 github.com/CryptoLabInc/envector-go-sdk v0.1.0/go.mod h1:jXVwGkqUOmQUnJiEshq7sG2x0nveFCNlAU5J7xc7CDw=
+github.com/CryptoLabInc/rune-admin/vault v0.0.0-20260506055025-ad52b6bd549d h1:BmK4Ync6jx4X9aN7IeiHNoweA1c/iD+x61+dY8fgIl0=
+github.com/CryptoLabInc/rune-admin/vault v0.0.0-20260506055025-ad52b6bd549d/go.mod h1:7Hb7PCl5auGCj2oX30SQU+B0xqzqvM6P4NjPH0jj9Xk=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=

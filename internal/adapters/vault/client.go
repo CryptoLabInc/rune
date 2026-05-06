@@ -19,22 +19,31 @@ package vault
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
+	vaultpb "github.com/CryptoLabInc/rune-admin/vault/pkg/vaultpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 )
 
-// Applied on both MaxCallRecvMsgSize and MaxCallSendMsgSize.
+// Applied on both MaxCallRecvMsgSize and MaxCallSendMsgSize
 const MaxMessageLength = 16 * 1024 * 1024
 
-// DefaultTimeout — Python vault_client.py:L84 (all RPCs: 30s; health 5s override).
+// DefaultTimeout — Python vault_client.py:L84 (all RPCs: 30s)
 const DefaultTimeout = 30 * time.Second
 
-// Returned by GetAgentManifest (GetAgentManifestResponse.manifest_json)
+// HealthCheckTimeout — Python vault_client.py:L315 (5s override on health probes)
+const HealthCheckTimeout = 5 * time.Second
+
+// Returned by GetAgentManifest (GetAgentManifestResponse.manifest_json).
 type Bundle struct {
 	EncKey           []byte // FHE encryption key (for local encrypt via envector SDK)
 	EnvectorEndpoint string // enVector Cloud server address
@@ -50,7 +59,7 @@ type manifestJSON struct {
 	EnvectorEndpoint string `json:"envector_endpoint"`
 	EnvectorAPIKey   string `json:"envector_api_key"`
 	AgentID          string `json:"agent_id"`
-	AgentDEK         string `json:"agent_dek"` // hex-encoded 32-byte key
+	AgentDEK         string `json:"agent_dek"` // base64(StdEncoding)
 	KeyID            string `json:"key_id"`
 	IndexName        string `json:"index_name"`
 }
@@ -77,40 +86,22 @@ func ParseManifestJSON(raw string) (*Bundle, error) {
 	}, nil
 }
 
-func decodeAgentDEK(hexStr string) ([]byte, error) {
-	if hexStr == "" {
+// base64 decode + 32-byte length check
+// length mismatch: non-retryable
+func decodeAgentDEK(b64 string) ([]byte, error) {
+	if b64 == "" {
 		return nil, fmt.Errorf("vault: agent_dek is empty")
 	}
 
-	// Decodes
-	b := make([]byte, len(hexStr)/2)
-	for i := 0; i < len(b); i++ {
-		hi := unhex(hexStr[2*i])
-		lo := unhex(hexStr[2*i+1])
-		if hi < 0 || lo < 0 {
-			return nil, fmt.Errorf("vault: agent_dek contains non-hex character at position %d", 2*i)
-		}
-		b[i] = byte(hi<<4 | lo)
+	b, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("vault: agent_dek invalid base64: %w", err)
 	}
-
-	// Validate 32-byte length
 	if len(b) != 32 {
 		return nil, fmt.Errorf("vault: invalid agent_dek size %d (expected 32)", len(b))
 	}
 
 	return b, nil
-}
-
-func unhex(c byte) int {
-	switch {
-	case '0' <= c && c <= '9':
-		return int(c - '0')
-	case 'a' <= c && c <= 'f':
-		return int(c - 'a' + 10)
-	case 'A' <= c && c <= 'F':
-		return int(c - 'A' + 10)
-	}
-	return -1
 }
 
 // ScoreEntry — DecryptScores output.
@@ -139,7 +130,14 @@ type ClientOpts struct {
 type client struct {
 	endpoint string
 	token    string
-	// TODO: grpc.ClientConn + VaultServiceClient stub (needs external dep)
+	conn     *grpc.ClientConn
+	stub     vaultpb.VaultServiceClient
+}
+
+var defaultKeepalive = keepalive.ClientParameters{
+	Time:                30 * time.Second,
+	Timeout:             10 * time.Second,
+	PermitWithoutStream: true,
 }
 
 // See spec/components/vault.md §TLS + §Keepalive.
@@ -154,19 +152,20 @@ func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
 			grpc.MaxCallRecvMsgSize(MaxMessageLength),
 			grpc.MaxCallSendMsgSize(MaxMessageLength),
 		),
+		grpc.WithKeepaliveParams(defaultKeepalive),
 	}
 
-	if opts.TLSDisable {
+	switch {
+	case opts.TLSDisable:
 		slog.Warn("vault: TLS disabled — gRPC traffic is unencrypted. Only use for local development.")
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else if opts.CACertPath != "" {
+	case opts.CACertPath != "":
 		creds, err := credentials.NewClientTLSFromFile(opts.CACertPath, "")
 		if err != nil {
 			return nil, fmt.Errorf("vault: failed to load CA cert %s: %w", opts.CACertPath, err)
 		}
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
-	} else {
-		// System CA bundle
+	default:
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(nil)))
 	}
 
@@ -176,25 +175,95 @@ func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
 	}
 
 	slog.Info("vault: connected", "endpoint", normalized)
-	return &client{endpoint: normalized, token: token, conn: conn}, nil
+	return &client{
+		endpoint: normalized,
+		token:    token,
+		conn:     conn,
+		stub:     vaultpb.NewVaultServiceClient(conn),
+	}, nil
 }
 
-// Stub implementations — all TODO.
-
-func (c *client) GetAgentManifest(ctx context.Context) (*Bundle, error) { return nil, nil }
-func (c *client) DecryptScores(ctx context.Context, blob string, topK int) ([]ScoreEntry, error) {
-	// TODO: call VaultService.DecryptScores RPC
-	return nil, fmt.Errorf("vault: DecryptScores not yet implemented (needs proto codegen)")
+func (c *client) authCtx(ctx context.Context) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.token)
 }
 
-func (c *client) DecryptMetadata(ctx context.Context, list []string) ([]string, error) {
-	// TODO: call VaultService.DecryptMetadata RPC
-	return nil, fmt.Errorf("vault: DecryptMetadata not yet implemented (needs proto codegen)")
+func withTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) <= d {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, d)
+}
+
+func (c *client) GetAgentManifest(ctx context.Context) (*Bundle, error) {
+	ctx, cancel := withTimeout(c.authCtx(ctx), DefaultTimeout)
+	defer cancel()
+
+	resp, err := c.stub.GetAgentManifest(ctx, &vaultpb.GetAgentManifestRequest{Token: c.token})
+	if err != nil {
+		return nil, MapGRPCError(err)
+	}
+	if msg := resp.GetError(); msg != "" {
+		return nil, &Error{Code: ErrVaultInternal.Code, Message: "GetAgentManifest: " + msg, Retryable: true}
+	}
+
+	return ParseManifestJSON(resp.GetManifestJson())
+}
+
+func (c *client) DecryptScores(ctx context.Context, encryptedBlobB64 string, topK int) ([]ScoreEntry, error) {
+	ctx, cancel := withTimeout(c.authCtx(ctx), DefaultTimeout)
+	defer cancel()
+
+	resp, err := c.stub.DecryptScores(ctx, &vaultpb.DecryptScoresRequest{
+		Token:            c.token,
+		EncryptedBlobB64: encryptedBlobB64,
+		TopK:             int32(topK),
+	})
+	if err != nil {
+		return nil, MapGRPCError(err)
+	}
+	if msg := resp.GetError(); msg != "" {
+		return nil, &Error{Code: ErrVaultInternal.Code, Message: "DecryptScores: " + msg, Retryable: true}
+	}
+
+	out := make([]ScoreEntry, 0, len(resp.GetResults()))
+	for _, e := range resp.GetResults() {
+		out = append(out, ScoreEntry{
+			ShardIdx: e.GetShardIdx(),
+			RowIdx:   e.GetRowIdx(),
+			Score:    e.GetScore(),
+		})
+	}
+	return out, nil
+}
+
+func (c *client) DecryptMetadata(ctx context.Context, encryptedMetadataList []string) ([]string, error) {
+	ctx, cancel := withTimeout(c.authCtx(ctx), DefaultTimeout)
+	defer cancel()
+
+	resp, err := c.stub.DecryptMetadata(ctx, &vaultpb.DecryptMetadataRequest{
+		Token:                 c.token,
+		EncryptedMetadataList: encryptedMetadataList,
+	})
+	if err != nil {
+		return nil, MapGRPCError(err)
+	}
+	if msg := resp.GetError(); msg != "" {
+		return nil, &Error{Code: ErrVaultInternal.Code, Message: "DecryptMetadata: " + msg, Retryable: true}
+	}
+	return resp.GetDecryptedMetadata(), nil
 }
 
 func (c *client) HealthCheck(ctx context.Context) (bool, error) {
-	// TODO: call grpc.health.v1.Health/Check
-	return false, fmt.Errorf("vault: HealthCheck not yet implemented")
+	ctx, cancel := withTimeout(ctx, HealthCheckTimeout)
+	defer cancel()
+
+	stub := grpc_health_v1.NewHealthClient(c.conn)
+	resp, err := stub.Check(ctx, &grpc_health_v1.HealthCheckRequest{Service: ""})
+	if err != nil {
+		return false, MapGRPCError(err)
+	}
+
+	return resp.GetStatus() == grpc_health_v1.HealthCheckResponse_SERVING, nil
 }
 
 func (c *client) Endpoint() string { return c.endpoint }

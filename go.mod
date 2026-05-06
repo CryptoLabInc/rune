@@ -13,11 +13,13 @@ go 1.25.9
 
 require (
 	github.com/CryptoLabInc/envector-go-sdk v0.1.0
+	github.com/CryptoLabInc/rune-admin/vault v0.0.0-20260506055025-ad52b6bd549d
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	google.golang.org/grpc v1.81.0
 )
 
 require (
+	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
