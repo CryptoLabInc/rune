@@ -1603,6 +1603,10 @@ class MCPServerApp:
                             rune_config.envector.api_key = vault_ev_api_key
                         save_rune_config(rune_config)
                         logger.info("Cached enVector credentials to config.json")
+
+                    if not vault_ev_endpoint or not vault_ev_api_key:
+                        logger.error("Vault bundle missing enVector credentials. Contact your Vault administrator.")
+                        _set_dormant_with_reason("envector_not_provisioned")
                 else:
                     result["errors"].append("Failed to fetch keys from Vault")
                     logger.error("Failed to fetch keys from Vault — capture/search will fail")
@@ -1924,50 +1928,22 @@ if __name__ == "__main__":
         VAULT_TLS_DISABLE = bool(_vault_cfg.get("tls_disable", False))
 
     VAULT_CONFIGURED = bool(RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN)
-    VAULT_KEYS_LOADED = False
     VAULT_INDEX_NAME = None
     AGENT_ID = None
     AGENT_DEK = None
 
     if RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN:
         # When Vault is configured (Rune plugin mode), use canonical key path.
-        # key_id is discovered from Vault — no hardcoded default.
+        # key_id is discovered from Vault by the background pipeline init thread —
+        # no synchronous fetch here, so MCP transport is ready in ~1s instead of
+        # blocking on a multi-MB EvalKey stream that can exceed Claude's startup
+        # timeout.
         ENVECTOR_KEY_PATH = MCPServerApp.DEFAULT_KEY_PATH
-
-        logger.info(f"Vault configured — fetching public keys from: {RUNEVAULT_ENDPOINT}")
-        (
-            success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek,
-            vault_ev_endpoint, vault_ev_api_key, vault_ev_secure,
-        ) = fetch_keys_from_vault(
-            RUNEVAULT_ENDPOINT, RUNEVAULT_TOKEN,
-            ENVECTOR_KEY_PATH,
-            ca_cert=VAULT_CA_CERT,
-            tls_disable=VAULT_TLS_DISABLE,
+        AUTO_KEY_SETUP = False
+        ENVECTOR_KEY_ID = None  # populated by _init_pipelines from Vault bundle
+        logger.info(
+            f"Vault configured — keys will be fetched in background from: {RUNEVAULT_ENDPOINT}"
         )
-        if success and vault_key_id:
-            ENVECTOR_KEY_ID = vault_key_id
-            logger.info(f"Vault provided key_id: {ENVECTOR_KEY_ID}")
-            AUTO_KEY_SETUP = False
-            VAULT_KEYS_LOADED = True
-            VAULT_INDEX_NAME = vault_index
-            AGENT_ID = vault_agent_id
-            AGENT_DEK = vault_agent_dek
-            if vault_ev_endpoint:
-                ENVECTOR_ENDPOINT = vault_ev_endpoint
-                logger.info("Using enVector endpoint from Vault bundle")
-            if vault_ev_api_key:
-                ENVECTOR_API_KEY = vault_ev_api_key
-                logger.info("Using enVector API key from Vault bundle")
-            if vault_ev_secure is not None:
-                ENVECTOR_SECURE = vault_ev_secure
-                logger.info(f"Using enVector secure={ENVECTOR_SECURE} from Vault bundle")
-            if not vault_ev_endpoint or not vault_ev_api_key:
-                logger.error("Vault bundle missing enVector credentials. Contact your Vault administrator.")
-                _set_dormant_with_reason("envector_not_provisioned")
-        else:
-            logger.error("Failed to fetch keys/key_id from Vault. Operations requiring encryption will fail.")
-            _set_dormant_with_reason("vault_unreachable")
-            AUTO_KEY_SETUP = False
     elif RUNEVAULT_ENDPOINT and not RUNEVAULT_TOKEN:
         logger.warning("Vault endpoint provided but no token specified. Skipping Vault integration.")
         VAULT_CONFIGURED = True
@@ -1975,20 +1951,25 @@ if __name__ == "__main__":
     elif not AUTO_KEY_SETUP:
         logger.info(f"Using externally provided keys from: {ENVECTOR_KEY_PATH}")
 
+    # When Vault is configured, defer adapter construction to _init_pipelines
+    # (which builds it after the background key fetch completes). Constructing
+    # it here would either block on key files or partially init with empty
+    # placeholders that get overwritten anyway.
     envector_adapter = None
-    try:
-        envector_adapter = EnVectorSDKAdapter(
-            address=ENVECTOR_ENDPOINT,
-            key_id=ENVECTOR_KEY_ID,
-            key_path=ENVECTOR_KEY_PATH,
-            eval_mode=ENVECTOR_EVAL_MODE,
-            query_encryption=ENCRYPTED_QUERY,
-            access_token=ENVECTOR_API_KEY,
-            secure=ENVECTOR_SECURE,
-            auto_key_setup=AUTO_KEY_SETUP,
-        )
-    except Exception as e:
-        logger.warning(f"enVector adapter init failed (server will start in degraded mode): {e}")
+    if not (RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN):
+        try:
+            envector_adapter = EnVectorSDKAdapter(
+                address=ENVECTOR_ENDPOINT,
+                key_id=ENVECTOR_KEY_ID,
+                key_path=ENVECTOR_KEY_PATH,
+                eval_mode=ENVECTOR_EVAL_MODE,
+                query_encryption=ENCRYPTED_QUERY,
+                access_token=ENVECTOR_API_KEY,
+                secure=ENVECTOR_SECURE,
+                auto_key_setup=AUTO_KEY_SETUP,
+            )
+        except Exception as e:
+            logger.warning(f"enVector adapter init failed (server will start in degraded mode): {e}")
 
     vault_client = None
     if RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN:
@@ -2015,7 +1996,10 @@ if __name__ == "__main__":
         agent_dek=AGENT_DEK,
     )
 
-    # Set enVector credentials from Vault bundle on app instance
+    # Seed enVector credentials from cached ~/.rune/config.json so that
+    # vault_status / non-encrypted tools have something to report before the
+    # background Vault fetch completes. _init_pipelines will overwrite these
+    # with fresh values from the Vault bundle.
     if ENVECTOR_ENDPOINT:
         app._envector_endpoint = ENVECTOR_ENDPOINT
     if ENVECTOR_API_KEY:
