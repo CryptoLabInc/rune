@@ -2,6 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"math"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/envector/rune-go/internal/adapters/embedder"
@@ -9,6 +16,7 @@ import (
 	"github.com/envector/rune-go/internal/adapters/vault"
 	"github.com/envector/rune-go/internal/domain"
 	"github.com/envector/rune-go/internal/lifecycle"
+	"github.com/envector/rune-go/internal/policy"
 )
 
 // RecallService orchestrates the 7-phase recall flow.
@@ -30,35 +38,51 @@ func NewRecallService() *RecallService {
 
 // Handle — Python: server.py:L910-1034 tool_recall + searcher.search().
 //
-// Flow (per spec/flows/recall.md):
-//
-//	Phase 1 (in handler): state gate + arg validation (empty query D24, topk ≤ 10)
-//	Phase 2: policy.Parse — intent/time/entities/keywords/expansions (English only D21)
-//	Phase 3: embedder.EmbedBatch(expansions[:3]) — D22 cap, D23 batch
-//	Phase 4: searchWithExpansions — sequential per expansion (D25 MVP)
-//	         per-expansion 4 RPC: envector.Score → Vault.DecryptScores →
-//	                              envector.GetMetadata → (Vault.DecryptMetadata in Phase 5)
-//	         dedup by record_id + sort by raw score desc
-//	Phase 5: resolveMetadata — classify entries (AES/plain/legacy base64 D26)
-//	         batch DecryptMetadata + per-entry fallback on batch failure
-//	Phase 6: expandPhaseChains (D27) → assembleGroups → applyMetadataFilters →
-//	         policy.FilterByTime → policy.ApplyRecencyWeighting → [:topk]
-//	Phase 7: buildResult — synthesized=false fixed (D28 agent-delegated)
+// TODO: External IO calls (Embedder, Envector, Vault) do not have explicit timeouts.
+// We should add context timeouts (context.WithTimeout) for these operations after we determine optimal duration
 func (s *RecallService) Handle(ctx context.Context, args *domain.RecallArgs) (*domain.RecallResult, error) {
-	// TODO Phase 2: parsed := policy.Parse(args.Query)
-	// TODO Phase 3: vectors, err := s.Embedder.EmbedBatch(ctx, parsed.ExpandedQueries[:3])
-	// TODO Phase 4: hits, err := s.searchWithExpansions(ctx, args.Query, parsed.ExpandedQueries, vectors, args.TopK)
-	// TODO Phase 5: resolveMetadata already happens inside searchSingle (via Phase 4 flow)
-	// TODO Phase 6: hits = s.expandPhaseChains(ctx, hits, vectors[0])
-	//               hits = s.assembleGroups(hits)
-	//               hits = s.applyMetadataFilters(hits, filtersFromArgs(args))
-	//               hits = policy.FilterByTime(hits, parsed.TimeScope, s.Now())
-	//               hits = policy.ApplyRecencyWeighting(hits, s.Now())
-	//               if len(hits) > args.TopK { hits = hits[:args.TopK] }
-	// TODO Phase 7: return s.buildResult(hits), nil
-	_ = ctx
-	_ = args
-	return nil, nil
+	// Phase 2: parse query
+	parsed := policy.Parse(args.Query)
+
+	expansions := parsed.ExpandedQueries
+	if len(expansions) > 3 {
+		expansions = expansions[:3]
+	}
+
+	// Phase 3: embed expansions
+	vectors, err := s.Embedder.EmbedBatch(ctx, expansions)
+	if err != nil {
+		return nil, fmt.Errorf("embed expansions: %w", err)
+	}
+
+	// Phase 4: search with expansions
+	topK := args.TopK
+	if topK <= 0 {
+		topK = 5
+	}
+	hits, err := s.searchWithExpansions(ctx, args.Query, expansions, vectors, topK)
+	if err != nil {
+		return nil, fmt.Errorf("search: %w", err)
+	}
+
+	// Phase 6: group expansion + assemble + filter + rerank
+	if len(vectors) > 0 {
+		hits = s.expandPhaseChains(ctx, hits, vectors[0])
+	}
+	hits = s.assembleGroups(hits)
+
+	filters := Filters{Domain: args.Domain, Status: args.Status, Since: args.Since}
+	hits = s.applyMetadataFilters(hits, filters)
+	hits = policy.FilterByTime(hits, parsed.TimeScope, s.Now())
+	hits = policy.ApplyRecencyWeighting(hits, s.Now())
+
+	// Final topK
+	if len(hits) > topK {
+		hits = hits[:topK]
+	}
+
+	// Phase 7: build result
+	return s.buildResult(hits), nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,11 +90,6 @@ func (s *RecallService) Handle(ctx context.Context, args *domain.RecallArgs) (*d
 // ─────────────────────────────────────────────────────────────────────────────
 
 // searchWithExpansions — Python: searcher.py:L153-176 _search_with_expansions.
-//   - iterate exps[:3] sequentially (D25)
-//   - per-expansion: searchSingle → dedup by record_id
-//   - original fallback (L167-173): if query.original not in exps, re-embed + search
-//   - sort by raw score desc (stable)
-//   - per-expansion failure = log warn + continue (Python L468-470 best-effort)
 func (s *RecallService) searchWithExpansions(
 	ctx context.Context,
 	original string,
@@ -78,19 +97,94 @@ func (s *RecallService) searchWithExpansions(
 	vectors [][]float32,
 	topk int,
 ) ([]domain.SearchHit, error) {
-	// TODO
-	return nil, nil
+	seen := make(map[string]bool)
+	var allHits []domain.SearchHit
+
+	for i, vec := range vectors {
+		if i >= len(exps) {
+			break
+		}
+		hits, err := s.searchSingle(ctx, vec, topk)
+		if err != nil {
+			slog.Warn("search expansion failed (best-effort)", "exp", exps[i], "err", err)
+			continue
+		}
+		for _, h := range hits {
+			if !seen[h.RecordID] {
+				seen[h.RecordID] = true
+				allHits = append(allHits, h)
+			}
+		}
+	}
+
+	// Original fallback
+	originalInExps := false
+	for _, e := range exps {
+		if e == original {
+			originalInExps = true
+			break
+		}
+	}
+	if !originalInExps && s.Embedder != nil {
+		vec, err := s.Embedder.EmbedSingle(ctx, original)
+		if err == nil {
+			hits, err := s.searchSingle(ctx, vec, topk)
+			if err == nil {
+				for _, h := range hits {
+					if !seen[h.RecordID] {
+						seen[h.RecordID] = true
+						allHits = append(allHits, h)
+					}
+				}
+			}
+		}
+	}
+
+	// Sort by raw score in descending order
+	sort.SliceStable(allHits, func(i, j int) bool {
+		return allHits[i].Score > allHits[j].Score
+	})
+
+	return allHits, nil
 }
 
 // searchSingle — Python: searcher.py:L371-373 + L375-470 _search_via_vault.
-// 4-RPC sequence per vector:
-//  1. envector.Score(vec) → encrypted blobs
-//  2. Vault.DecryptScores(blobs[0], topk) → [{shard, row, score}]
-//  3. envector.GetMetadata(refs, ["metadata"]) → encrypted metadata entries
-//  4. resolveMetadata → plaintext hits
 func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk int) ([]domain.SearchHit, error) {
-	// TODO
-	return nil, nil
+	// Score
+	blobs, err := s.Envector.Score(ctx, vec)
+	if err != nil {
+		return nil, fmt.Errorf("envector score: %w", err)
+	}
+	if len(blobs) == 0 {
+		return nil, nil
+	}
+
+	// Vault decrypt scores
+	entries, err := s.Vault.DecryptScores(ctx, string(blobs[0]), topk)
+	if err != nil {
+		return nil, fmt.Errorf("vault decrypt scores: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
+	// Get metadata
+	refs := make([]envector.MetadataRef, len(entries))
+	for i, e := range entries {
+		refs[i] = envector.MetadataRef{ShardIdx: uint64(e.ShardIdx), RowIdx: uint64(e.RowIdx)}
+	}
+	metaEntries, err := s.Envector.GetMetadata(ctx, refs, []string{"metadata"})
+	if err != nil {
+		return nil, fmt.Errorf("envector get_metadata: %w", err)
+	}
+
+	// Search hit
+	hits, err := s.resolveMetadata(ctx, metaEntries, entries)
+	if err != nil {
+		return nil, fmt.Errorf("resolve metadata: %w", err)
+	}
+
+	return hits, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,66 +202,334 @@ const (
 )
 
 // classifyMetadata — Python: searcher.py:L417-464 inline logic.
-// Returns the format + the parsed value (nil for AES, which is passed to Vault).
-func classifyMetadata(data string) (metadataFormat, any) {
-	// TODO:
-	//  1. Try JSON parse → if has "a" and "c" → AES envelope (return original)
-	//     else plain JSON (return parsed)
-	//  2. Try base64.StdEncoding.DecodeString → JSON parse → base64 JSON
-	//  3. Otherwise → unrecognized
-	_ = data
+func classifyMetadata(data string) (metadataFormat, map[string]any) {
+	data = strings.TrimSpace(data)
+	if data == "" {
+		return fmtUnrecognized, nil
+	}
+
+	// Try JSON parse
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(data), &parsed); err == nil {
+		// Check for AES envelope: {"a": ..., "c": ...}
+		if _, hasA := parsed["a"]; hasA {
+			if _, hasC := parsed["c"]; hasC {
+				return fmtAESEnvelope, nil
+			}
+		}
+		return fmtPlainJSON, parsed
+	}
+
+	// Try base64
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err == nil {
+		var b64Parsed map[string]any
+		if err := json.Unmarshal(decoded, &b64Parsed); err == nil {
+			return fmtBase64JSON, b64Parsed
+		}
+	}
+
 	return fmtUnrecognized, nil
 }
 
 // resolveMetadata — Python: searcher.py:L417-464 + _to_search_result.
-// For each entry: classify + batch Vault.DecryptMetadata + per-entry fallback.
-// Unrecognized / failed entries → empty metadata (logged warn, not fatal).
-func (s *RecallService) resolveMetadata(ctx context.Context, entries []envector.MetadataEntry) ([]domain.SearchHit, error) {
-	// TODO:
-	//  - classify each entry; collect AES envelopes as aesItems
-	//  - batch decrypt via s.Vault.DecryptMetadata(aesList)
-	//  - on batch failure: per-entry loop fallback
-	//  - convert to SearchHit via toSearchHit (domain.ExtractPayloadText)
-	_ = ctx
-	_ = entries
-	return nil, nil
+func (s *RecallService) resolveMetadata(ctx context.Context, entries []envector.MetadataEntry, scores []vault.ScoreEntry) ([]domain.SearchHit, error) {
+	type classifiedItem struct {
+		idx    int
+		fmt    metadataFormat
+		parsed map[string]any
+		raw    string
+		score  float64
+	}
+
+	var aesIndices []int
+	var aesList []string
+	items := make([]classifiedItem, len(entries))
+
+	for i, e := range entries {
+		score := 0.0
+		if i < len(scores) {
+			score = scores[i].Score
+		}
+		f, parsed := classifyMetadata(e.Data)
+		items[i] = classifiedItem{idx: i, fmt: f, parsed: parsed, raw: e.Data, score: score}
+
+		if f == fmtAESEnvelope {
+			aesIndices = append(aesIndices, i)
+			aesList = append(aesList, e.Data)
+		}
+	}
+
+	// Batch decrypt AES envelopes
+	if len(aesList) > 0 && s.Vault != nil {
+		decrypted, err := s.Vault.DecryptMetadata(ctx, aesList)
+		if err != nil {
+			slog.Warn("batch decrypt failed, trying per-entry", "err", err)
+			for j, aesIdx := range aesIndices {
+				single, singleErr := s.Vault.DecryptMetadata(ctx, []string{aesList[j]})
+				if singleErr == nil && len(single) > 0 {
+					var parsed map[string]any
+					if json.Unmarshal([]byte(single[0]), &parsed) == nil {
+						items[aesIdx].parsed = parsed
+						items[aesIdx].fmt = fmtPlainJSON
+					}
+				}
+			}
+		} else {
+			for j, aesIdx := range aesIndices {
+				if j < len(decrypted) {
+					var parsed map[string]any
+					if json.Unmarshal([]byte(decrypted[j]), &parsed) == nil {
+						items[aesIdx].parsed = parsed
+						items[aesIdx].fmt = fmtPlainJSON
+					}
+				}
+			}
+		}
+	}
+
+	// Convert to SearchHits
+	var hits []domain.SearchHit
+	for _, item := range items {
+		if item.parsed == nil {
+			continue // unrecognized or  failed
+		}
+		hits = append(hits, toSearchHit(item.parsed, item.score))
+	}
+
+	return hits, nil
 }
 
 // toSearchHit — Python: searcher.py:L472-521 _to_search_result.
-// Field paths (bit-identical):
-//   - id fallback chain: metadata["id"] → raw["id"] → "unknown"
-//   - title: default "Untitled"
-//   - domain: default "general"
-//   - status: default "unknown"
-//   - certainty: NESTED metadata["why"]["certainty"], default "unknown"
-//   - payload_text: domain.ExtractPayloadText (strict v2.1, D32)
-//   - group fields optional (group_id / group_type / phase_seq / phase_total)
-func toSearchHit(entry envector.MetadataEntry, metadata map[string]any, score float64) domain.SearchHit {
-	// TODO: bit-identical per searcher.py:L472-521
-	return domain.SearchHit{}
+func toSearchHit(metadata map[string]any, score float64) domain.SearchHit {
+	h := domain.SearchHit{
+		RecordID:    strFromMap(metadata, "id", "unknown"),
+		Title:       strFromMap(metadata, "title", "Untitled"),
+		Domain:      strFromMap(metadata, "domain", "general"),
+		Status:      strFromMap(metadata, "status", "unknown"),
+		Score:       score,
+		Metadata:    metadata,
+		PayloadText: domain.ExtractPayloadText(metadata),
+	}
+
+	if why, ok := metadata["why"].(map[string]any); ok {
+		h.Certainty = strFromMap(why, "certainty", "unknown")
+	} else {
+		h.Certainty = "unknown"
+	}
+
+	if ri, ok := metadata["reusable_insight"].(string); ok {
+		h.ReusableInsight = ri
+	}
+
+	// Optional fileds
+	if gid, ok := metadata["group_id"].(string); ok && gid != "" {
+		h.GroupID = &gid
+	}
+	if gt, ok := metadata["group_type"].(string); ok && gt != "" {
+		h.GroupType = &gt
+	}
+	if ps, ok := metadata["phase_seq"].(float64); ok {
+		v := int(ps)
+		h.PhaseSeq = &v
+	}
+	if pt, ok := metadata["phase_total"].(float64); ok {
+		v := int(pt)
+		h.PhaseTotal = &v
+	}
+
+	return h
+}
+
+func strFromMap(m map[string]any, key, def string) string {
+	if v, ok := m[key].(string); ok && v != "" {
+		return v
+	}
+	return def
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Phase 6 — group expansion, filters (Python-specific logic)
+// Phase 6 — group expansion, filters
 // ─────────────────────────────────────────────────────────────────────────────
 
 // expandPhaseChains — Python: searcher.py:L306-365 _expand_phase_chains.
-// Detects phase groups with missing siblings (phase_total > present count),
-// picks max 2 groups, re-searches with "Group: {gid}" query, merges in phase order.
-//
-// Issues 4 additional RPCs per expanded group (embedder + searchSingle).
-// MVP keeps this (D27); Post-MVP perf eval.
 func (s *RecallService) expandPhaseChains(ctx context.Context, results []domain.SearchHit, origVec []float32) []domain.SearchHit {
-	// TODO: per recall.md Phase 6 Step 1
+	type groupInfo struct {
+		gid       string
+		total     int
+		present   int
+		bestScore float64
+	}
+
+	groups := make(map[string]*groupInfo)
+	for _, h := range results {
+		if h.GroupID == nil {
+			continue
+		}
+		gid := *h.GroupID
+		g, ok := groups[gid]
+		if !ok {
+			total := 0
+			if h.PhaseTotal != nil {
+				total = *h.PhaseTotal
+			}
+			g = &groupInfo{gid: gid, total: total}
+			groups[gid] = g
+		}
+		g.present++
+		if h.Score > g.bestScore {
+			g.bestScore = h.Score
+		}
+	}
+
+	// Pick max 2 groups with missing siblings
+	var incomplete []*groupInfo
+	for _, g := range groups {
+		if g.total > g.present {
+			incomplete = append(incomplete, g)
+		}
+	}
+	sort.Slice(incomplete, func(i, j int) bool {
+		return incomplete[i].bestScore > incomplete[j].bestScore
+	})
+	if len(incomplete) > 2 {
+		incomplete = incomplete[:2]
+	}
+
+	// Search again for missing siblings
+	seen := make(map[string]bool)
+	for _, h := range results {
+		seen[h.RecordID] = true
+	}
+
+	for _, g := range incomplete {
+		query := fmt.Sprintf("Group: %s", g.gid)
+		vec, err := s.Embedder.EmbedSingle(ctx, query)
+		if err != nil {
+			continue
+		}
+		hits, err := s.searchSingle(ctx, vec, g.total)
+		if err != nil {
+			continue
+		}
+		for _, h := range hits {
+			if !seen[h.RecordID] && h.GroupID != nil && *h.GroupID == g.gid {
+				seen[h.RecordID] = true
+				results = append(results, h)
+			}
+		}
+	}
+
 	return results
 }
 
 // assembleGroups — Python: searcher.py:L178-226 _assemble_groups.
-// Groups hits by group_id (best_score per group) + standalone hits.
-// Interleaves sorted by best_score desc; phase_seq asc within group.
 func (s *RecallService) assembleGroups(results []domain.SearchHit) []domain.SearchHit {
-	// TODO: per recall.md Phase 6 Step 2
-	return results
+	type group struct {
+		hits      []domain.SearchHit
+		bestScore float64
+	}
+
+	groups := make(map[string]*group)
+	var standalone []domain.SearchHit
+
+	for _, h := range results {
+		if h.GroupID != nil {
+			gid := *h.GroupID
+			g, ok := groups[gid]
+			if !ok {
+				g = &group{}
+				groups[gid] = g
+			}
+			g.hits = append(g.hits, h)
+			if h.Score > g.bestScore {
+				g.bestScore = h.Score
+			}
+		} else {
+			standalone = append(standalone, h)
+		}
+	}
+
+	type scoredGroup struct {
+		gid   string
+		g     *group
+		score float64
+	}
+
+	var sorted []scoredGroup
+	for gid, g := range groups {
+		// Sort by phase_seq per group
+		sort.SliceStable(g.hits, func(i, j int) bool {
+			si, sj := 0, 0
+			if g.hits[i].PhaseSeq != nil {
+				si = *g.hits[i].PhaseSeq
+			}
+			if g.hits[j].PhaseSeq != nil {
+				sj = *g.hits[j].PhaseSeq
+			}
+			return si < sj
+		})
+
+		sorted = append(sorted, scoredGroup{gid: gid, g: g, score: g.bestScore})
+	}
+
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].score > sorted[j].score
+	})
+
+	sort.SliceStable(standalone, func(i, j int) bool {
+		return standalone[i].Score > standalone[j].Score
+	})
+
+	var assembled []domain.SearchHit
+	gi, si := 0, 0
+	for gi < len(sorted) || si < len(standalone) {
+		groupScore := -1.0
+		standScore := -1.0
+		if gi < len(sorted) {
+			groupScore = sorted[gi].score
+		}
+		if si < len(standalone) {
+			standScore = standalone[si].Score
+		}
+		if groupScore >= standScore {
+			assembled = append(assembled, sorted[gi].g.hits...)
+			gi++
+		} else {
+			assembled = append(assembled, standalone[si])
+			si++
+		}
+	}
+
+	return assembled
+}
+
+// applyMetadataFilters — Python: searcher.py:L228-252 _apply_metadata_filters.
+func (s *RecallService) applyMetadataFilters(results []domain.SearchHit, f Filters) []domain.SearchHit {
+	var filtered []domain.SearchHit
+	for _, h := range results {
+		if f.Domain != nil && h.Domain != *f.Domain {
+			continue
+		}
+		if f.Status != nil && h.Status != *f.Status {
+			continue
+		}
+		if f.Since != nil {
+			ts := ""
+			if m := h.Metadata; m != nil {
+				if t, ok := m["timestamp"].(string); ok {
+					ts = t
+				}
+			}
+
+			// Keep record without timestamp (port from Python version)
+			if ts != "" && ts < *f.Since {
+				continue
+			}
+		}
+		filtered = append(filtered, h)
+	}
+	return filtered
 }
 
 // Filters — user-supplied filter args (subset of RecallArgs).
@@ -177,32 +539,88 @@ type Filters struct {
 	Since  *string // ISO date "YYYY-MM-DD"
 }
 
-// applyMetadataFilters — Python: searcher.py:L228-252 _apply_metadata_filters.
-// domain + status equality + since ISO date lex comparison.
-// No-timestamp records are kept (Python behavior).
-func (s *RecallService) applyMetadataFilters(results []domain.SearchHit, f Filters) []domain.SearchHit {
-	// TODO: per recall.md Phase 6 Step 3
-	return results
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 7 — response build
 // ─────────────────────────────────────────────────────────────────────────────
 
 // buildResult — Python: server.py:L950-990 agent-delegated path.
-// Includes calculateConfidence (L393-412) + top-5 sources.
-// Synthesized = false fixed (D28).
 func (s *RecallService) buildResult(results []domain.SearchHit) *domain.RecallResult {
-	// TODO: per recall.md Phase 7
-	return nil
+	confidence := calculateConfidence(results)
+
+	entries := make([]domain.RecallEntry, len(results))
+	for i, h := range results {
+		entry := domain.RecallEntry{
+			RecordID:        h.RecordID,
+			Title:           h.Title,
+			Domain:          h.Domain,
+			Certainty:       h.Certainty,
+			Status:          h.Status,
+			Score:           h.Score,
+			AdjustedScore:   h.AdjustedScore,
+			ReusableInsight: h.ReusableInsight,
+			PayloadText:     h.PayloadText,
+			GroupID:         h.GroupID,
+			GroupType:       h.GroupType,
+			PhaseSeq:        h.PhaseSeq,
+			PhaseTotal:      h.PhaseTotal,
+		}
+		entries[i] = entry
+	}
+
+	sourceCount := 5
+	if len(results) < sourceCount {
+		sourceCount = len(results)
+	}
+
+	sources := make([]domain.RecallSource, sourceCount)
+	for i := 0; i < sourceCount; i++ {
+		sources[i] = domain.RecallSource{
+			RecordID: results[i].RecordID,
+			Title:    results[i].Title,
+		}
+	}
+
+	return &domain.RecallResult{
+		OK:          true,
+		Found:       len(results),
+		Results:     entries,
+		Confidence:  confidence,
+		Sources:     sources,
+		Synthesized: false,
+	}
 }
 
 // calculateConfidence — Python: server.py:L393-412.
-// See internal/policy/rerank.go for formula docs (may migrate here if unused elsewhere).
 // Top-5 weighted sum / 2.0 clamp 1.0 round 2 decimals.
-// "/2.0" is the approximate normalization for the harmonic partial sum of
-// (1 + 1/2 + 1/3 + 1/4 + 1/5 ≈ 2.283); see docs/v04/spec/flows/recall.md Phase 7.
 func calculateConfidence(results []domain.SearchHit) float64 {
-	// TODO
-	return 0
+	if len(results) == 0 {
+		return 0
+	}
+
+	certaintyWeights := map[string]float64{
+		"supported":            1.0,
+		"partially_supported":  0.6,
+		"unknown":              0.3,
+	}
+
+	totalScore := 0.0
+	limit := 5
+	if len(results) < limit {
+		limit = len(results)
+	}
+
+	for i := 0; i < limit; i++ {
+		r := results[i]
+		positionWeight := 1.0 / float64(i+1)
+		certWeight := 0.3
+		if w, ok := certaintyWeights[r.Certainty]; ok {
+			certWeight = w
+		}
+		weight := positionWeight * certWeight * r.Score
+		totalScore += weight
+	}
+
+	conf := math.Min(1.0, totalScore/2.0)
+
+	return math.Round(conf*100) / 100
 }

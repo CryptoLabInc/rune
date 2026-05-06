@@ -1,6 +1,12 @@
 package service
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
 
 // EnvectorErrorType — envector probe error classification.
 // Python: server.py:L655-672 (string pattern matching — Python).
@@ -25,23 +31,22 @@ const (
 //	DEADLINE_EXCEEDED                  → deadline_exceeded
 //	other                              → unknown
 //
-// Hints (Python exact strings, keep bit-identical for schema):
-//   - connection_refused: "Check that envector Cloud is reachable (network / endpoint)."
-//   - auth_failure:       "Check envector API key in Vault bundle."
-//   - deadline_exceeded:  "envector RPC timed out; server may be overloaded."
-//   - timeout:            "Health check timed out after N s."
-//   - unknown:            "Unexpected envector error; see logs."
+// Hints (Python exact strings, keep bit-identical for schema)
+// XXX: it seems that ErrDeadlineExcceded can cover ErrTimeout
 func ClassifyEnvectorError(err error, elapsed time.Duration) (EnvectorErrorType, string) {
-	// TODO:
-	//  st, ok := status.FromError(err)
-	//  if !ok → unknown
-	//  switch st.Code() {
-	//  case codes.Unavailable:       → connection_refused
-	//  case codes.Unauthenticated:   → auth_failure
-	//  case codes.DeadlineExceeded:  → deadline_exceeded
-	//  default:                      → unknown
-	//  }
-	_ = err
-	_ = elapsed
-	return EnvErrUnknown, ""
+	st, ok := status.FromError(err)
+	if !ok {
+		return EnvErrUnknown, fmt.Sprintf("Unexpected envector error (%.1fms): %v", float64(elapsed.Milliseconds()), err)
+	}
+
+	switch st.Code() {
+	case codes.Unavailable:
+		return EnvErrConnectionRefused, "Check that the enVector endpoint is correct and reachable from this machine"
+	case codes.Unauthenticated:
+		return EnvErrAuthFailure, "enVector API key may be invalid or expired"
+	case codes.DeadlineExceeded:
+		return EnvErrDeadlineExceeded, "The enVector gRPC deadline was exceeded. Run /rune:activate to pre-warm, then retry /rune:status"
+	default:
+		return EnvErrUnknown, "Run /rune:activate to reinitialize the connection, or check network connectivity"
+	}
 }

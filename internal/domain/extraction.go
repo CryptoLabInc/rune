@@ -1,5 +1,11 @@
 package domain
 
+import (
+	"fmt"
+	"math"
+	"strings"
+)
+
 // Agent extraction types (ExtractionResult hierarchy).
 // Spec: docs/v04/spec/types.md §3a.
 // Python: agents/scribe/llm_extractor.py:L28-70 — types only in agent-delegated mode.
@@ -55,16 +61,186 @@ func (r *ExtractionResult) IsBundle() bool {
 	return r.GroupType == "bundle" && len(r.Phases) > 1
 }
 
+
 // ParseExtractionFromAgent builds Detection + ExtractionResult from the flat
 // CaptureRequest.Extracted dict sent by the agent. Wire → internal conversion.
 //
 // Mapping table: docs/v04/spec/types.md §3a.4.
 // Python reference: mcp/server/server.py:L1244-1324 (_capture_single).
-//
-// TODO: extract tier2.{capture,reason,domain} into Detection;
-//	extract remaining fields into ExtractionResult;
-//	handle single vs phases dispatch.
 func ParseExtractionFromAgent(extracted map[string]any) (*Detection, *ExtractionResult, error) {
-	// TODO: implement per types.md §3a.4 mapping table
-	return &Detection{}, &ExtractionResult{}, nil
+	if extracted == nil {
+		return nil, nil, fmt.Errorf("extracted JSON is nil")
+	}
+
+	// Tier 2 detection
+	tier2, _ := extracted["tier2"].(map[string]any)
+	detection := &Detection{
+		IsSignificant: true, // agent-delegated: always true
+		Domain:        "general",
+	}
+
+	if tier2 != nil {
+		// capture=false: early rejection
+		if capture, ok := tier2["capture"].(bool); ok && !capture {
+			reason, _ := tier2["reason"].(string)
+			return detection, nil, &CaptureRejection{Reason: reason}
+		}
+		if dom, ok := tier2["domain"].(string); ok && dom != "" {
+			detection.Domain = dom
+		}
+	}
+
+	// Confidence: top-level or 0.0
+	agentConfidence := 0.0
+	if c, ok := extracted["confidence"].(float64); ok {
+		agentConfidence = math.Max(0.0, math.Min(1.0, c))
+	}
+	detection.Confidence = agentConfidence
+
+	var conf *float64
+	if agentConfidence > 0.0 {
+		conf = &agentConfidence
+	}
+
+	phasesRaw, hasPhases := extracted["phases"].([]any)
+
+	if hasPhases && len(phasesRaw) > 1 {
+		// Multi-phase or record bundle
+		var phases []PhaseExtractedFields
+		for i, pRaw := range phasesRaw {
+			if i >= 7 {
+				break
+			}
+			p, ok := pRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			phases = append(phases, PhaseExtractedFields{
+				PhaseTitle:     truncRunes(strVal(p, "phase_title"), MaxTitleLen),
+				PhaseDecision:  strVal(p, "phase_decision"),
+				PhaseRationale: strVal(p, "phase_rationale"),
+				PhaseProblem:   strVal(p, "phase_problem"),
+				Alternatives:   strSlice(p, "alternatives"),
+				TradeOffs:      strSlice(p, "trade_offs"),
+				Tags:           lowerStrSlice(p, "tags"),
+			})
+		}
+
+		reusableInsight := strVal(extracted, "reusable_insight")
+		if reusableInsight == "" {
+			reusableInsight = strVal(extracted, "group_title")
+		}
+
+		return detection, &ExtractionResult{
+			GroupTitle:   truncRunes(strVal(extracted, "group_title"), MaxTitleLen),
+			GroupType:    strVal(extracted, "group_type"),
+			GroupSummary: reusableInsight,
+			StatusHint:   strings.ToLower(strVal(extracted, "status_hint")),
+			Tags:         lowerStrSlice(extracted, "tags"),
+			Confidence:   conf,
+			Phases:       phases,
+		}, nil
+	}
+
+	// Single record
+	var single ExtractedFields
+	if hasPhases && len(phasesRaw) == 1 {
+		p, ok := phasesRaw[0].(map[string]any)
+		if ok {
+			single = ExtractedFields{
+				Title:        truncRunes(strVal2(p, "phase_title", strVal(extracted, "title")), MaxTitleLen),
+				Rationale:    strVal2(p, "phase_rationale", strVal(extracted, "rationale")),
+				Problem:      strVal2(p, "phase_problem", strVal(extracted, "problem")),
+				Alternatives: strSlice(p, "alternatives"),
+				TradeOffs:    strSlice(p, "trade_offs"),
+				StatusHint:   strings.ToLower(strVal(extracted, "status_hint")),
+				Tags:         lowerStrSliceOr(p, "tags", lowerStrSlice(extracted, "tags")),
+			}
+		}
+	} else {
+		single = ExtractedFields{
+			Title:        truncRunes(strVal(extracted, "title"), MaxTitleLen),
+			Rationale:    strVal(extracted, "rationale"),
+			Problem:      strVal(extracted, "problem"),
+			Alternatives: strSlice(extracted, "alternatives"),
+			TradeOffs:    strSlice(extracted, "trade_offs"),
+			StatusHint:   strings.ToLower(strVal(extracted, "status_hint")),
+			Tags:         lowerStrSlice(extracted, "tags"),
+		}
+	}
+
+	reusableInsight := strVal(extracted, "reusable_insight")
+
+	return detection, &ExtractionResult{
+		GroupTitle:   single.Title,
+		GroupSummary: reusableInsight,
+		StatusHint:   single.StatusHint,
+		Tags:         single.Tags,
+		Confidence:   conf,
+		Single:       &single,
+	}, nil
+}
+
+type CaptureRejection struct {
+	Reason string
+}
+
+func (e *CaptureRejection) Error() string {
+	if e.Reason != "" {
+		return "capture rejected: " + e.Reason
+	}
+	return "capture rejected by agent"
+}
+
+//--- Helper ---//
+
+func strVal(m map[string]any, key string) string {
+	v, _ := m[key].(string)
+	return v
+}
+
+func strVal2(m map[string]any, key, fallback string) string {
+	v := strVal(m, key)
+	if v != "" {
+		return v
+	}
+	return fallback
+}
+
+func strSlice(m map[string]any, key string) []string {
+	raw, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, item := range raw {
+		if s, ok := item.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func lowerStrSlice(m map[string]any, key string) []string {
+	raw := strSlice(m, key)
+	for i, s := range raw {
+		raw[i] = strings.ToLower(s)
+	}
+	return raw
+}
+
+func lowerStrSliceOr(m map[string]any, key string, fallback []string) []string {
+	result := lowerStrSlice(m, key)
+	if len(result) > 0 {
+		return result
+	}
+	return fallback
+}
+
+func truncRunes(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) > maxRunes {
+		runes = runes[:maxRunes]
+	}
+	return string(runes)
 }
