@@ -46,15 +46,85 @@ var (
 //	<other / non-gRPC>  → ErrVaultInternal
 //
 // Returns nil for nil input.
-// TODO: implement with google.golang.org/grpc/{status,codes}.
-//
-//	st, ok := status.FromError(err)
-//	if !ok { return &Error{Code: ErrVaultInternal.Code, Retryable: true, Cause: err} }
-//	switch st.Code() { ... }
 func MapGRPCError(err error) error {
 	if err == nil {
 		return nil
 	}
-	// TODO: per spec/components/vault.md §에러 분류
-	return err
+
+	st, ok := statusFromError(err)
+	if !ok {
+		return &Error{
+			Code:      ErrVaultInternal.Code,
+			Message:   err.Error(),
+			Retryable: true,
+			Cause:     err,
+		}
+	}
+
+	switch st.code {
+	case codeUnauthenticated:
+		return &Error{
+			Code:      ErrVaultAuthFailed.Code,
+			Message:   st.message,
+			Retryable: false,
+			Cause:     err,
+		}
+	case codeNotFound:
+		return &Error{
+			Code:      ErrVaultKeyNotFound.Code,
+			Message:   st.message,
+			Retryable: false,
+			Cause:     err,
+		}
+	case codeUnavailable:
+		return &Error{
+			Code:      ErrVaultUnavailable.Code,
+			Message:   st.message,
+			Retryable: true,
+			Cause:     err,
+		}
+	case codeDeadlineExceeded:
+		return &Error{
+			Code:      ErrVaultTimeout.Code,
+			Message:   st.message,
+			Retryable: true,
+			Cause:     err,
+		}
+	default:
+		return &Error{
+			Code:      ErrVaultInternal.Code,
+			Message:   st.message,
+			Retryable: true,
+			Cause:     err,
+		}
+	}
+}
+
+type grpcStatus struct {
+	code    int
+	message string
+}
+
+// ref: google.golang.org/grpc/codes
+const (
+	codeUnauthenticated  = 16
+	codeNotFound         = 5
+	codeUnavailable      = 14
+	codeDeadlineExceeded = 4
+)
+
+func statusFromError(err error) (grpcStatus, bool) {
+	type grpcStatuser interface {
+		GRPCStatus() interface {
+			Code() int
+			Message() string
+		}
+	}
+
+	if gs, ok := err.(grpcStatuser); ok {
+		st := gs.GRPCStatus()
+		return grpcStatus{code: st.Code(), message: st.Message()}, true
+	}
+
+	return grpcStatus{}, false
 }
