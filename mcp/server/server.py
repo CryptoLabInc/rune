@@ -41,6 +41,34 @@ class _SensitiveFilter(logging.Filter):
 
 
 logger.addFilter(_SensitiveFilter())
+
+# Optional file log for diagnosing background-thread issues that Claude
+# Code's MCP console doesn't always capture cleanly. Off by default.
+#   RUNE_MCP_DEBUG_LOG=1       -> INFO level (lifecycle + errors)
+#   RUNE_MCP_DEBUG_LOG=debug   -> DEBUG level (verbose, includes httpx traces)
+if os.environ.get("RUNE_MCP_DEBUG_LOG"):
+    try:
+        from logging.handlers import RotatingFileHandler
+        _debug_log = os.path.expanduser("~/.rune/mcp-server.log")
+        os.makedirs(os.path.dirname(_debug_log), exist_ok=True)
+        _fh = RotatingFileHandler(_debug_log, maxBytes=5_000_000, backupCount=3)
+        _level = (
+            logging.DEBUG
+            if os.environ["RUNE_MCP_DEBUG_LOG"].lower() == "debug"
+            else logging.INFO
+        )
+        _fh.setLevel(_level)
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(threadName)s] %(levelname)s %(name)s: %(message)s"
+        ))
+        _fh.addFilter(_SensitiveFilter())
+        _root = logging.getLogger()
+        _root.addHandler(_fh)
+        if _root.level == 0 or _root.level > _level:
+            _root.setLevel(_level)
+    except Exception:
+        pass
+
 from pydantic import Field
 
 # Add parent directory (rune/mcp/) to sys.path so `from adapter import ...` works
@@ -317,11 +345,21 @@ def fetch_keys_from_vault(
                 asyncio.run,
                 _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable),
             )
+            # gRPC GetPublicKey has a 90s deadline; add buffer for thread/
+            # asyncio/TLS overhead so a slow-but-eventually-OK fetch returns
+            # its real result. The `with` block already waits on shutdown,
+            # so a longer timeout costs nothing on the success path.
             try:
-                return future.result(timeout=30)
+                return future.result(timeout=120)
             except concurrent.futures.TimeoutError:
-                logger.error("Vault key fetch timed out after 30 seconds")
-                return _fail
+                logger.warning(
+                    "Vault key fetch exceeded 120s — waiting briefly for in-flight call"
+                )
+                try:
+                    return future.result(timeout=30)
+                except Exception as e:
+                    logger.error(f"Vault key fetch ultimately failed: {e}")
+                    return _fail
             except Exception as e:
                 logger.error(f"Vault key fetch failed in thread: {e}")
                 return _fail
