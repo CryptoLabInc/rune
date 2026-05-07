@@ -34,8 +34,15 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// Applied on both MaxCallRecvMsgSize and MaxCallSendMsgSize
-const MaxMessageLength = 16 * 1024 * 1024
+// MaxMessageLength — 256MB applied on both MaxCallRecvMsgSize and MaxCallSendMsgSize.
+// Python parity: vault_client.py:L33 + spec/components/vault.md §256MB.
+//
+// Even with EvalKey no longer included in the manifest (Vault now owns
+// EvalKey/SecKey server-side), the manifest_json still carries EncKey JSON
+// content which can be on the order of MBs depending on FHE parameters.
+// Keeping the cap at 256MB matches Python's grpcio settings and avoids
+// future ResourceExhausted surprises if EncKey size grows.
+const MaxMessageLength = 256 * 1024 * 1024
 
 // DefaultTimeout — Python vault_client.py:L84 (all RPCs: 30s)
 const DefaultTimeout = 30 * time.Second
