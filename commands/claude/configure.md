@@ -1,24 +1,31 @@
 ---
-description: Configure Rune — sets up Python environment, collects credentials, registers MCP servers
-allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(mkdir:*), Bash(chmod:*), Bash(bash:*), Bash(scripts/*), Bash(timeout:*), Bash(curl:*), Read, Write, AskUserQuestion, Edit, mcp__envector__reload_pipelines
+description: Configure Rune — collect Vault credentials and write ~/.rune/config.json (Go v0.4)
+allowed-tools: Bash(mkdir:*), Bash(chmod:*), Bash(cp:*), Bash(test:*), Read, Write, AskUserQuestion, Edit, mcp__envector__reload_pipelines
 ---
 
-# /rune:configure — Full Setup & Configuration
+# /rune:configure — Setup & Configuration
 
-Single entrypoint after `claude plugin install rune`. Handles environment setup, credential collection, config generation, MCP server registration, and auto-activation.
+Single entry after `claude plugin install rune`. Collects Vault credentials,
+writes `~/.rune/config.json`, and triggers `reload_pipelines` to bring Rune
+online.
+
+In v0.4 the MCP server is a single Go binary
+(`${CLAUDE_PLUGIN_ROOT}/bin/rune-mcp`) that Claude Code auto-spawns from the
+plugin manifest. There is no Python venv, no install script, and no separate
+`claude mcp add` step.
 
 ## Quick Update Mode
 
 If $ARGUMENTS contains any of: `--vault-token`, `--vault-endpoint`:
 
-1. Read existing `~/.rune/config.json`
+1. Read existing `~/.rune/config.json`.
    - If not found: respond "Not configured yet. Run `/rune:configure` without arguments first." and stop.
 2. Update only the specified field(s):
    - `--vault-token <value>` → `vault.token`
    - `--vault-endpoint <value>` → `vault.endpoint` (auto-prepend `tcp://` if no scheme)
-3. Write back to `~/.rune/config.json` with `chmod 600`
-4. Update `metadata.lastUpdated` to current ISO timestamp
-5. If state is "active", call `reload_pipelines` MCP tool to apply changes
+3. Write back to `~/.rune/config.json` with `chmod 600`.
+4. Update `metadata.lastUpdated` to current ISO timestamp.
+5. Call `reload_pipelines` to apply.
 6. Show: "Updated [field]. Use `/rune:status` to verify."
 
 Skip all steps below.
@@ -27,124 +34,112 @@ Skip all steps below.
 
 ## Full Setup Steps
 
-### 1. Detect Plugin Root
+### 1. Collect Credentials (conversational, via AskUserQuestion)
 
-Find where the plugin is installed:
+If `~/.rune/config.json` already exists, show current values (mask token), ask
+if the user wants to reconfigure. If they decline, skip to Step 4 (reload only).
 
-```bash
-PLUGIN_ROOT=$(find ~/.claude/plugins/cache -name "plugin.json" -path "*/rune/*" -exec dirname {} \; 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
-```
+Ask each credential one at a time:
 
-- If empty: also check the current working directory and its parents for `.claude-plugin/plugin.json`
-- If still not found: respond "Rune plugin not found. Run `claude plugin install rune` first." and stop.
+- **Vault Endpoint** (required, format: `tcp://<host>:50051`).
+  Auto-prepend `tcp://` when the user enters a value without a scheme prefix.
+  Example: `vault.example.com:50051` → `tcp://vault.example.com:50051`
+- **Vault Token** (required, format: `evt_xxx...`).
 
-### 2. Setup Python Environment (automatic)
+### 2. TLS Choice
 
-Check if `$PLUGIN_ROOT/.venv` exists.
+Ask: "How does your Vault server handle TLS?"
 
-- If it exists: skip to Step 3.
-- If missing: run `bash $PLUGIN_ROOT/scripts/install.sh`
-  - This creates the venv and installs dependencies (non-interactive).
-  - If it fails (e.g. Python < 3.12): show the error output and stop.
-  - Show progress: "Setting up Python environment..."
-
-### 3. Collect Credentials (conversational)
-
-Check if `~/.rune/config.json` already exists.
-- If it exists: read and show current values (masked API keys), ask user if they want to reconfigure.
-- If user declines: skip to Step 5.
-
-Ask user for each credential one at a time:
-- **Vault Endpoint** (required, format: `tcp://vault-TEAM.oci.envector.io:50051`)
-  - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
-  - Example: user enters `vault.example.com:50051` → store as `tcp://vault.example.com:50051`
-- **Vault Token** (required, format: `evt_xxx`)
-
-Then ask the TLS question:
-
-**"How does your Vault server handle TLS?"**
-
-1. **Self-signed certificate** — "My team uses a self-signed CA (provide CA cert path)"
-   - Follow-up: "Enter the path to your CA certificate PEM file:"
-   - Support `~` expansion in the path
-   - Copy the file to `~/.rune/certs/ca.pem` (`cp <user_path> ~/.rune/certs/ca.pem && chmod 600 ~/.rune/certs/ca.pem`)
-   - If copy fails (file not found, permission denied), show error and ask again
-   - Inform user: "CA certificate copied to ~/.rune/certs/ca.pem"
-   - → config: `ca_cert: "~/.rune/certs/ca.pem"`, `tls_disable: false`
-
-2. **Public CA (default)** — "Vault uses a publicly-signed certificate (e.g., Let's Encrypt)"
-   - No additional input needed, system CA handles verification
+1. **Self-signed certificate** (Recommended) — team uses a self-signed CA.
+   - Follow-up: "Path to CA certificate PEM file:" (support `~` expansion).
+   - Copy via:
+     ```bash
+     mkdir -p ~/.rune/certs && chmod 700 ~/.rune
+     cp <user_path> ~/.rune/certs/ca.pem
+     chmod 600 ~/.rune/certs/ca.pem
+     ```
+   - If the cp fails (file not found, permission denied), surface the error
+     and ask for a path the current user can read. Common fix:
+     `sudo cp /opt/runevault/certs/ca.pem ~/.rune/ca.pem && sudo chown $USER ~/.rune/ca.pem`.
+   - → config: `ca_cert: "<HOME>/.rune/certs/ca.pem"`, `tls_disable: false`
+2. **Public CA** (Let's Encrypt etc.) — system CA pool handles verification.
    - → config: `ca_cert: ""`, `tls_disable: false`
-
-3. **No TLS** — "Connect without TLS (not recommended — traffic is unencrypted)"
-   - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
+3. **No TLS** — local dev only. Vault must also be running with
+   `server.grpc.tls.disable: true` — `install-dev.sh`'s default does NOT do
+   this, so this option only works when the user has explicitly disabled TLS
+   on the Vault side.
+   - Warn: "Plaintext gRPC. Make sure your Vault server has tls.disable: true."
    - → config: `ca_cert: ""`, `tls_disable: true`
 
-### 4. Write ~/.rune/config.json
+### 3. Write ~/.rune/config.json
 
 ```bash
 mkdir -p ~/.rune && chmod 700 ~/.rune
 ```
 
-Write the config file:
+Write:
 ```json
 {
-  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>", "ca_cert": "<ca_cert_path or empty>", "tls_disable": false},
-  "state": "dormant",
-  "metadata": {"configVersion": "2.0", "lastUpdated": "<ISO timestamp>", "installedFrom": "<PLUGIN_ROOT>"}
+  "vault": {
+    "endpoint": "<vault_endpoint>",
+    "token": "<vault_token>",
+    "ca_cert": "<ca_cert_path or empty>",
+    "tls_disable": <true|false>
+  },
+  "state": "active",
+  "metadata": {
+    "configVersion": "2.0",
+    "lastUpdated": "<ISO timestamp>"
+  }
 }
 ```
 
-Note: enVector credentials are no longer stored locally — they are delivered automatically via the Vault bundle at session start.
+Then `chmod 600 ~/.rune/config.json`.
 
-Then: `chmod 600 ~/.rune/config.json`
+Note: enVector credentials (endpoint, API key, EvalKey, SecKey) are not
+stored locally — Vault delivers them via the agent manifest on first
+connection.
 
-### 5. Register MCP Servers
+### 4. Trigger Boot Loop
 
-Run: `bash $PLUGIN_ROOT/scripts/configure-claude-mcp.sh`
+Call `mcp__envector__reload_pipelines`. This re-runs the boot loop:
 
-This registers the envector MCP server via `claude mcp add --scope user` (Claude Code) and JSON merge (Claude Desktop).
+1. Dial Vault (TLS or plaintext per config) and call `GetAgentManifest`.
+2. Persist the returned `EncKey` to `~/.rune/keys/<keyID>/EncKey.json`.
+3. Dial runed at `~/.runed/embedding.sock` (or `RUNE_EMBEDDER_SOCKET`).
+4. Connect to enVector cluster using the bundle endpoint + API key.
+5. Open the team index.
 
-### 6. Infrastructure Validation (no auto-activate)
+If `reload_pipelines` returns an error or state stays dormant:
+- Surface the message — it is the boot loop's `LastError`.
+- Common causes:
+  - Vault unreachable — verify `endpoint` reachable from this host.
+  - Token invalid / role lacks permission — re-issue with
+    `runevault token issue --user <name> --role member`.
+  - runed not running — start the embedding daemon.
+  - enVector cluster unreachable — check the cluster's external
+    connectivity from this host.
+  - **Known issue**: `LifecycleService.ReloadPipelines` doesn't yet re-spawn
+    `RunBootLoop` on a terminal Dormant state. If the MCP server booted
+    before `~/.rune/config.json` existed (very common on first
+    `/rune:configure`), restart Claude Code so the server picks up the
+    populated config.
+- Suggest `/rune:status` for the full health snapshot.
 
-**Important:** Do NOT change `state` to `"active"` here. Activation must happen via
-`/rune:activate`, which calls `reload_pipelines` on the already-connected MCP server
-to download the embedding model (~1.2GB) and initialize pipelines. If `state` is set
-to `"active"` without `reload_pipelines`, the next Claude Code restart will attempt
-model download during MCP server startup, exceeding the 30-second connection timeout.
+### 5. Completion Summary
 
-1. Run infrastructure validation:
-   - Check Vault connectivity by parsing the scheme from `vault.endpoint`:
-     - If `http://` or `https://`: `curl -sf <vault-endpoint>/health`
-     - If `tcp://`: extract host and port, then test TCP connectivity:
-       ```bash
-       python3 -c "import socket; s=socket.socket(); s.settimeout(10); s.connect(('<host>', <port>)); print('OK'); s.close()"
-       ```
-   - Check MCP server can import: `$PLUGIN_ROOT/.venv/bin/python3 -c "import mcp"`
-
-2. If all checks pass:
-   - Keep `state` as `"dormant"` (do NOT set to "active")
-   - Show: "Infrastructure validated. Run `/rune:activate` to enable organizational memory."
-
-3. If checks fail:
-   - Keep `state` as `"dormant"`
-   - Show what failed
-   - Suggest: "Fix the issues above, then run `/rune:activate`."
-
-### 7. Completion
-
-Show summary:
+Show:
 ```
 Rune Configuration Complete
 ============================
   Config    : ~/.rune/config.json
-  Plugin    : <PLUGIN_ROOT>
-  Python    : <PLUGIN_ROOT>/.venv
-  MCP       : registered via claude mcp add (user scope)
-  State     : <active|dormant>
-  Vault TLS : <enabled (system CA) | enabled (custom CA: <path>) | disabled>
+  Plugin    : ${CLAUDE_PLUGIN_ROOT}
+  Vault     : <endpoint>
+  TLS       : <enabled (system CA) | enabled (custom CA: <path>) | disabled>
+  State     : <active | dormant: <reason>>
 
 Next steps:
-  1. Restart Claude Code to load the MCP server
-  2. After restart, run /rune:activate to download the embedding model and enable
+  - /rune:status      — verify connection + pipeline health
+  - /rune:capture     — capture your first decision
+  - /rune:recall      — query organizational memory
 ```
