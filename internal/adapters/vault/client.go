@@ -34,8 +34,15 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// Applied on both MaxCallRecvMsgSize and MaxCallSendMsgSize
-const MaxMessageLength = 16 * 1024 * 1024
+// MaxMessageLength — 256MB applied on both MaxCallRecvMsgSize and MaxCallSendMsgSize.
+// Python parity: vault_client.py:L33 + spec/components/vault.md §256MB.
+//
+// Even with EvalKey no longer included in the manifest (Vault now owns
+// EvalKey/SecKey server-side), the manifest_json still carries EncKey JSON
+// content which can be on the order of MBs depending on FHE parameters.
+// Keeping the cap at 256MB matches Python's grpcio settings and avoids
+// future ResourceExhausted surprises if EncKey size grows.
+const MaxMessageLength = 256 * 1024 * 1024
 
 // DefaultTimeout — Python vault_client.py:L84 (all RPCs: 30s)
 const DefaultTimeout = 30 * time.Second
@@ -175,12 +182,26 @@ func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
 	}
 
 	slog.Info("vault: connected", "endpoint", normalized)
+	return newWithConn(normalized, token, conn), nil
+}
+
+// NewBufconnClient wraps an existing *grpc.ClientConn (e.g., from
+// google.golang.org/grpc/test/bufconn) so tests can exercise the same RPC
+// path without going through DNS / TLS / endpoint normalization.
+//
+// Production callers should prefer NewClient — this constructor intentionally
+// trusts whatever creds + options the conn was built with.
+func NewBufconnClient(conn *grpc.ClientConn, token string) Client {
+	return newWithConn("bufconn", token, conn)
+}
+
+func newWithConn(endpoint, token string, conn *grpc.ClientConn) *client {
 	return &client{
-		endpoint: normalized,
+		endpoint: endpoint,
 		token:    token,
 		conn:     conn,
 		stub:     vaultpb.NewVaultServiceClient(conn),
-	}, nil
+	}
 }
 
 func (c *client) authCtx(ctx context.Context) context.Context {
