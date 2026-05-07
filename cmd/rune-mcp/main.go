@@ -53,7 +53,17 @@ func main() {
 	}()
 
 	deps := buildDeps()
-	go lifecycle.RunBootLoop(ctx, deps.State)
+
+	// Wire ReloadPipelines → fresh RunBootLoop. Without this, the boot
+	// loop's first call to bootDormant returns and the goroutine exits;
+	// LifecycleService.ReloadPipelines (called by /rune:configure on a
+	// freshly-spawned MCP server with empty config) would then have no
+	// way to re-trigger the loop short of process restart.
+	deps.State.SetReloadFunc(func() {
+		go lifecycle.RunBootLoop(ctx, deps.State, deps)
+	})
+
+	go lifecycle.RunBootLoop(ctx, deps.State, deps)
 
 	srv := sdkmcp.NewServer(&sdkmcp.Implementation{
 		Name:    "rune-mcp",

@@ -70,6 +70,7 @@ type Manager struct {
 	state     atomic.Int32
 	lastError atomic.Value // string
 	attempts  atomic.Int32
+	onReload  atomic.Value // func()
 }
 
 // NewManager — initial state = Starting.
@@ -87,6 +88,43 @@ func (m *Manager) Current() State {
 // SetState — atomic store.
 func (m *Manager) SetState(s State) {
 	m.state.Store(int32(s))
+}
+
+// SetReloadFunc installs the callback that respawns the boot loop. main.go
+// wires this so service.LifecycleService.ReloadPipelines can ask for a
+// fresh attempt without taking a circular import dependency on
+// lifecycle.RunBootLoop.
+//
+// The callback should spawn a fresh RunBootLoop goroutine bound to the
+// long-lived ctx + the same Deps (BootAdapterInjector). Manager itself
+// does not invoke the callback unless Retrigger is called and state is
+// Dormant — see Retrigger.
+func (m *Manager) SetReloadFunc(f func()) {
+	m.onReload.Store(f)
+}
+
+// Retrigger respawns the boot loop only if no loop is currently running.
+//
+// Concretely it fires only when state is Dormant — the boot loop returns
+// after a terminal Dormant (config missing / not_configured /
+// vault_unconfigured / user_deactivated), so its goroutine has exited and
+// a re-spawn is safe. While state is Starting / WaitingForVault / Active
+// a goroutine is still active (retrying or already succeeded), so firing
+// would race; Retrigger silently no-ops in those cases — the existing
+// loop's progress is what the caller will observe via state polling.
+func (m *Manager) Retrigger() {
+	if m.Current() != StateDormant {
+		return
+	}
+	v := m.onReload.Load()
+	if v == nil {
+		return
+	}
+	f, ok := v.(func())
+	if !ok || f == nil {
+		return
+	}
+	f()
 }
 
 // LastError reports the most recent transient failure recorded by the boot

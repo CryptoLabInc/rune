@@ -498,6 +498,16 @@ const WarmupTimeout = 60 * time.Second
 // Until both land, /rune:activate cannot recover from dormant or trigger first-time
 // pipeline init.
 func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipelinesResult, error) {
+	// Dormant terminal: the boot loop has exited. Ask Manager to spawn a
+	// fresh attempt (Manager.Retrigger silently no-ops on non-dormant
+	// states, so this is also safe to call unconditionally if we ever
+	// expand the trigger surface). Then poll for up to 5s so the response
+	// reflects the new state instead of the stale dormant snapshot.
+	if s.State.Current() == lifecycle.StateDormant {
+		s.State.Retrigger()
+		s.waitForBootProgress(ctx, 5*time.Second)
+	}
+
 	result := &ReloadPipelinesResult{
 		OK:    true,
 		State: s.State.Current().String(),
@@ -514,6 +524,40 @@ func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipeline
 	}
 
 	return result, nil
+}
+
+// waitForBootProgress polls Manager.Current() until either Active or a
+// terminal Dormant is reached, or the deadline elapses. The caller has
+// already triggered a fresh boot loop; this just gives it room to make
+// progress before we snapshot state for the response. WaitingForVault
+// (transient retry) is treated as still-in-progress because the loop is
+// actively retrying with backoff and may yet reach Active.
+//
+// Initial 150ms grace period: Retrigger schedules a `go RunBootLoop(...)`
+// — there is a brief window between the call returning and the spawned
+// goroutine reaching its first `m.SetState(StateStarting)`. Without the
+// grace, the very first state read can still see the prior Dormant
+// snapshot and exit immediately.
+func (s *LifecycleService) waitForBootProgress(ctx context.Context, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	for time.Now().Before(deadline) {
+		switch s.State.Current() {
+		case lifecycle.StateActive, lifecycle.StateDormant:
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }
 
 // warmupEnvector — GetIndexList under 60s timeout.
