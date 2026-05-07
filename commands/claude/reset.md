@@ -1,6 +1,6 @@
 ---
 description: Clear Rune configuration and return to dormant state
-allowed-tools: Bash(python3:*), Bash(rm ~/.rune/config.json), Bash(cat ~/.rune/*), Read
+allowed-tools: Bash(rm ~/.rune/config.json), Bash(cat ~/.rune/*), Read
 ---
 
 # /rune:reset — Reset Configuration

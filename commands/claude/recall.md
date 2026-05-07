@@ -1,6 +1,6 @@
 ---
 description: Search organizational memory for past decisions and context
-allowed-tools: Bash(python3:*), Bash(cat ~/.rune/*), Read, mcp__plugin_rune_envector__*
+allowed-tools: Bash(cat ~/.rune/*), Read, mcp__envector__*
 ---
 
 # /rune:recall — Search Memory

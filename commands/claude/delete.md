@@ -1,6 +1,6 @@
 ---
 description: Delete a captured decision record
-allowed-tools: mcp__plugin_rune_envector__delete_capture, mcp__plugin_rune_envector__capture_history
+allowed-tools: mcp__envector__delete_capture, mcp__envector__capture_history
 ---
 
 # /rune:delete — Delete Captured Record

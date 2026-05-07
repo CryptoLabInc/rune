@@ -119,11 +119,6 @@ If `reload_pipelines` returns an error or state stays dormant:
   - runed not running — start the embedding daemon.
   - enVector cluster unreachable — check the cluster's external
     connectivity from this host.
-  - **Known issue**: `LifecycleService.ReloadPipelines` doesn't yet re-spawn
-    `RunBootLoop` on a terminal Dormant state. If the MCP server booted
-    before `~/.rune/config.json` existed (very common on first
-    `/rune:configure`), restart Claude Code so the server picks up the
-    populated config.
 - Suggest `/rune:status` for the full health snapshot.
 
 ### 5. Completion Summary

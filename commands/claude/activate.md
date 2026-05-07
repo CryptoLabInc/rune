@@ -1,94 +1,67 @@
 ---
-description: Activate Rune after infrastructure is ready
-allowed-tools: Bash(python3:*), Bash(find:*), Bash(cat ~/.rune/*), Bash(curl:*), Bash(bash:*), Bash(scripts/*), Bash(timeout:*), Read, Write, Edit, mcp__envector__reload_pipelines
+description: Activate Rune (resume from dormant) and verify pipelines come up healthy
+allowed-tools: Read, Edit, mcp__envector__reload_pipelines, mcp__envector__diagnostics, mcp__envector__vault_status
 ---
 
 # /rune:activate — Activate Plugin
 
-Validate infrastructure end-to-end and switch to active state.
+Resume Rune from a dormant state and verify the boot loop reaches Active.
+
+In v0.4 the MCP server is a single Go binary auto-spawned by Claude Code
+from the plugin manifest. The boot loop runs as soon as `state == "active"`
+in `~/.rune/config.json`, so `/rune:activate`'s job is to flip state to
+active, ask the server to re-run the boot loop, and confirm health.
 
 ## Steps
 
-1. Check if `~/.rune/config.json` exists.
-   - NO: Respond "Not configured. Run `/rune:configure` first." and stop.
+1. Read `~/.rune/config.json`.
+   - Not found: respond "Not configured. Run `/rune:configure` first." and stop.
 
-2. Read config and verify required fields exist (`vault.endpoint`, `vault.token`).
-   - Missing fields: Show what's missing, suggest `/rune:configure`.
-   - Note: enVector credentials are delivered via the Vault bundle at runtime and are not stored in config.
+2. Verify required fields:
+   - `vault.endpoint` and `vault.token` must be present.
+   - Missing: report which fields are missing and suggest `/rune:configure`.
+   - enVector credentials are delivered via the Vault bundle at runtime —
+     they are not stored locally.
 
-3. Detect plugin root:
-   ```bash
-   PLUGIN_ROOT=$(find ~/.claude/plugins/cache -name "plugin.json" -path "*/rune/*" -exec dirname {} \; 2>/dev/null | head -1 | xargs dirname 2>/dev/null)
-   ```
-   - Also check the current working directory and its parents for `.claude-plugin/plugin.json`.
+3. If `state` is already `"active"`, skip to Step 5 (just verify health).
 
-4. Check Python venv at `$PLUGIN_ROOT/.venv`:
-   - If missing: auto-run `bash $PLUGIN_ROOT/scripts/install.sh` to set up.
-   - If install fails: show error and stop.
+4. If `state` is `"dormant"`, update the config:
+   - Set `state` to `"active"`.
+   - Remove any `dormant_reason` and `dormant_since` fields.
+   - Update `metadata.lastUpdated` to the current ISO timestamp.
 
-5. Run infrastructure validation - test **all subsystems**, not just connectivity:
+5. Call `mcp__envector__reload_pipelines`. This re-spawns the boot loop:
+   - Dial Vault → `GetAgentManifest` → persist `EncKey` to disk
+   - Dial runed → connect to enVector → open the team index
+   - Transition state to Active
 
-   **5a. Vault: connectivity + token validity**
-   - Check Vault connectivity by parsing the scheme from `vault.endpoint`:
-     - If `http://` or `https://`: `curl -sf <vault-endpoint>/health`
-     - If `tcp://`: extract host and port, then test TCP connectivity using Python (portable across macOS/Linux, works in both bash and zsh):
-      ```bash
-      python3 -c "import socket; s=socket.socket(); s.settimeout(10); s.connect(('<host>', <port>)); print('OK'); s.close()"
-      ```
-      - Do NOT use `bash -c 'echo > /dev/tcp/...'` — macOS `/bin/bash` may not support `/dev/tcp`.
-     - Do NOT blindly curl a `tcp://` endpoint — curl does not support the `tcp://` scheme.
-   - Validate Vault token:
-     ```bash
-     $PLUGIN_ROOT/.venv/bin/python3 -c "
-     import asyncio, sys, os
-     sys.path.insert(0, '$PLUGIN_ROOT/mcp')
-     from adapter.vault_client import VaultClient
-     async def check():
-         c = VaultClient(
-             vault_endpoint='<vault_endpoint>',
-             vault_token='<vault_token>',
-             ca_cert='<ca_cert_or_empty>' or None,
-             tls_disable=<tls_disable_bool>,
-         )
-         try:
-             bundle = await c.get_public_key()
-             key_id = bundle.get('key_id', '')
-             index = bundle.get('index_name', '')
-             print(f'OK key_id={key_id} index={index}')
-         finally:
-             await c.close()
-     asyncio.run(check())
-     "
-     ```
-   - If key fetch fails, report **specifically**: "Vault reachable but token rejected - check your token or run `/rune:configure`."
+6. Call `mcp__envector__diagnostics` (fall back to `vault_status` if
+   diagnostics is unavailable) and render a per-subsystem report:
 
-   **5b. Python environment**
-   - Check MCP server can import: `$PLUGIN_ROOT/.venv/bin/python3 -c "import mcp"`
-
-6. Display a per-subsystem validation report:
    ```
    Infrastructure Validation
    =========================
-   - Vault reachable        (tcp://vault.example.com:50051)
-   - Vault token valid      (key_id: abc123)
-   - Python environment     (.venv OK)
+   - Vault           : reachable (<endpoint>)
+   - Encryption Key  : loaded (key_id: <id>)
+   - Embedder        : ready
+   - enVector Cloud  : reachable (<latency>ms)
+   - Pipeline State  : Active
    ```
-   Use "x" mark for failures with the specific error message on the same line.
+   Use a check mark for healthy items, "x" for failures with the specific
+   message on the same line.
 
-7. If all checks pass:
-   - Update `~/.rune/config.json` setting `state` to `"active"`
-   - **Clear dormant reason**: remove `dormant_reason` and `dormant_since` fields from config if present
-   - Call `reload_pipelines` as a **native MCP tool** (`mcp__envector__reload_pipelines`) — invoke it directly like any other tool, do NOT use `claude mcp call` via Bash (that subcommand doesn't exist).
-   - If `reload_pipelines` is not available as a tool (MCP server not running), note that a Claude Code restart is needed for changes to take effect.
-   - If reload_pipelines returns errors, show them and suggest restarting Claude Code as fallback.
+7. If the boot loop succeeded:
    - Respond: "Rune activated. Organizational memory is now online."
 
-8. If any check fails:
-   - Keep `state` as `"dormant"`
-   - Show the full validation report (passed and failed items)
-   - For each failure, include the specific recovery action:
-     - Vault unreachable: "Check if Vault server is running and endpoint is correct"
-     - Vault token invalid: "Token may be expired or incorrect - run `/rune:configure` to update"
-   - Suggest: `/rune:status` for more detailed diagnostics
+8. If any subsystem failed:
+   - Show the full validation report.
+   - Surface the specific recovery action per failure:
+     - Vault unreachable: "Verify the Vault server is running and the endpoint is correct."
+     - Vault token rejected: "Token may be expired — run `/rune:configure` to update."
+     - runed not running: "Start the embedding daemon."
+     - enVector unreachable: "Check the cluster's external connectivity from this host."
+   - Suggest `/rune:status` for the full health snapshot.
 
-**Note**: This is the ONLY command that makes network requests to validate infrastructure.
+**Note**: This is a session-local resume — the MCP server stays the same
+process. There is no Claude Code restart required (Task #28 wired the
+reload to re-spawn the boot loop on dormant terminals).
