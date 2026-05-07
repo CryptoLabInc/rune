@@ -159,8 +159,14 @@ func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk in
 		return nil, nil
 	}
 
-	// Vault decrypt scores
-	entries, err := s.Vault.DecryptScores(ctx, string(blobs[0]), topk)
+	// Vault decrypt scores. The Vault RPC field is `EncryptedBlobB64`
+	// (proto3 `string`, valid-UTF-8 only) — envector returns raw cipher
+	// bytes, so we must base64-encode before sending. A direct
+	// `string(blobs[0])` cast pushes random cipher bytes through the
+	// proto3 string-validation path and trips
+	// "grpc: error while marshaling: string field contains invalid UTF-8".
+	encryptedBlobB64 := base64.StdEncoding.EncodeToString(blobs[0])
+	entries, err := s.Vault.DecryptScores(ctx, encryptedBlobB64, topk)
 	if err != nil {
 		return nil, fmt.Errorf("vault decrypt scores: %w", err)
 	}
