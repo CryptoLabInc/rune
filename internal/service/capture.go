@@ -10,6 +10,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -273,7 +274,11 @@ func (s *CaptureService) runNoveltyCheck(ctx context.Context, embeddingText stri
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil
 	}
 
-	entries, err := s.Vault.DecryptScores(ctx, string(blobs[0]), 3)
+	// Vault.DecryptScores's `EncryptedBlobB64` is a proto3 string field —
+	// envector's raw cipher bytes must be base64-encoded before sending.
+	// Mirrors recall.searchSingle.
+	encryptedBlobB64 := base64.StdEncoding.EncodeToString(blobs[0])
+	entries, err := s.Vault.DecryptScores(ctx, encryptedBlobB64, 3)
 	if err != nil || len(entries) == 0 {
 		slog.Warn("novelty check: decrypt failed (non-fatal)", "err", err)
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil
