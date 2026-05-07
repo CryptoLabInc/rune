@@ -1,6 +1,6 @@
 module github.com/envector/rune-go
 
-go 1.26.2
+go 1.25.9
 
 // External dependencies, in implementation order:
 //

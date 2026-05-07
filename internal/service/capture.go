@@ -3,9 +3,10 @@
 // delegate to these services; business logic lives here, not in handlers.
 //
 // Spec:
-//   docs/v04/spec/flows/capture.md (7-phase)
-//   docs/v04/spec/flows/recall.md (7-phase)
-//   docs/v04/spec/flows/lifecycle.md (6 tools)
+//
+//	docs/v04/spec/flows/capture.md (7-phase)
+//	docs/v04/spec/flows/recall.md (7-phase)
+//	docs/v04/spec/flows/lifecycle.md (6 tools)
 package service
 
 import (

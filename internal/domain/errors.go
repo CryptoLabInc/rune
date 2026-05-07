@@ -8,16 +8,16 @@ import "errors"
 
 // Code enum — 8 codes.
 const (
-	CodeInternal             = "INTERNAL_ERROR"
-	CodeVaultConnection      = "VAULT_CONNECTION_ERROR"
-	CodeVaultDecryption      = "VAULT_DECRYPTION_ERROR"
-	CodeEnvectorConnection   = "ENVECTOR_CONNECTION_ERROR"
-	CodeEnvectorInsert       = "ENVECTOR_INSERT_ERROR"
-	CodePipelineNotReady     = "PIPELINE_NOT_READY"
-	CodeInvalidInput         = "INVALID_INPUT"
-	CodeEmbedderUnreachable  = "EMBEDDER_UNREACHABLE" // Go-specific (D30)
-	CodeEmptyEmbedText       = "EMPTY_EMBED_TEXT"     // D5 — dedicated code for missing embed text
-	CodeExtractionMissing    = "EXTRACTION_MISSING"   // D14 — agent must provide pre_extraction
+	CodeInternal            = "INTERNAL_ERROR"
+	CodeVaultConnection     = "VAULT_CONNECTION_ERROR"
+	CodeVaultDecryption     = "VAULT_DECRYPTION_ERROR"
+	CodeEnvectorConnection  = "ENVECTOR_CONNECTION_ERROR"
+	CodeEnvectorInsert      = "ENVECTOR_INSERT_ERROR"
+	CodePipelineNotReady    = "PIPELINE_NOT_READY"
+	CodeInvalidInput        = "INVALID_INPUT"
+	CodeEmbedderUnreachable = "EMBEDDER_UNREACHABLE" // Go-specific (D30)
+	CodeEmptyEmbedText      = "EMPTY_EMBED_TEXT"     // D5 — dedicated code for missing embed text
+	CodeExtractionMissing   = "EXTRACTION_MISSING"   // D14 — agent must provide pre_extraction
 )
 
 // RuneError — MCP error response body (Python make_error equivalent).

@@ -2,8 +2,9 @@
 // owns Deps injection + state-aware response shaping.
 //
 // Spec:
-//   docs/v04/spec/components/rune-mcp.md (MCP server 구현)
-//   docs/v04/spec/flows/{capture,recall,lifecycle}.md
+//
+//	docs/v04/spec/components/rune-mcp.md (MCP server 구현)
+//	docs/v04/spec/flows/{capture,recall,lifecycle}.md
 //
 // SDK: github.com/modelcontextprotocol/go-sdk v1.5.0+ (D2). Stdio transport.
 // Input schema is auto-inferred from the Go input struct (jsonschema tags
@@ -38,13 +39,12 @@ import (
 //
 // Future fields (commented as a contract sketch — to be activated as the
 // owning adapter PR lands):
-//
 type Deps struct {
-	Vault      vault.Client
-	Envector   envector.Client
-	Embedder   embedder.Client
-	State      *lifecycle.Manager
-	
+	Vault    vault.Client
+	Envector envector.Client
+	Embedder embedder.Client
+	State    *lifecycle.Manager
+
 	Capture   *service.CaptureService
 	Recall    *service.RecallService
 	Lifecycle *service.LifecycleService
@@ -52,23 +52,41 @@ type Deps struct {
 
 func (d *Deps) InjectVault(client vault.Client) {
 	d.Vault = client
-	if d.Capture != nil { d.Capture.Vault = client }
-	if d.Recall != nil { d.Recall.Vault = client }
-	if d.Lifecycle != nil { d.Lifecycle.Vault = client }
+	if d.Capture != nil {
+		d.Capture.Vault = client
+	}
+	if d.Recall != nil {
+		d.Recall.Vault = client
+	}
+	if d.Lifecycle != nil {
+		d.Lifecycle.Vault = client
+	}
 }
 
 func (d *Deps) InjectEmbedder(client embedder.Client) {
 	d.Embedder = client
-	if d.Capture != nil { d.Capture.Embedder = client }
-	if d.Recall != nil { d.Recall.Embedder = client }
-	if d.Lifecycle != nil { d.Lifecycle.Embedder = client }
+	if d.Capture != nil {
+		d.Capture.Embedder = client
+	}
+	if d.Recall != nil {
+		d.Recall.Embedder = client
+	}
+	if d.Lifecycle != nil {
+		d.Lifecycle.Embedder = client
+	}
 }
 
 func (d *Deps) InjectEnvector(client envector.Client) {
 	d.Envector = client
-	if d.Capture != nil { d.Capture.Envector = client }
-	if d.Recall != nil { d.Recall.Envector = client }
-	if d.Lifecycle != nil { d.Lifecycle.Envector = client }
+	if d.Capture != nil {
+		d.Capture.Envector = client
+	}
+	if d.Recall != nil {
+		d.Recall.Envector = client
+	}
+	if d.Lifecycle != nil {
+		d.Lifecycle.Envector = client
+	}
 }
 
 // ApplyVaultBundle propagates per-bundle metadata (AgentID / AgentDEK /

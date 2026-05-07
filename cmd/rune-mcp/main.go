@@ -4,7 +4,8 @@
 // Spawn model: Claude Code launches one instance per session via stdio.
 // Lifecycle: starting → waiting_for_vault → active ↔ dormant.
 // Tools: 8 MCP tools (capture, recall, batch_capture, capture_history,
-//        delete_capture, vault_status, diagnostics, reload_pipelines).
+//
+//	delete_capture, vault_status, diagnostics, reload_pipelines).
 //
 // Phase A (current): MCP handshake + tools/list only. All 8 handlers return
 // "not yet implemented" CallToolResult. RunBootLoop · Vault · envector ·
