@@ -71,6 +71,34 @@ func (d *Deps) InjectEnvector(client envector.Client) {
 	if d.Lifecycle != nil { d.Lifecycle.Envector = client }
 }
 
+// ApplyVaultBundle propagates per-bundle metadata (AgentID / AgentDEK /
+// IndexName / KeyID) to the three services that need them. Called by the
+// boot loop after Vault.GetAgentManifest succeeds.
+//
+// Without this call, capture's AES envelope sealing fails (empty AgentDEK)
+// and recall / lifecycle diagnostics surface zero-value IndexName. Adapter
+// client injection (InjectVault/InjectEmbedder/InjectEnvector) handles the
+// gRPC connections; this method handles the per-token metadata.
+func (d *Deps) ApplyVaultBundle(b *vault.Bundle) {
+	if b == nil {
+		return
+	}
+	if d.Capture != nil {
+		d.Capture.AgentID = b.AgentID
+		d.Capture.AgentDEK = b.AgentDEK
+		d.Capture.IndexName = b.IndexName
+	}
+	if d.Recall != nil {
+		d.Recall.IndexName = b.IndexName
+	}
+	if d.Lifecycle != nil {
+		d.Lifecycle.IndexName = b.IndexName
+		d.Lifecycle.KeyID = b.KeyID
+		d.Lifecycle.AgentDEK = b.AgentDEK
+		d.Lifecycle.EncKeyLoaded = len(b.EncKey) > 0
+	}
+}
+
 // emptyArgs — input type for tools that take no arguments.
 type emptyArgs struct{}
 
