@@ -11,17 +11,18 @@ rune-mcp가 scribe 에이전트의 `rune_capture` tool 호출을 처리하는 en
 에이전트가 의사결정 레코드를 저장하려 할 때:
 
 1. rune-mcp가 stdio로 MCP tool call 수신
-2. 입력 검증 + 임베딩 대상 텍스트 선택
-3. `embedder` (외부 프로세스)에 gRPC로 임베딩 요청 (novelty 검사용 1회)
-4. envector + Vault로 기존 레코드 대비 유사도 계산 → 분류
-5. `near_duplicate` 면 거부 · 아니면 record_builder로 DecisionRecord 조립
-6. (필요 시 multi-record 추가 임베딩 batch) AES envelope 생성 + envector.Insert
+2. 입력 검증 + Detection/ExtractionResult 파싱 (tier2.capture=false면 즉시 거부)
+3. `record_builder`로 DecisionRecord 조립 (PII 마스킹 · domain 매핑 · payload 렌더링) — N개 record (1~7)
+4. `records[0]`의 임베딩 텍스트로 임베딩 → envector.Score → Vault.DecryptScores → novelty 분류 + Related[] 빌드 (`near_duplicate`면 빌드된 records 폐기 후 거부 응답)
+5. records 전체 batch 임베딩 + AES envelope 봉인
+6. envector.Insert (vectors + envelopes 한 번)
 7. capture_log append + 응답
 
 **핵심 원칙**:
-- Python `mcp/server/server.py` + `agents/scribe/record_builder.py` 동작과 bit-identical
+- Python `mcp/server/server.py:_capture_single` + `agents/scribe/record_builder.py` 동작과 bit-identical
 - agent-delegated 전제 (LLM fallback 제거, `pre_extraction` 필수)
 - 모델 연산은 `embedder` 위임 (gRPC, D30) · FHE 복호화는 Vault 위임 · AES envelope은 rune-mcp 직접
+- **순서 주의**: `record_builder`가 novelty check **전에** 실행 (Python `server.py:L1333` 기준). near_duplicate면 빌드된 records를 폐기하고 거부 응답하는 비용 감수 — `embedding_text`가 빌드된 records[0]에서 추출되어야 저장 vector 공간과 일치하기 때문 (`server.py:L1337` `_embedding_text_for_record(records[0])`)
 
 ## 전체 시퀀스
 
@@ -35,28 +36,26 @@ sequenceDiagram
 
     Agent->>MCP: tools/call rune_capture (text, extracted)
     Note over MCP: Phase 1: state 검사 · JSON 파싱
-    Note over MCP: Phase 2: 검증 + text_to_embed 선택
+    Note over MCP: Phase 2: 검증 + Detection/ExtractionResult 파싱<br/>(tier2.capture=false면 즉시 거부)
+    Note over MCP: Phase 3: record_builder → N records<br/>(PII 마스킹 · domain 매핑 · payload 렌더)
 
-    MCP->>Embedder: Embed(text)
+    Note over MCP: Phase 4 시작: records[0]에서 임베딩 텍스트 선택
+    MCP->>Embedder: EmbedSingle(text)
     Embedder-->>MCP: vector[1024]
-    Note over MCP: Phase 3 완료
-
     MCP->>Envector: Score(vec)
     Envector-->>MCP: 암호화된 CipherBlock
-    MCP->>Vault: DecryptScores(blob)
-    Vault-->>MCP: [{shard, row, score}, ...]
-    Note over MCP: Phase 4: novelty 분류
+    MCP->>Vault: DecryptScores(blob, top_k=3)
+    Vault-->>MCP: [{shard, row, score, metadata}, ...]
+    Note over MCP: novelty 분류 + Related[] top-3 빌드
 
     alt near_duplicate (sim >= 0.95)
-        Note over MCP: skip capture (Phase 5-7 생략)
-        MCP-->>Agent: {ok: true, captured: false, reason, novelty}
+        Note over MCP: 빌드된 records 폐기, capture 거부
+        MCP-->>Agent: {ok: true, captured: false, reason,<br/>novelty: {class, score, related[]}}
     else novel/related/evolution
-        Note over MCP: Phase 5a: record_builder → N records<br/>(PII 마스킹 · domain 매핑 · certainty 규칙)
-
-        MCP->>Embedder: EmbedBatch(texts)
+        MCP->>Embedder: EmbedBatch(records 텍스트들)
         Embedder-->>MCP: N vectors
+        Note over MCP: Phase 5: AES envelope × N
 
-        Note over MCP: Phase 5b: AES envelope × N
         MCP->>Envector: Insert(vectors, envelopes)
         Envector-->>MCP: ItemIDs
         Note over MCP: Phase 6 완료
@@ -94,14 +93,17 @@ mcp.AddTool(srv, &mcp.Tool{Name: "rune_capture", Description: "..."},
 
 ---
 
-## Phase 2 — 검증 + tier2 체크 + text_to_embed 선택
+## Phase 2 — 검증 + tier2 체크 + Detection/ExtractionResult 파싱
 
 ### 책임
 - `extracted` JSON 파싱 실패 응답 조립 (Python `server.py:L1240-1242`)
 - **에이전트 tier2 판정 처리 (Python `server.py:L1244-1254`)** — `tier2.capture=false`이면 즉시 reject 응답
 - `extracted` 내 알려진 필드 정규화 (phases[:7], title[:60], confidence clamp [0,1])
 - Python과 동일한 silent truncate 동작
-- `reusable_insight > payload.text` 우선순위로 임베딩 텍스트 선택 (Python `server.py:L1337` + `embedding.py:embedding_text_for_record`)
+- `Detection` 객체 조립 (`tier2.domain` + `confidence` → `agent_domain`, `agent_confidence`)
+- `ExtractionResult` 객체 조립 (single / phase_chain / bundle 분기)
+
+> **참고**: 임베딩 텍스트 선택은 Phase 4에서 일어남 (Python `server.py:L1337`이 `records[0]`에서 뽑음). Phase 2는 텍스트 선택 안 함 — 이 시점엔 records가 아직 없음.
 
 ### 입력 `extracted` JSON shape (Python `server.py:L1244-1267`)
 
@@ -170,11 +172,6 @@ func Capture(req *domain.CaptureRequest) (*domain.CaptureResponse, error) {
     return nil, nil  // 계속 진행
 }
 
-// internal/policy/embedtext.go
-func PickTextToEmbed(extracted map[string]any) string {
-    // reusable_insight (trim, non-empty) > payload.text (trim, non-empty)
-}
-
 // internal/policy/detection.go — Python _detection_from_agent_data 포팅 (server.py:L70-87)
 func DetectionFromAgent(extracted map[string]any) Detection {
     tier2, _ := GetMap(extracted, "tier2")
@@ -199,7 +196,6 @@ func DetectionFromAgent(extracted map[string]any) Detection {
 ### 관련 결정
 - **D3**: title 60자 rune-단위 truncate (Python 동일)
 - **D4**: `extracted`는 `map[string]any` + `GetString/GetFloat/GetBool/GetMap/GetList` helper
-- **D5**: 빈 embed 텍스트 → `EMPTY_EMBED_TEXT` 전용 에러
 - **D14**: agent-delegated — `tier2.domain`, `confidence` 에이전트가 제공
 
 ### 분기 · 응답 shape
@@ -219,213 +215,42 @@ func DetectionFromAgent(extracted map[string]any) Detection {
 | `text` 빈 문자열 | `INVALID_INPUT` | `{"ok": false, "error": "text empty"}` |
 | `extracted` 필드 부재/파싱 실패 | `INVALID_INPUT` | `{"ok": false, "error": "Invalid extracted JSON — could not parse."}` |
 | `tier2.capture=false` | — (성공 응답) | `{"ok": true, "captured": false, "reason": "Agent rejected: ..."}` |
-| `reusable_insight` + `payload.text` 둘 다 빈 문자열 | `EMPTY_EMBED_TEXT` | `{"ok": false, "error": "...", "error_code": "EMPTY_EMBED_TEXT"}` |
 
 ### 구현 위치
 - `internal/validate/capture.go`
-- `internal/policy/embedtext.go`
 - `internal/policy/detection.go` (DetectionFromAgent)
+- `internal/domain/extraction.go` (`ParseExtractionFromAgent` — wire JSON → ExtractionResult)
 - `internal/domain/extracted.go` (GetString/GetFloat/GetBool/GetMap/GetList helpers)
 
 ---
 
-## Phase 3 — embedder Embed/EmbedBatch gRPC 호출
+## Phase 3 — record_builder.BuildPhases (DecisionRecord 조립)
 
 ### 책임
-- 외부 `embedder` 프로세스에 gRPC로 임베딩 요청 (D30)
-- 단일 텍스트는 `Embed`, 다수는 `EmbedBatch`
-- retry + dim 검증 + 에러 매핑
-
-### 구현 형태
-```go
-// internal/adapters/embedder/client.go (gRPC 래퍼)
-// 상세는 spec/spec/components/embedder.md 참조
-type Client interface {
-    EmbedSingle(ctx context.Context, text string) ([]float32, error)
-    EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
-    Info(ctx context.Context) (InfoSnapshot, error)
-}
-
-// capture novelty check (1 text)
-vec, err := s.embedder.EmbedSingle(ctx, embedText)
-```
-
-Dial:
-```go
-conn, _ := grpc.NewClient("unix:"+sockPath, grpc.WithTransportCredentials(insecure.NewCredentials()))
-svc := embedderv1.NewEmbedderServiceClient(conn)
-```
-
-Retry `[0, 500ms, 2s]` × 3 (D7): `UNAVAILABLE` · `DEADLINE_EXCEEDED` · `RESOURCE_EXHAUSTED`에 대해.
-
-### 관련 결정
-- **D7**: retry backoff `[0, 500ms, 2s]`
-- **D8**: 부팅 시 Health 폴링 안 함. 첫 embed 실패 시 Health로 분류
-- **D30**: 통신 프로토콜 = gRPC. Socket 경로는 env/config로 받음 (embedder 프로젝트 convention 따름)
-
-### 에러 (embedder gRPC status → 도메인 매핑)
-| gRPC | 도메인 에러 | retry |
-|---|---|---|
-| `UNAVAILABLE` | `EmbedderUnavailableError` | ✓ |
-| `DEADLINE_EXCEEDED` | `EmbedderTimeoutError` | ✓ |
-| `RESOURCE_EXHAUSTED` | `EmbedderBusyError` | ✓ |
-| `INVALID_ARGUMENT` | `EmbedderInvalidInputError` | ✗ |
-| 기타 | `EmbedderError(wrap)` | ✗ |
-
-dim 검증: `Info.vector_dim`(1024 예상)과 실제 응답 `vector` 길이 불일치 시 비-retryable 에러 (모델 mismatch 방어).
-
-### 구현 위치
-- `internal/adapters/embedder/client.go` (gRPC 래퍼)
-- `internal/adapters/embedder/info_cache.go` (Info `sync.Once` 캐시)
-- `internal/adapters/embedder/retry.go` (D7 backoff)
-- 상세: `spec/components/embedder.md`
-
----
-
-## Phase 4 — Novelty check
-
-### 책임
-- `envector.Score(vec)` → 암호화된 유사도 blob 수신
-- `Vault.DecryptScores(blob, top_k=3)` → 평문 top-3 점수 + metadata
-- `novelty.related[:3]` 리스트 조립 (id·title·similarity, Python `server.py:L1353-1360` 동일)
-- `policy.ClassifyNovelty(max_sim)` → `novel`/`related`/`evolution`/`near_duplicate` 분류
-- `near_duplicate`면 Phase 5-7 **생략**하고 조기 응답 (Python `server.py:L1363-1369` 동일)
-
-### 구현 형태 (Python bit-identical)
-```go
-blobs, err := s.envector.Score(ctx, vec)
-if err != nil { return vaultOrEnvectorErr(err) }
-
-var parsed []VaultScoreEntry
-if len(blobs) > 0 {
-    decrypted, err := s.vault.DecryptScores(ctx, blobs[0], /*topK=*/ 3)
-    if err != nil { return vaultDecryptErr(err) }
-    parsed = decrypted
-}
-
-// Python L1338, L1351 대응: 기본은 "novel", 결과 있으면 max similarity
-novelty := NoveltyInfo{Class: NoveltyNovel, Score: 1.0, Related: []RelatedRecord{}}
-if len(parsed) > 0 {
-    maxSim := parsed[0].Score  // DecryptScores 는 desc sort 보장
-    novelty = policy.ClassifyNovelty(maxSim)  // class + score 세팅
-
-    // Python L1353-1360: top-3 related 조립
-    n := min(3, len(parsed))
-    novelty.Related = make([]RelatedRecord, 0, n)
-    for i := 0; i < n; i++ {
-        meta := parsed[i].Metadata
-        novelty.Related = append(novelty.Related, RelatedRecord{
-            ID:         getString(meta, "id"),
-            Title:      getString(meta, "title"),
-            Similarity: roundTo3(parsed[i].Score),
-        })
-    }
-}
-
-// Python L1363-1369: near_duplicate 차단
-if novelty.Class == NoveltyNearDuplicate {
-    return &CaptureResponse{
-        OK:       true,
-        Captured: false,
-        Reason:   "Near-duplicate — virtually identical insight already stored",
-        Novelty:  &novelty,
-    }
-}
-// Phase 5로 진행
-```
-
-### Python 정확 응답 shape (near_duplicate 시)
-
-```json
-{
-  "ok": true,
-  "captured": false,
-  "reason": "Near-duplicate — virtually identical insight already stored",
-  "novelty": {
-    "class": "near_duplicate",
-    "score": 0.97,
-    "related": [
-      {"id": "dec_2026-04-10_architecture_postgres_choice", "title": "...", "similarity": 0.97},
-      {"id": "dec_2026-03-15_architecture_db_selection",    "title": "...", "similarity": 0.88}
-    ]
-  }
-}
-```
-
-- `ok`는 **true** (에러 아님, 정책에 의한 거부)
-- `captured=false` + `reason` 로 차단 통보
-- `novelty.related[]`에 상위 3개 유사 record (id/title/similarity). 에이전트는 `related[0].id`로 가장 유사한 record에 접근 가능
-- **`similar_to` 필드 없음** (D10 Archived — Python parity 우선)
-
-### Python 비-fatal 처리 (L1370-1372)
-```python
-except Exception as e:
-    logger.warning("Novelty check failed (non-fatal): %s", e)
-```
-Phase 4 전체 예외 시 novelty 판정 없이 Phase 5로 진행 (capture 성공 유지).
-
-### 관련 결정
-- ~~**D10**: `similar_to` 필드~~ **Archived (2026-04-22)** — Python parity로 drop. `novelty.related[]` 사용
-- **D11**: novelty 임계값 `{0.3, 0.7, 0.95}` (Python runtime 기본값)
-- **D12**: 첫 capture (top-k 빈 경우) → `similarity=0` → `novel` 판정
-
-### 분류 기준 (Python `embedding.py:L49-56` bit-identical)
-
-| similarity (max) | class | 의미 |
-|---|---|---|
-| `< 0.3` | `novel` | 완전히 새로운 내용 |
-| `0.3 ~ 0.7` | `evolution` | 관련 있지만 다른 각도 (새 phase) |
-| `0.7 ~ 0.95` | `related` | 같은 토픽 |
-| `≥ 0.95` | `near_duplicate` | 거의 동일, capture 차단 |
-
-**임계값**: `{0.3, 0.7, 0.95}` (Python `server.py:L102-104` runtime defaults).
-
-> **주의**: Python `embedding.py` 모듈 상수는 `{0.4, 0.7, 0.93}`이지만 `server.py`에서 `_classify_novelty(max_sim)` 호출 시 자기 defaults `{0.3, 0.7, 0.95}`를 명시 전달 → module 상수는 dead code. runtime 동작은 0.3/0.7/0.95.
-
-**`novelty.score` 의미**: `round(1.0 - max_similarity, 4)` — **inverted** (유사도 높을수록 score 낮음). 기존 레코드 없으면 score=1.0 (최대 novelty).
-
-### 에러
-| 상황 | 처리 |
-|---|---|
-| envector.Score 실패 | Python L1370-1372 따라 **non-fatal warn 로그** + Phase 5 진행 (capture 성공) |
-| Vault.DecryptScores 실패 | 동일 (non-fatal) |
-| metadata.id 조회 실패 | `related[i].id`가 빈 문자열 ("" 유지, 판정 자체는 유효) |
-
-### 구현 위치
-- `internal/policy/novelty.go` (ClassifyNovelty)
-- `internal/service/capture.go` (호출 orchestration + response 조립)
-
----
-
-## Phase 5 — record_builder 포팅 + AES envelope
-
-### 책임
-- `ExtractionResult` + `RawEvent` → `[]*DecisionRecord` 변환 (Python `record_builder.py` 이식, D13 Option A)
+- `RawEvent` + `Detection` + `ExtractionResult` → `[]*DecisionRecord` 변환 (Python `record_builder.py` 이식, D13 Option A)
 - `BuildPhases` 진입부에서 `_redact_sensitive(raw_event.text)` → `cleanText` 산출 (Python `record_builder.py:L228` bit-identical). agent-delegated 모드에서도 **항상** 실행
 - `cleanText`는 extraction helpers (title/evidence/decision 추출)에 공급. `original_text` 필드에는 redact 전 원본 보존 (AES envelope으로 암호화되어 envector에 저장)
 - 각 record: PII 마스킹 · quote 추출 · certainty/status 규칙 · domain 매핑 · group/phase 필드 · payload.text 렌더링 (D15)
-- N개 record면 batch로 embedding (Phase 3 API 재사용)
-- 각 record metadata JSON을 AES-256-CTR envelope으로 감쌈
+- 결과 `records`는 1~7개 (single / phase_chain / bundle)
 
 ### 구현 형태
 ```go
-// Phase 5a: record 조립
-records, err := policy.BuildPhases(rawEvent, detection, extraction, clock)
-// records: len 1~7 (phase chain / bundle)
-
-// Phase 5b: batch embedding
-embedTexts := make([]string, len(records))
-for i, r := range records {
-    embedTexts[i] = selectEmbedTextForRecord(r)  // reusable_insight > payload.text
+// internal/service/capture.go — Phase 3
+rawEvent := &domain.RawEvent{
+    Text:    req.Text,
+    Source:  req.Source,
+    User:    req.User,    // 빈 문자열이면 "unknown"
+    Channel: req.Channel, // 빈 문자열이면 "claude_session"
 }
-vectors, err := s.embedder.EmbedBatch(ctx, embedTexts)  // embedder EmbedBatch 1회
 
-// Phase 5c: AES envelope
-envelopes := make([]string, len(records))
-for i, r := range records {
-    body, _ := json.Marshal(r)
-    envelopes[i], _ = envector.Seal(agentDEK, agentID, body)
+records, err := policy.BuildPhases(rawEvent, detection, extraction, s.Now())
+if err != nil {
+    return nil, fmt.Errorf("build phases: %w", err)
 }
+if len(records) == 0 {
+    return nil, &domain.RuneError{Code: domain.CodeInternalError, Message: "build phases returned 0 records"}
+}
+// records[0]이 대표 record (D18 — 응답 record_id, capture_log entry, novelty embedding text)
 ```
 
 ### Record builder 내부 구조
@@ -458,7 +283,7 @@ internal/policy/
 
 **검증**: `testdata/payload_text/golden/{id}.md` 50개 샘플 byte-for-byte 비교. **이 테스트 통과가 포팅 완료 판정 기준.**
 
-> **Go 개발자 노트**: payload.text는 embedding 대상이므로 Python과 1자라도 다르면 vector 공간이 달라져 recall이 다른 결과를 냄. 반드시 Python 원본을 펼쳐놓고 라인 단위 포팅할 것.
+> **Go 개발자 노트**: payload.text는 (Phase 5 batch embed 시) embedding 대상이므로 Python과 1자라도 다르면 vector 공간이 달라져 recall이 다른 결과를 냄. 반드시 Python 원본을 펼쳐놓고 라인 단위 포팅할 것.
 
 ### 🔒 Canonical reference — `record_builder.py` (D13 Option A)
 
@@ -506,6 +331,224 @@ agent가 항상 `pre_extraction` 제공하므로 legacy regex fallback은 dead c
 
 → 초기 구현에서 제외해도 됨 (agent-delegated mode에선 미사용). Post-MVP에 legacy 완전 제거 결정 시 삭제.
 
+### 관련 결정
+- **D13**: record_builder를 rune-mcp로 Option A 포팅 (B·C 미래 선택지)
+- **D14**: LLM fallback 제거 · `pre_extraction` 필수 (없으면 `EXTRACTION_MISSING` 에러)
+- **D15**: `render_payload_text` (Python `templates.py` 363 LoC) 전체 포팅
+
+### 에러
+| 상황 | 코드 | 비고 |
+|---|---|---|
+| `pre_extraction` 없음 (Detection은 있는데 ExtractionResult가 nil) | `EXTRACTION_MISSING` | non-retryable. agent-delegated 전제 위반 |
+| record_builder 내부 에러 (regex 컴파일 등) | `RECORD_BUILD_FAILED` | non-retryable |
+| `BuildPhases`가 0개 record 반환 | `INTERNAL_ERROR` | 빈 records는 invariant 위반 |
+
+### 구현 위치
+- `internal/policy/record_builder.go` + 관련 파일
+- `internal/policy/payload_text.go`
+- `internal/service/capture.go` (호출)
+
+---
+
+## Phase 4 — Novelty check (embed + Score + DecryptScores + classify + Related)
+
+### 책임
+- `records[0]`에서 임베딩 텍스트 선택 (`reusable_insight` 우선, 빈 문자열이면 `payload.text` — Python `embedding.py:embedding_text_for_record`)
+- `embedder.EmbedSingle(text)` → `vector[1024]` (novelty 검사용 1회)
+- `envector.Score(vec)` → 암호화된 유사도 blob 수신
+- `Vault.DecryptScores(blob, top_k=3)` → 평문 top-3 점수 + metadata
+- `policy.ClassifyNovelty(max_sim)` → `novel`/`related`/`evolution`/`near_duplicate` 분류
+- `novelty.related[:3]` 리스트 조립 (id·title·similarity, Python `server.py:L1353-1360` 동일)
+- `near_duplicate`면 빌드된 records 폐기 + 거부 응답 (Python `server.py:L1363-1369` 동일)
+
+### 구현 형태 (Python bit-identical)
+
+```go
+// internal/service/capture.go — Phase 4
+embedText := pickEmbedText(&records[0])  // records[0].ReusableInsight 우선, 없으면 records[0].Payload.Text
+
+// 기본은 "novel" (Python L1338) — embedder/envector/Vault 어느 단계든 실패하면 이 값 유지
+novelty := domain.NoveltyInfo{Class: domain.NoveltyNovel, Score: 1.0, Related: []domain.RelatedRecord{}}
+
+vec, err := s.Embedder.EmbedSingle(ctx, embedText)
+if err != nil {
+    slog.WarnContext(ctx, "novelty embed failed (non-fatal)", "err", err)
+    // novelty = novel 그대로, Phase 5 진행 (Python L1370-1372)
+} else {
+    blobs, err := s.Envector.Score(ctx, vec)
+    if err == nil && len(blobs) > 0 {
+        entries, err := s.Vault.DecryptScores(ctx, blobs[0], /*topK=*/ 3)
+        if err == nil && len(entries) > 0 {
+            maxSim := entries[0].Score  // DecryptScores는 desc sort 보장
+            novelty = policy.ClassifyNovelty(maxSim)  // class + score 세팅
+
+            // Python L1353-1360: top-3 related 조립
+            n := min(3, len(entries))
+            novelty.Related = make([]domain.RelatedRecord, 0, n)
+            for i := 0; i < n; i++ {
+                meta := entries[i].Metadata
+                novelty.Related = append(novelty.Related, domain.RelatedRecord{
+                    ID:         getString(meta, "id"),
+                    Title:      getString(meta, "title"),
+                    Similarity: roundTo3(entries[i].Score),
+                })
+            }
+        } else if err != nil {
+            slog.WarnContext(ctx, "novelty decrypt failed (non-fatal)", "err", err)
+        }
+    } else if err != nil {
+        slog.WarnContext(ctx, "novelty score failed (non-fatal)", "err", err)
+    }
+}
+
+// Python L1363-1369: near_duplicate 차단 — 빌드된 records 폐기
+if novelty.Class == domain.NoveltyNearDuplicate {
+    return &domain.CaptureResponse{
+        OK:       true,
+        Captured: false,
+        Reason:   "Near-duplicate — virtually identical insight already stored",
+        Novelty:  &novelty,
+    }, nil
+}
+// Phase 5로 진행
+```
+
+### Python 정확 응답 shape (near_duplicate 시)
+
+```json
+{
+  "ok": true,
+  "captured": false,
+  "reason": "Near-duplicate — virtually identical insight already stored",
+  "novelty": {
+    "class": "near_duplicate",
+    "score": 0.97,
+    "related": [
+      {"id": "dec_2026-04-10_architecture_postgres_choice", "title": "...", "similarity": 0.97},
+      {"id": "dec_2026-03-15_architecture_db_selection",    "title": "...", "similarity": 0.88}
+    ]
+  }
+}
+```
+
+- `ok`는 **true** (에러 아님, 정책에 의한 거부)
+- `captured=false` + `reason` 로 차단 통보
+- `novelty.related[]`에 상위 3개 유사 record (id/title/similarity). 에이전트는 `related[0].id`로 가장 유사한 record에 접근 가능
+- **`similar_to` 필드 없음** (D10 Archived — Python parity 우선)
+
+### Python 비-fatal 처리 (L1370-1372)
+```python
+except Exception as e:
+    logger.warning("Novelty check failed (non-fatal): %s", e)
+```
+embed/score/decrypt 어느 단계든 예외 시 novelty 판정 없이 (default `novel`) Phase 5로 진행 (capture 성공 유지).
+
+### 임베딩 텍스트 선택 — `pickEmbedText(record)`
+
+Python `embedding.py:L21-30 _embedding_text_for_record`:
+```python
+def _embedding_text_for_record(record):
+    if record.reusable_insight and record.reusable_insight.strip():
+        return record.reusable_insight
+    return record.payload.text
+```
+
+Go:
+```go
+func pickEmbedText(r *domain.DecisionRecord) string {
+    if strings.TrimSpace(r.ReusableInsight) != "" {
+        return r.ReusableInsight
+    }
+    return r.Payload.Text
+}
+```
+
+**왜 input extracted dict가 아니라 records[0]에서 뽑나** (Python `server.py:L1337` 기준):
+- Phase 5 batch embed가 `records[i]`의 텍스트를 임베딩해서 envector에 저장 → recall 시 같은 vector 공간에서 유사도 비교
+- Phase 4 novelty check도 같은 함수(`_embedding_text_for_record`)로 `records[0]` 텍스트를 뽑아야 vector 공간 일치
+- input `extracted.payload.text`와 `records[0].Payload.Text`는 다를 수 있음 (record_builder의 `render_payload_text`로 새로 렌더되니까)
+- → **embedding consistency를 위해 record_builder가 novelty 전에 돌고, novelty가 records[0]에서 텍스트를 뽑는 것이 정확한 포팅**
+
+### 관련 결정
+- ~~**D10**: `similar_to` 필드~~ **Archived (2026-04-22)** — Python parity로 drop. `novelty.related[]` 사용
+- **D11**: novelty 임계값 `{0.3, 0.7, 0.95}` (Python runtime 기본값)
+- **D12**: 첫 capture (top-k 빈 경우) → `similarity=0` → `novel` 판정
+- **D26**: 점수 복호화 Vault 위임 (rune-mcp는 SecKey 미보유)
+
+### 분류 기준 (Python `embedding.py:L49-56` bit-identical)
+
+| similarity (max) | class | 의미 |
+|---|---|---|
+| `< 0.3` | `novel` | 완전히 새로운 내용 |
+| `0.3 ~ 0.7` | `evolution` | 관련 있지만 다른 각도 (새 phase) |
+| `0.7 ~ 0.95` | `related` | 같은 토픽 |
+| `≥ 0.95` | `near_duplicate` | 거의 동일, capture 차단 |
+
+**임계값**: `{0.3, 0.7, 0.95}` (Python `server.py:L102-104` runtime defaults).
+
+> **주의**: Python `embedding.py` 모듈 상수는 `{0.4, 0.7, 0.93}`이지만 `server.py`에서 `_classify_novelty(max_sim)` 호출 시 자기 defaults `{0.3, 0.7, 0.95}`를 명시 전달 → module 상수는 dead code. runtime 동작은 0.3/0.7/0.95.
+
+**`novelty.score` 의미**: `round(1.0 - max_similarity, 4)` — **inverted** (유사도 높을수록 score 낮음). 기존 레코드 없으면 score=1.0 (최대 novelty).
+
+### 에러 (모두 non-fatal — Python L1370-1372)
+| 상황 | 처리 |
+|---|---|
+| 임베딩 텍스트 빈 문자열 (records[0]의 reusable_insight·payload.text 둘 다 비었을 때) | `EMPTY_EMBED_TEXT`. record_builder가 이걸 보장해야 — 발생 시 record_builder bug |
+| embedder 실패 | non-fatal warn 로그 + Phase 5 진행 (novelty=novel default) |
+| envector.Score 실패 | 동일 |
+| Vault.DecryptScores 실패 | 동일 |
+| metadata.id 조회 실패 | `related[i].id`가 빈 문자열 ("" 유지, 판정 자체는 유효) |
+
+### embedder gRPC 에러 매핑 (호출 시점에 일관 적용)
+| gRPC | 도메인 에러 | retry |
+|---|---|---|
+| `UNAVAILABLE` | `EmbedderUnavailableError` | ✓ |
+| `DEADLINE_EXCEEDED` | `EmbedderTimeoutError` | ✓ |
+| `RESOURCE_EXHAUSTED` | `EmbedderBusyError` | ✓ |
+| `INVALID_ARGUMENT` | `EmbedderInvalidInputError` | ✗ |
+| 기타 | `EmbedderError(wrap)` | ✗ |
+
+dim 검증: `Info.vector_dim`(1024 예상)과 실제 응답 `vector` 길이 불일치 시 비-retryable 에러 (모델 mismatch 방어).
+
+### 구현 위치
+- `internal/policy/novelty.go` (ClassifyNovelty)
+- `internal/adapters/embedder/client.go` (EmbedSingle)
+- `internal/adapters/envector/client.go` (Score)
+- `internal/adapters/vault/client.go` (DecryptScores)
+- `internal/service/capture.go` (호출 orchestration + Related[] 빌드 + near_duplicate 응답 조립)
+
+---
+
+## Phase 5 — Batch embed + AES envelope
+
+### 책임
+- `records` 전체를 batch embed (1회 gRPC 호출, D16) → N vectors
+- 각 record metadata JSON을 AES-256-CTR envelope으로 봉인 → N envelopes
+
+### 구현 형태
+```go
+// internal/service/capture.go — Phase 5
+// 5a. batch embedding
+embedTexts := make([]string, len(records))
+for i, r := range records {
+    embedTexts[i] = pickEmbedText(&r)  // Phase 4와 동일 함수 (reusable_insight > payload.text)
+}
+vectors, err := s.Embedder.EmbedBatch(ctx, embedTexts)  // embedder EmbedBatch 1회 (D16)
+if err != nil {
+    return nil, fmt.Errorf("embed batch: %w", err)
+}
+
+// 5b. AES envelope (Python envector_sdk.py:L227-234 _app_encrypt_metadata)
+envelopes := make([]string, len(records))
+for i, r := range records {
+    body, _ := json.Marshal(r)
+    envelopes[i], err = envector.Seal(s.AgentDEK, s.AgentID, body)
+    if err != nil {
+        return nil, fmt.Errorf("seal record %d: %w", i, err)
+    }
+}
+```
+
 ### AES envelope 포맷
 
 ```json
@@ -518,20 +561,24 @@ agent가 항상 `pre_extraction` 제공하므로 legacy regex fallback은 dead c
 상세 (알고리즘·Go 구현·MAC 미존재 등)는 `spec/components/rune-mcp.md` "AES envelope" 섹션 참조 (pyenvector `mcp/adapter/envector_sdk.py:L227-234` bit-identical).
 
 ### 관련 결정
-- **D13**: record_builder를 rune-mcp로 Option A 포팅 (B·C 미래 선택지)
-- **D14**: LLM fallback 제거 · `pre_extraction` 필수 (없으면 `EXTRACTION_MISSING` 에러)
-- **D15**: `render_payload_text` (Python `templates.py` 363 LoC) 전체 포팅
+- **D7**: embedder retry backoff `[0, 500ms, 2s]`
 - **D16**: multi-record embedding은 batch 1회 (N개 개별 호출 아님)
+- **D26**: capture는 rune-mcp 직접 봉인 (recall은 Vault 위임 — 비대칭)
+- **D1** (Deferred): AES-MAC envelope 추가 (현재 CTR 단독, malleability 잔존)
 
-### 검증 전략
-- `scripts/gen_golden.py`가 Python `RecordBuilder.build_phases()` 실행 결과 JSON 덤프
-- Go 테스트가 같은 입력으로 빌드 후 JSON bit-identical 비교
-- 100+ 실 capture 샘플 커버
+### 에러
+| 상황 | 코드 | retry |
+|---|---|---|
+| embedder batch 실패 | `EMBEDDER_*` (Phase 4와 동일 매핑) | ✓ |
+| `agent_dek` 길이 ≠ 32 | `INVALID_DEK` | ✗ |
+| `agent_id` 빈 문자열 | (Python `envector_sdk.py:L250-251` skip) | safety check, 정상 흐름엔 없음 |
+| JSON marshal 실패 | `INTERNAL_ERROR` | ✗ |
 
 ### 구현 위치
-- `internal/policy/record_builder.go` + 관련 파일
-- `internal/policy/payload_text.go`
+- `internal/policy/embedtext.go` (`pickEmbedText` — Phase 4·5 공유)
+- `internal/adapters/embedder/client.go` (EmbedBatch)
 - `internal/adapters/envector/aes_ctr.go` (Seal · Open)
+- `internal/service/capture.go` (호출)
 
 ---
 
@@ -543,7 +590,7 @@ agent가 항상 `pre_extraction` 제공하므로 legacy regex fallback은 dead c
 
 ### 구현 형태
 ```go
-result, err := s.envector.Insert(ctx, envector.InsertRequest{
+result, err := s.Envector.Insert(ctx, envector.InsertRequest{
     Vectors:  vectors,
     Metadata: envelopes,
 })
@@ -589,9 +636,9 @@ entry := domain.LogEntry{
     ID:           records[0].ID,
     Title:        records[0].Title,
     Domain:       string(records[0].Domain),
-    Mode:         "standard",
+    Mode:         "agent-delegated",
     NoveltyClass: string(novelty.Class),
-    NoveltyScore: &novelty.Similarity,
+    NoveltyScore: &novelty.Score,
 }
 if err := s.captureLog.Append(entry); err != nil {
     slog.ErrorContext(ctx, "capture_log append failed", "err", err)
@@ -618,7 +665,7 @@ return &domain.CaptureResponse{
   "id": "dec_2026-04-21_architecture_postgres_choice",
   "title": "PostgreSQL 선택",
   "domain": "architecture",
-  "mode": "standard",
+  "mode": "agent-delegated",
   "novelty_class": "novel",
   "novelty_score": 0.23
 }
@@ -647,19 +694,20 @@ return &domain.CaptureResponse{
 | 1 | state=dormant | `DORMANT` | ✗ |
 | 1 | JSON 파싱 실패 | `INVALID_INPUT` | ✗ |
 | 2 | `text` 빈 문자열 | `INVALID_INPUT` | ✗ |
-| 2 | embed 텍스트 선택 실패 | `EMPTY_EMBED_TEXT` | ✗ |
-| 3 | embedder 미기동 | `EMBEDDER_UNAVAILABLE` | ✓ (retry 3회) |
-| 3 | embedder 모델 로드 중 | `EMBEDDER_NOT_READY` | ✓ |
-| 3 | embedder timeout | `EMBEDDER_TIMEOUT` | ✓ |
-| 3 | vector dim ≠ 1024 | `EMBEDDER_DIM_MISMATCH` | ✗ |
-| 4 | envector.Score 실패 | `ENVECTOR_UNAVAILABLE` | ✓ |
-| 4 | Vault.DecryptScores 실패 | `VAULT_DECRYPT_FAILED` | ✓ |
-| 4 | near_duplicate | (ok=false, reason 반환) | — |
-| 4 | similar_to 조회 실패 | **Degrade (좌표 fallback)** | — |
-| 5 | `pre_extraction` 없음 | `EXTRACTION_MISSING` | ✗ |
-| 5 | record_builder 내부 에러 (regex 등) | `RECORD_BUILD_FAILED` | ✗ |
+| 2 | `extracted` 부재/파싱 실패 | `INVALID_INPUT` | ✗ |
+| 2 | `tier2.capture=false` | (ok=true, captured=false 응답) | — |
+| 3 | `pre_extraction` 없음 | `EXTRACTION_MISSING` | ✗ |
+| 3 | record_builder 내부 에러 (regex 등) | `RECORD_BUILD_FAILED` | ✗ |
+| 3 | `BuildPhases`가 0 record 반환 | `INTERNAL_ERROR` | ✗ |
+| 4 | records[0] embed 텍스트 빈 문자열 | `EMPTY_EMBED_TEXT` | ✗ (record_builder bug 신호) |
+| 4 | embedder 미기동 / 모델 로드 중 | `EMBEDDER_UNAVAILABLE` / `EMBEDDER_NOT_READY` | ✓ (retry 3회) |
+| 4 | embedder timeout | `EMBEDDER_TIMEOUT` | ✓ |
+| 4 | vector dim ≠ 1024 | `EMBEDDER_DIM_MISMATCH` | ✗ |
+| 4 | envector.Score / Vault.DecryptScores 실패 | **non-fatal warn 로그** + Phase 5 진행 (novelty=novel default) | — |
+| 4 | near_duplicate | (ok=true, captured=false 응답) | — |
 | 5 | DEK 길이 ≠ 32 | `INVALID_DEK` | ✗ |
-| 5 | batch embed 실패 | `EMBEDDER_*` (Phase 3와 동일) | ✓ |
+| 5 | batch embed 실패 | `EMBEDDER_*` (Phase 4와 동일 매핑) | ✓ |
+| 5 | AES seal 실패 | `INTERNAL_ERROR` | ✗ |
 | 6 | envector.Insert 실패 | `ENVECTOR_INSERT_FAILED` | ✓ |
 | 6 | `len(ItemIDs) != len(Vectors)` | `ENVECTOR_INCONSISTENT` | ✗ (D17 재검토 trigger) |
 | 7 | capture_log append 실패 | **Degrade (성공 응답 유지)** | — |
@@ -670,13 +718,12 @@ return &domain.CaptureResponse{
 | Phase | 결정 번호 |
 |---|---|
 | 1 (MCP 진입점) | D2 |
-| 2 (검증 + text 선택) | D3, D4, D5 |
-| 3 (embedder 호출) | D7, D8, D30 (D6, D9 Archived — embedder 담당 범위) |
-| 4 (Novelty check) | D10, D11, D12 |
-| 5 (record_builder + AES) | D13, D14, D15, D16 |
+| 2 (검증 + Detection/ExtractionResult 파싱) | D3, D4, D14 |
+| 3 (record_builder + DecisionRecord 조립) | D13, D14, D15 |
+| 4 (embed + score + decrypt + classify) | D7, D8, D11, D12, D26, D30 (D6, D9, D10 Archived) |
+| 5 (batch embed + AES envelope) | D7, D16, D26, D1 (Deferred) |
 | 6 (envector.Insert) | D17, D18 |
 | 7 (capture_log + 응답) | D19, D20 |
-| 전역 (미해결) | D1 (AES-MAC envelope, Deferred) |
 
 결정 상세(배경·선택지·근거·구현·재평가 트리거)는 `docs/v04/decisions.md` 참조.
 
@@ -694,21 +741,21 @@ internal/validate/
 └── capture.go                                 # Phase 2 검증 + 정규화
 
 internal/policy/
-├── embedtext.go                               # Phase 2 text_to_embed 선택
-├── novelty.go                                 # Phase 4 분류
-├── embedder.go                                # retry 정책 상수
-├── record_builder.go                          # Phase 5 메인
+├── detection.go                               # Phase 2 DetectionFromAgent
+├── embedtext.go                               # Phase 4·5 pickEmbedText (records[0] 또는 N records)
+├── novelty.go                                 # Phase 4 ClassifyNovelty
+├── record_builder.go                          # Phase 3 메인
 ├── pii.go · quote.go · rationale.go
 ├── evidence.go · certainty.go · status.go
 ├── domain.go · tags.go · title.go
 ├── record_id.go · consistency.go
-└── payload_text.go                            # templates 이식
+└── payload_text.go                            # Phase 3 templates 이식
 
 internal/adapters/
-├── embedder/client.go                         # Phase 3 gRPC client (embedder)
+├── embedder/client.go                         # Phase 4·5 gRPC client (EmbedSingle, EmbedBatch)
 ├── embedder/info_cache.go                      # Info sync.Once 캐시
 ├── embedder/retry.go                           # D7 backoff
-├── envector/client.go                         # Phase 4·6 SDK 래퍼
+├── envector/client.go                         # Phase 4·6 SDK 래퍼 (Score, Insert)
 ├── envector/aes_ctr.go                        # Phase 5 Seal / Open
 ├── vault/client.go                            # Phase 4 DecryptScores
 └── logio/capture_log.go                       # Phase 7
@@ -720,6 +767,7 @@ internal/domain/
 ├── capture.go                                 # CaptureRequest / Response
 ├── decision_record.go                         # v2.1 전체 struct
 ├── raw_event.go · detection.go · extraction.go
+├── novelty.go                                 # NoveltyInfo / RelatedRecord
 └── logio.go                                   # LogEntry
 ```
 

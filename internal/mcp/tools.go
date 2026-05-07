@@ -20,6 +20,9 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/envector/rune-go/internal/adapters/embedder"
+	"github.com/envector/rune-go/internal/adapters/envector"
+	"github.com/envector/rune-go/internal/adapters/vault"
 	"github.com/envector/rune-go/internal/lifecycle"
 	"github.com/envector/rune-go/internal/service"
 )
@@ -32,10 +35,81 @@ import (
 // CheckState; read-only tools (vault_status, diagnostics, capture_history)
 // can run pre-active for diagnostics.
 type Deps struct {
-	State     *lifecycle.Manager
+	Vault    vault.Client
+	Envector envector.Client
+	Embedder embedder.Client
+	State    *lifecycle.Manager
+
 	Capture   *service.CaptureService
 	Recall    *service.RecallService
 	Lifecycle *service.LifecycleService
+}
+
+func (d *Deps) InjectVault(client vault.Client) {
+	d.Vault = client
+	if d.Capture != nil {
+		d.Capture.Vault = client
+	}
+	if d.Recall != nil {
+		d.Recall.Vault = client
+	}
+	if d.Lifecycle != nil {
+		d.Lifecycle.Vault = client
+	}
+}
+
+func (d *Deps) InjectEmbedder(client embedder.Client) {
+	d.Embedder = client
+	if d.Capture != nil {
+		d.Capture.Embedder = client
+	}
+	if d.Recall != nil {
+		d.Recall.Embedder = client
+	}
+	if d.Lifecycle != nil {
+		d.Lifecycle.Embedder = client
+	}
+}
+
+func (d *Deps) InjectEnvector(client envector.Client) {
+	d.Envector = client
+	if d.Capture != nil {
+		d.Capture.Envector = client
+	}
+	if d.Recall != nil {
+		d.Recall.Envector = client
+	}
+	if d.Lifecycle != nil {
+		d.Lifecycle.Envector = client
+	}
+}
+
+// ApplyVaultBundle propagates per-bundle metadata (AgentID / AgentDEK /
+// IndexName / KeyID) to the three services that need them. Called by the
+// boot loop after Vault.GetAgentManifest succeeds.
+//
+// Without this call, capture's AES envelope sealing fails (empty AgentDEK)
+// and recall / lifecycle diagnostics surface zero-value IndexName. Adapter
+// client injection (InjectVault/InjectEmbedder/InjectEnvector) handles the
+// gRPC connections; this method handles the per-token metadata.
+func (d *Deps) ApplyVaultBundle(b *vault.Bundle) {
+	if b == nil {
+		return
+	}
+	if d.Capture != nil {
+		d.Capture.AgentID = b.AgentID
+		d.Capture.AgentDEK = b.AgentDEK
+		d.Capture.IndexName = b.IndexName
+	}
+	if d.Recall != nil {
+		d.Recall.IndexName = b.IndexName
+	}
+	if d.Lifecycle != nil {
+		d.Lifecycle.IndexName = b.IndexName
+		d.Lifecycle.KeyID = b.KeyID
+		d.Lifecycle.AgentDEK = b.AgentDEK
+		d.Lifecycle.EncKeyLoaded = len(b.EncKey) > 0
+	}
 }
 
 // emptyArgs — input type for tools that take no arguments.

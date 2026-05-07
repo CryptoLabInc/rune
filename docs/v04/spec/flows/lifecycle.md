@@ -474,7 +474,7 @@ func (s *lifecycleService) DeleteCapture(ctx context.Context, args DeleteCapture
     vec, err := s.embedder.EmbedSingle(ctx, embedText)
     if err != nil { return nil, wrapEmbedError(err) }
 
-    aes, err := s.encryptMetadata(target.Metadata)  // Phase 5b of capture flow 재사용
+    aes, err := s.encryptMetadata(target.Metadata)  // Phase 5 (AES envelope) of capture flow 재사용
     if err != nil { return nil, err }
 
     if err := s.envector.Insert(ctx, s.indexName, [][]float32{vec}, []string{aes}); err != nil {
@@ -528,7 +528,7 @@ func (s *lifecycleService) searchByID(ctx context.Context, id string) (*SearchHi
 
 ### 관련 결정
 - **D20** (capture_log append): soft-delete 기록도 동일 포맷
-- Metadata re-encrypt는 capture flow Phase 5b 재사용 (`record_builder` + AES envelope)
+- Metadata re-encrypt는 capture flow Phase 3 (`record_builder`) + Phase 5 (AES envelope) 재사용
 
 ### 구현 위치
 - `internal/service/lifecycle.go` — `DeleteCapture`
@@ -617,7 +617,7 @@ Lifecycle flow는 **새 결정을 발생시키지 않는다**. 기존 결정 재
 | diagnostics | — (read-only 조회) |
 | batch_capture | D14 · D16 (capture flow 재사용) |
 | capture_history | D20 (jsonl 포맷 bit-identical) |
-| delete_capture | D20 (로그) · capture Phase 5b 재사용 |
+| delete_capture | D20 (로그) · capture Phase 3 (record_builder) + Phase 5 (AES envelope) 재사용 |
 | reload_pipelines | — |
 
 모두 **Python 동작 bit-identical** 원칙 (D25/D27 정신 연장). 새 쟁점이 발견되면 D30+로 추가.

@@ -1,5 +1,13 @@
 package envector
 
+import (
+	"errors"
+
+	envector "github.com/CryptoLabInc/envector-go-sdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
 // Error — envector adapter's typed error. Wraps an SDK or gRPC cause.
 // Service layer catches these and converts to domain.RuneError for MCP responses.
 // Spec: docs/v04/spec/components/envector.md §에러 처리.
@@ -26,9 +34,6 @@ var (
 	// Connection / transport.
 	ErrConnectionLost = &Error{Code: "ENVECTOR_CONNECTION_LOST", Retryable: true}
 
-	// ActivateKeys race (Q3 — server-side idempotency assumed MVP).
-	ErrKeyActivationConflict = &Error{Code: "KEY_ACTIVATION_CONFLICT", Retryable: true}
-
 	// PR-conditional: SDK OpenKeysFromFile without SecKey.json (Q4).
 	ErrDecryptorUnavailable = &Error{Code: "DECRYPTOR_UNAVAILABLE", Retryable: false}
 
@@ -39,35 +44,54 @@ var (
 // MapSDKError converts an envector-go SDK error (or underlying gRPC status)
 // into an adapter-level Error. Service layer should subsequently wrap to domain.RuneError.
 //
-// Go relies on SDK typed errors (`errors.Is`) + gRPC status codes — see
-// spec/components/envector.md "Python 대비 (의도적 차이)".
+// Priority: SDK typed errors -> gRPC status codes -> generic fallback
 func MapSDKError(err error) error {
 	if err == nil {
 		return nil
 	}
 
-	// Try gRPC status extraction
-	st, ok := statusFromError(err)
+	// SDK typed errors
+	if errors.Is(err, envector.ErrKeysNotForEncrypt) {
+		return &Error{Code: ErrDecryptorUnavailable.Code, Message: err.Error(), Retryable: false, Cause: err}
+	}
+	if errors.Is(err, envector.ErrKeysNotForDecrypt) {
+		return &Error{Code: ErrDecryptorUnavailable.Code, Message: err.Error(), Retryable: false, Cause: err}
+	}
+	if errors.Is(err, envector.ErrKeysNotForRegister) {
+		return &Error{Code: "KEY_NOT_FOR_REGISTER", Message: err.Error(), Retryable: false, Cause: err}
+	}
+	if errors.Is(err, envector.ErrClientClosed) {
+		return &Error{Code: ErrConnectionLost.Code, Message: err.Error(), Retryable: true, Cause: err}
+	}
+	if errors.Is(err, envector.ErrKeysNotFound) {
+		return &Error{Code: "ENVECTOR_KEYS_NOT_FOUND", Message: err.Error(), Retryable: false, Cause: err}
+	}
+	if errors.Is(err, envector.ErrKeysRequired) {
+		return &Error{Code: "ENVECTOR_KEYS_REQUIRED", Message: err.Error(), Retryable: false, Cause: err}
+	}
+
+	// gRPC status codes
+	st, ok := status.FromError(err)
 	if ok {
-		switch st.code {
-		case codeUnavailable, codeDeadlineExceeded:
+		switch st.Code() {
+		case codes.Unavailable, codes.DeadlineExceeded:
 			return &Error{
 				Code:      ErrConnectionLost.Code,
-				Message:   st.message,
+				Message:   st.Message(),
 				Retryable: true,
 				Cause:     err,
 			}
-		case codeResourceExhausted:
+		case codes.ResourceExhausted:
 			return &Error{
 				Code:      ErrConnectionLost.Code,
-				Message:   "resource exhausted: " + st.message,
+				Message:   "resource exhausted: " + st.Message(),
 				Retryable: true,
 				Cause:     err,
 			}
-		case codeUnauthenticated:
+		case codes.Unauthenticated:
 			return &Error{
 				Code:      "ENVECTOR_AUTH_FAILED",
-				Message:   st.message,
+				Message:   st.Message(),
 				Retryable: false,
 				Cause:     err,
 			}
@@ -81,33 +105,4 @@ func MapSDKError(err error) error {
 		Retryable: false,
 		Cause:     err,
 	}
-}
-
-type grpcStatus struct {
-	code    int
-	message string
-}
-
-// gRPC constants
-const (
-	codeUnauthenticated   = 16
-	codeUnavailable       = 14
-	codeDeadlineExceeded  = 4
-	codeResourceExhausted = 8
-)
-
-func statusFromError(err error) (grpcStatus, bool) {
-	type grpcStatuser interface {
-		GRPCStatus() interface {
-			Code() int
-			Message() string
-		}
-	}
-
-	if gs, ok := err.(grpcStatuser); ok {
-		st := gs.GRPCStatus()
-		return grpcStatus{code: st.Code(), message: st.Message()}, true
-	}
-
-	return grpcStatus{}, false
 }
