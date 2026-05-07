@@ -10,6 +10,8 @@ permissions:
 jobs:
   go-tests:
     name: go test + vet + gofmt
+    # Skip fork PRs — self-hosted runner must not execute untrusted code.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, rune-ci]
     steps:
       - uses: actions/checkout@v4
@@ -18,8 +20,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
-          cache: true
+          # Pull the toolchain version from go.mod so the workflow doesn't
+          # drift when go.mod's `go` / `toolchain` lines bump.
+          go-version-file: go.mod
+          # Disable cache: a malicious PR could write to the runner's
+          # module/build cache, persisting attacker code into later runs.
+          # CI is fast enough on a self-hosted runner without it.
+          cache: false
 
       - name: gofmt (no diff)
         run: |
@@ -34,34 +41,4 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        id: gotest
-        run: |
-          go test -race -timeout 5m ./... 2>&1 | tee gotest_output.txt
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
-        continue-on-error: true
-
-      - name: Save PR info
-        if: always()
-        run: |
-          cat > pr_info.json <<EOF
-          {
-            "PR_NUMBER": "${{ github.event.pull_request.number }}",
-            "EXIT_CODE": "${{ steps.gotest.outputs.exit_code }}",
-            "HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
-            "HAS_CHANGED": "false",
-            "TEST_IDS": ""
-          }
-          EOF
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: |
-            gotest_output.txt
-            pr_info.json
-
-      - name: Fail if tests failed
-        if: always() && steps.gotest.outputs.exit_code != '0'
-        run: exit 1
+        run: go test -race -timeout 5m ./...
