@@ -16,9 +16,10 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -202,7 +203,7 @@ func RunBootLoop(ctx context.Context, m *Manager, deps BootAdapterInjector) {
 func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootResult {
 	cfg, err := config.Load()
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			// Fresh install — config.json not provisioned. Retrying won't help;
 			// user must run /rune:configure first. Persist the dormant state
 			// to config.json so the next boot picks up the same reason
