@@ -149,12 +149,25 @@ func (s *RecallService) searchWithExpansions(
 }
 
 // searchSingle — Python: searcher.py:L371-373 + L375-470 _search_via_vault.
+//
+// Logs each phase (score blob count → decrypt entry count → metadata hit
+// count → resolved hit count) at INFO so a user-facing 0-result recall
+// can be triaged without adding fresh instrumentation. The branches that
+// intentionally abort (silent return on 0 blobs / 0 entries) leave a
+// breadcrumb, since callers used to see only "no results" with no signal
+// as to where the pipeline shed rows.
 func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk int) ([]domain.SearchHit, error) {
 	// Score
 	blobs, err := s.Envector.Score(ctx, vec)
 	if err != nil {
+		slog.Warn("recall: envector score failed", "err", err)
 		return nil, fmt.Errorf("envector score: %w", err)
 	}
+	slog.Info("recall: envector score returned",
+		"blobs", len(blobs),
+		"first_blob_bytes", firstBlobLen(blobs),
+		"topk", topk,
+	)
 	if len(blobs) == 0 {
 		return nil, nil
 	}
@@ -168,8 +181,10 @@ func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk in
 	encryptedBlobB64 := base64.StdEncoding.EncodeToString(blobs[0])
 	entries, err := s.Vault.DecryptScores(ctx, encryptedBlobB64, topk)
 	if err != nil {
+		slog.Warn("recall: vault decrypt_scores failed", "err", err)
 		return nil, fmt.Errorf("vault decrypt scores: %w", err)
 	}
+	slog.Info("recall: vault decrypt_scores returned", "entries", len(entries))
 	if len(entries) == 0 {
 		return nil, nil
 	}
@@ -181,16 +196,32 @@ func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk in
 	}
 	metaEntries, err := s.Envector.GetMetadata(ctx, refs, []string{"metadata"})
 	if err != nil {
+		slog.Warn("recall: envector get_metadata failed", "err", err, "refs", len(refs))
 		return nil, fmt.Errorf("envector get_metadata: %w", err)
 	}
+	slog.Info("recall: envector get_metadata returned",
+		"metaEntries", len(metaEntries),
+		"refs", len(refs),
+	)
 
 	// Search hit
 	hits, err := s.resolveMetadata(ctx, metaEntries, entries)
 	if err != nil {
+		slog.Warn("recall: resolve metadata failed", "err", err)
 		return nil, fmt.Errorf("resolve metadata: %w", err)
 	}
+	slog.Info("recall: hits resolved", "hits", len(hits))
 
 	return hits, nil
+}
+
+// firstBlobLen surfaces the byte size of blobs[0] in slog without
+// nil-deref'ing the slice when blobs is empty.
+func firstBlobLen(blobs [][]byte) int {
+	if len(blobs) == 0 {
+		return 0
+	}
+	return len(blobs[0])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -39,6 +40,25 @@ const version = "0.4.0-alpha"
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Tee slog to ~/.rune/logs/rune-mcp.log so users can inspect what the
+	// MCP server saw when something went sideways. stderr stays the
+	// primary sink (Claude Code captures it however it sees fit); the
+	// file is a best-effort secondary that survives Claude's stderr
+	// handling. Failures here are non-fatal — slog falls back to the
+	// default text handler on stderr only.
+	if home, err := os.UserHomeDir(); err == nil {
+		logDir := filepath.Join(home, ".rune", "logs")
+		if err := os.MkdirAll(logDir, 0o700); err == nil {
+			logPath := filepath.Join(logDir, "rune-mcp.log")
+			if f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+				slog.SetDefault(slog.New(slog.NewTextHandler(
+					io.MultiWriter(os.Stderr, f),
+					&slog.HandlerOptions{Level: slog.LevelInfo},
+				)))
+			}
+		}
+	}
 
 	// SIGINT / SIGTERM → cancel ctx → srv.Run unblocks.
 	// stdin EOF (Claude window closed) also unblocks Run via the StdioTransport.
