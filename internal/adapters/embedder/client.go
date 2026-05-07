@@ -14,7 +14,12 @@ package embedder
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	runedv1 "github.com/CryptoLabInc/runed/gen/runed/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // RetryBackoffs — D7 (Python server.py timeout equivalent).
@@ -51,28 +56,140 @@ type Client interface {
 
 type client struct {
 	sockPath string
-	// TODO: grpc.ClientConn + embedder.v1.EmbedderServiceClient stub (external dep)
-	// TODO: infoCache sync.Once + InfoSnapshot
+	conn     *grpc.ClientConn
+	pb       runedv1.RunedServiceClient
+	info     *infoCache
 }
 
-// New — dials unix socket. TODO: grpc.NewClient("unix:"+sockPath, insecure creds).
+// New dials the runed daemon over unix socket. The caller resolves sockPath
+// (env RUNE_EMBEDDER_SOCKET > config.embedder.socket_path > default
+// ~/.runed/embedding.sock per embedder.md §소켓 경로).
+//
+// grpc-go natively resolves "unix://" targets; no custom dialer is needed.
+// TLS is unnecessary for UDS (kernel-mediated, same machine — embedder.md §Dial).
 func New(sockPath string) (Client, error) {
-	// TODO
-	return &client{sockPath: sockPath}, nil
+	conn, err := grpc.NewClient(
+		"unix://"+sockPath,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("embedder: grpc dial %s: %w", sockPath, err)
+	}
+	return newWithConn(sockPath, conn), nil
 }
 
-// Stub implementations.
+// NewBufconnClient wraps an existing *grpc.ClientConn (e.g., from
+// google.golang.org/grpc/test/bufconn) so tests can exercise the same RPC
+// path without needing a real unix socket / runed daemon.
+func NewBufconnClient(conn *grpc.ClientConn) Client {
+	return newWithConn("bufconn", conn)
+}
+
+func newWithConn(sockPath string, conn *grpc.ClientConn) *client {
+	pb := runedv1.NewRunedServiceClient(conn)
+	return &client{
+		sockPath: sockPath,
+		conn:     conn,
+		pb:       pb,
+		info:     &infoCache{svc: pb},
+	}
+}
 
 func (c *client) EmbedSingle(ctx context.Context, text string) ([]float32, error) {
-	// TODO: call Embed RPC with retry
-	return nil, nil
+	resp, err := retry(ctx, func(ctx context.Context) (*runedv1.EmbedResponse, error) {
+		return c.pb.Embed(ctx, &runedv1.EmbedRequest{Text: text})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetVector(), nil
 }
 
+// EmbedBatch splits len(texts) > Info.MaxBatchSize into chunks and submits
+// each chunk via embedBatchOnce. Order is preserved.
 func (c *client) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
-	// TODO: call EmbedBatch with Info.MaxBatchSize split + retry
-	return nil, nil
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	info, err := c.info.Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("embedder: load Info before EmbedBatch: %w", err)
+	}
+
+	if info.MaxBatchSize <= 0 || len(texts) <= info.MaxBatchSize {
+		return c.embedBatchOnce(ctx, texts)
+	}
+
+	out := make([][]float32, 0, len(texts))
+	for i := 0; i < len(texts); i += info.MaxBatchSize {
+		end := i + info.MaxBatchSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		chunk, err := c.embedBatchOnce(ctx, texts[i:end])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, chunk...)
+	}
+	return out, nil
 }
 
-func (c *client) Info(ctx context.Context) (InfoSnapshot, error)     { return InfoSnapshot{}, nil }
-func (c *client) Health(ctx context.Context) (HealthSnapshot, error) { return HealthSnapshot{}, nil }
-func (c *client) Close() error                                       { return nil }
+func (c *client) embedBatchOnce(ctx context.Context, texts []string) ([][]float32, error) {
+	resp, err := retry(ctx, func(ctx context.Context) (*runedv1.EmbedBatchResponse, error) {
+		return c.pb.EmbedBatch(ctx, &runedv1.EmbedBatchRequest{Texts: texts})
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.GetEmbeddings()) != len(texts) {
+		return nil, fmt.Errorf("embedder: expected %d embeddings, got %d", len(texts), len(resp.GetEmbeddings()))
+	}
+	out := make([][]float32, len(resp.GetEmbeddings()))
+	for i, e := range resp.GetEmbeddings() {
+		out[i] = e.GetVector()
+	}
+	return out, nil
+}
+
+func (c *client) Info(ctx context.Context) (InfoSnapshot, error) { return c.info.Get(ctx) }
+
+// Health issues a Health RPC. Status maps proto enum (STATUS_OK / STATUS_LOADING /
+// STATUS_DEGRADED / STATUS_SHUTTING_DOWN / STATUS_UNSPECIFIED) to the
+// "STATUS_"-stripped string the spec documents (OK / LOADING / DEGRADED /
+// SHUTTING_DOWN / UNSPECIFIED).
+//
+// Health is NOT retried — D8 says first embed call drives connectivity; Health
+// is a diagnostic tool surface (vault_status, diagnostics).
+func (c *client) Health(ctx context.Context) (HealthSnapshot, error) {
+	resp, err := c.pb.Health(ctx, &runedv1.HealthRequest{})
+	if err != nil {
+		return HealthSnapshot{}, err
+	}
+	return HealthSnapshot{
+		Status:        statusName(resp.GetStatus()),
+		UptimeSeconds: resp.GetUptimeSeconds(),
+		TotalRequests: resp.GetTotalRequests(),
+	}, nil
+}
+
+func statusName(s runedv1.HealthResponse_Status) string {
+	switch s {
+	case runedv1.HealthResponse_STATUS_OK:
+		return "OK"
+	case runedv1.HealthResponse_STATUS_LOADING:
+		return "LOADING"
+	case runedv1.HealthResponse_STATUS_DEGRADED:
+		return "DEGRADED"
+	case runedv1.HealthResponse_STATUS_SHUTTING_DOWN:
+		return "SHUTTING_DOWN"
+	default:
+		return "UNSPECIFIED"
+	}
+}
+func (c *client) Close() error {
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
+}
