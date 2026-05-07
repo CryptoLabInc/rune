@@ -18,6 +18,9 @@ import (
 //   - dormant(vault)      → "Check config.vault.endpoint"
 //   - dormant(envector)   → "Check network · API key"
 func CheckState(m *lifecycle.Manager) error {
+	if m == nil {
+		return withHint(domain.ErrPipelineNotReady, "rune-mcp boot has not been wired (Deps.State == nil).")
+	}
 	switch m.Current() {
 	case lifecycle.StateActive:
 		return nil

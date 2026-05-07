@@ -7,9 +7,10 @@
 //
 //	delete_capture, vault_status, diagnostics, reload_pipelines).
 //
-// Phase A (current): MCP handshake + tools/list only. All 8 handlers return
-// "not yet implemented" CallToolResult. RunBootLoop · Vault · envector ·
-// embedder are not wired. Phase 4-5 brings real adapters + service logic.
+// Wiring: Deps holds a State manager + 3 services. Adapter clients (vault /
+// envector / embedder) are populated on the services by the boot loop after
+// Vault returns the bundle. Until boot completes, write tools fail with
+// PIPELINE_NOT_READY through CheckState; read-only tools work degraded.
 //
 // Python reference: mcp/server/server.py (2002 LoC)
 package main
@@ -24,7 +25,9 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/envector/rune-go/internal/lifecycle"
 	"github.com/envector/rune-go/internal/mcp"
+	"github.com/envector/rune-go/internal/service"
 )
 
 // version is the rune-mcp protocol version surfaced in MCP `initialize`.
@@ -47,8 +50,8 @@ func main() {
 		}
 	}()
 
-	// Phase A: empty Deps. RunBootLoop / config.Load / adapter wiring deferred.
-	deps := &mcp.Deps{}
+	deps := buildDeps()
+	go lifecycle.RunBootLoop(ctx, deps.State)
 
 	srv := sdkmcp.NewServer(&sdkmcp.Implementation{
 		Name:    "rune-mcp",
@@ -72,4 +75,29 @@ func main() {
 // SIGINT/SIGTERM, which surfaces as context.Canceled.
 func isNormalShutdown(err error) bool {
 	return err == nil || errors.Is(err, context.Canceled)
+}
+
+// buildDeps wires the state manager + 3 services so that handler dispatch can
+// proceed immediately. Adapter clients (vault.Client, embedder.Client,
+// envector.Client) and DEK/key state are populated by RunBootLoop once Vault
+// returns the bundle — until then, the services see nil adapters and write
+// tools are state-gated to PIPELINE_NOT_READY.
+//
+// State is shared across services so a single Manager.SetState transition
+// updates the gate from every code path uniformly.
+func buildDeps() *mcp.Deps {
+	mgr := lifecycle.NewManager()
+
+	cap := service.NewCaptureService()
+	cap.State = mgr
+
+	life := service.NewLifecycleService()
+	life.State = mgr
+
+	return &mcp.Deps{
+		State:     mgr,
+		Capture:   cap,
+		Recall:    service.NewRecallService(),
+		Lifecycle: life,
+	}
 }
