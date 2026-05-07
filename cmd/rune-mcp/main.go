@@ -20,10 +20,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/envector/rune-go/internal/adapters/config"
+	"github.com/envector/rune-go/internal/adapters/logio"
 	"github.com/envector/rune-go/internal/lifecycle"
 	"github.com/envector/rune-go/internal/mcp"
 	"github.com/envector/rune-go/internal/service"
@@ -87,11 +90,23 @@ func isNormalShutdown(err error) bool {
 func buildDeps() *mcp.Deps {
 	mgr := lifecycle.NewManager()
 
+	// ~/.rune as the config / log root. RuneDir() returns ~/.rune (creating
+	// the parent if needed); fallback to plain "$HOME/.rune" if HOME unset
+	// so handler dispatch never panics during boot/handshake.
+	runeDir, err := config.RuneDir()
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		runeDir = filepath.Join(home, ".rune")
+	}
+	captureLog := logio.New(filepath.Join(runeDir, logio.DefaultFilename))
+
 	cap := service.NewCaptureService()
 	cap.State = mgr
+	cap.CaptureLog = captureLog
 
 	life := service.NewLifecycleService()
 	life.State = mgr
+	life.ConfigDir = runeDir
 
 	return &mcp.Deps{
 		State:     mgr,
