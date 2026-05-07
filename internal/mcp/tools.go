@@ -137,30 +137,30 @@ func Register(srv *sdkmcp.Server, deps *Deps) (err error) {
 	}()
 
 	// Write tools — state-gated.
-	mustAdd(srv, "rune_capture",
+	mustAdd(srv, "capture",
 		"Capture a decision record (agent-delegated extraction required).",
 		handleCapture(deps))
-	mustAdd(srv, "rune_batch_capture",
+	mustAdd(srv, "batch_capture",
 		"Capture a batch of decision records (e.g. session-end sweep).",
 		handleBatchCapture(deps))
-	mustAdd(srv, "rune_recall",
+	mustAdd(srv, "recall",
 		"Query organizational memory by natural-language question.",
 		handleRecall(deps))
-	mustAdd(srv, "rune_delete_capture",
+	mustAdd(srv, "delete_capture",
 		"Soft-delete a record by ID (sets status=reverted, re-inserts).",
 		handleDeleteCapture(deps))
 
 	// Read / diagnostic tools — bypass state gate.
-	mustAdd(srv, "rune_capture_history",
+	mustAdd(srv, "capture_history",
 		"List recent captures from local capture_log.jsonl (read-only).",
 		handleCaptureHistory(deps))
-	mustAdd(srv, "rune_vault_status",
+	mustAdd(srv, "vault_status",
 		"Probe Vault connectivity and report secure-search mode.",
 		handleVaultStatus(deps))
-	mustAdd(srv, "rune_diagnostics",
+	mustAdd(srv, "diagnostics",
 		"Collect a 7-section health snapshot (env / state / vault / keys / pipelines / embedding / envector).",
 		handleDiagnostics(deps))
-	mustAdd(srv, "rune_reload_pipelines",
+	mustAdd(srv, "reload_pipelines",
 		"Re-initialize Vault + envector pipelines (BOOT replay) with envector warmup.",
 		handleReloadPipelines(deps))
 

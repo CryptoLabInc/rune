@@ -12,7 +12,7 @@ import (
 )
 
 func TestIsValidToolName(t *testing.T) {
-	if !isValidToolName("rune_capture") {
+	if !isValidToolName("capture") {
 		t.Error("rune_capture should be valid")
 	}
 	if isValidToolName("") {

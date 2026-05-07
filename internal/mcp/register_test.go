@@ -22,14 +22,14 @@ import (
 // expectedTools — alphabetical order matches what the SDK advertises in
 // tools/list (Python rune v0.3.x bit-identical names).
 var expectedTools = []string{
-	"rune_batch_capture",
-	"rune_capture",
-	"rune_capture_history",
-	"rune_delete_capture",
-	"rune_diagnostics",
-	"rune_recall",
-	"rune_reload_pipelines",
-	"rune_vault_status",
+	"batch_capture",
+	"capture",
+	"capture_history",
+	"delete_capture",
+	"diagnostics",
+	"recall",
+	"reload_pipelines",
+	"vault_status",
 }
 
 // newSession spins up an in-memory MCP server with all 8 tools registered
@@ -143,10 +143,10 @@ func TestRegister_WriteToolsGated(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{"rune_batch_capture", map[string]any{"items": "[]"}},
-		{"rune_capture", map[string]any{"text": "hi", "source": "test", "extracted": map[string]any{}}},
-		{"rune_delete_capture", map[string]any{"record_id": "test-id"}},
-		{"rune_recall", map[string]any{"query": "hello"}},
+		{"batch_capture", map[string]any{"items": "[]"}},
+		{"capture", map[string]any{"text": "hi", "source": "test", "extracted": map[string]any{}}},
+		{"delete_capture", map[string]any{"record_id": "test-id"}},
+		{"recall", map[string]any{"query": "hello"}},
 	}
 
 	for _, tc := range cases {
@@ -190,7 +190,7 @@ func TestRegister_ReadOnlyToolsBypassGate(t *testing.T) {
 	}{
 		{
 			// nil Vault → "standard mode"
-			name:        "rune_vault_status",
+			name:        "vault_status",
 			args:        nil,
 			mustContain: []string{`"vault_configured":false`, "standard"},
 			mustNotContain: []string{
@@ -203,7 +203,7 @@ func TestRegister_ReadOnlyToolsBypassGate(t *testing.T) {
 			// reflects config.json contents (not runtime Manager) and the
 			// test environment may have a real config.json present — see
 			// `LifecycleService.Diagnostics` for the read path.
-			name:        "rune_diagnostics",
+			name:        "diagnostics",
 			args:        nil,
 			mustContain: []string{`"environment"`, `"vault"`, `"keys"`, `"embedding"`},
 			mustNotContain: []string{
@@ -213,7 +213,7 @@ func TestRegister_ReadOnlyToolsBypassGate(t *testing.T) {
 		{
 			// CaptureHistory reads ~/.rune/capture_log.jsonl (likely missing in test env);
 			// the handler should still respond without error (entries: empty, ok: true).
-			name:        "rune_capture_history",
+			name:        "capture_history",
 			args:        map[string]any{"limit": 5.0},
 			mustContain: []string{`"ok":true`},
 			mustNotContain: []string{
@@ -268,7 +268,7 @@ func TestRegister_ErrorResultPreservesRuneError(t *testing.T) {
 	cs := newSession(t)
 
 	res, err := cs.CallTool(t.Context(), &sdkmcp.CallToolParams{
-		Name:      "rune_capture",
+		Name:      "capture",
 		Arguments: map[string]any{"text": "hi", "source": "test", "extracted": map[string]any{}},
 	})
 	if err != nil {
