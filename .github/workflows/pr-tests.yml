@@ -2,10 +2,20 @@
 #   - Files must live under a `tests/` subdirectory and be named `test_*.py`
 #   - Test classes must start with `Test`
 #   - Test functions/methods must start with `test_`
+#
+# v0.4 Go migration note: this pipeline is gated to PRs targeting `main`.
+# The feat/go-migration line — PRs into feat/go-migration, pushes to it,
+# the long-running task branches under it — is excluded. There is no
+# value in running the v0.3 Python pytest suite against an in-flight Go
+# rewrite. When feat/go-migration is ready to merge into main, the CI
+# itself will be rewritten in that final integration PR (Go build, vet,
+# fmt, test -race) so it actually exercises the v0.4 code at the
+# boundary.
 name: PR Tests
 
 on:
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened]
 
 permissions:
