@@ -112,10 +112,10 @@ type DiagnosticsResult struct {
 
 // EnvInfo — OS, Go runtime version, cwd.
 type EnvInfo struct {
-	OS        string `json:"os"`
-	Runtime   string `json:"runtime"`
-	CWD       string `json:"cwd"`
-	GOArch    string `json:"goarch"`
+	OS      string `json:"os"`
+	Runtime string `json:"runtime"`
+	CWD     string `json:"cwd"`
+	GOArch  string `json:"goarch"`
 }
 
 // VaultInfo — subset exposed in diagnostics.
@@ -168,10 +168,10 @@ func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 	// Environment
 	cwd, _ := os.Getwd()
 	r.Environment = EnvInfo{
-		OS:        runtime.GOOS,
-		Runtime:   runtime.Version(),
-		CWD:       cwd,
-		GOArch:    runtime.GOARCH,
+		OS:      runtime.GOOS,
+		Runtime: runtime.Version(),
+		CWD:     cwd,
+		GOArch:  runtime.GOARCH,
 	}
 
 	// Config state

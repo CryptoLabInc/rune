@@ -59,7 +59,7 @@ func SaveToPath(cfg *Config, path string) error {
 //   - "not_configured"     — config.json missing, fresh install
 //   - "vault_unconfigured" — config exists but Vault.Endpoint/Token empty
 //   - "user_deactivated"   — already-dormant config picked up by boot
-//                            (idempotent path, just refreshes timestamp)
+//     (idempotent path, just refreshes timestamp)
 func MarkDormant(reason string) error {
 	cfg, err := Load()
 	if err != nil {

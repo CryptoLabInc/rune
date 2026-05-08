@@ -210,9 +210,9 @@ type Payload struct {
 // DecisionRecord — §3. Python: decision_record.py:L166-213.
 // envector.Insert metadata의 decrypted payload.
 type DecisionRecord struct {
-	SchemaVersion string    `json:"schema_version"` // fixed "2.1"
-	ID            string    `json:"id"`
-	Type          string    `json:"type"` // fixed "decision_record"
+	SchemaVersion string `json:"schema_version"` // fixed "2.1"
+	ID            string `json:"id"`
+	Type          string `json:"type"` // fixed "decision_record"
 
 	Domain       Domain      `json:"domain"`
 	Sensitivity  Sensitivity `json:"sensitivity"`
