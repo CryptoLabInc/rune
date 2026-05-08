@@ -112,10 +112,10 @@ type DiagnosticsResult struct {
 
 // EnvInfo — OS, Go runtime version, cwd.
 type EnvInfo struct {
-	OS        string `json:"os"`
-	Runtime   string `json:"runtime"`
-	CWD       string `json:"cwd"`
-	GOArch    string `json:"goarch"`
+	OS      string `json:"os"`
+	Runtime string `json:"runtime"`
+	CWD     string `json:"cwd"`
+	GOArch  string `json:"goarch"`
 }
 
 // VaultInfo — subset exposed in diagnostics.
@@ -168,10 +168,10 @@ func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 	// Environment
 	cwd, _ := os.Getwd()
 	r.Environment = EnvInfo{
-		OS:        runtime.GOOS,
-		Runtime:   runtime.Version(),
-		CWD:       cwd,
-		GOArch:    runtime.GOARCH,
+		OS:      runtime.GOOS,
+		Runtime: runtime.Version(),
+		CWD:     cwd,
+		GOArch:  runtime.GOARCH,
 	}
 
 	// Config state
@@ -490,11 +490,12 @@ const WarmupTimeout = 60 * time.Second
 //
 // TODO: currently a no-op for state recovery — only envector warmup probe runs.
 // Full re-init requires:
-//   1. internal/lifecycle/boot.go::RunBootLoop body (Vault.GetAgentManifest + bundle setup
-//      + envector.NewClient + state=Active transition)
-//   2. wiring here to re-trigger boot logic on call (state.SetState(Starting) +
-//      RunBootLoop re-invoke, or a shared _init_pipelines helper called from both
-//      startup and this function)
+//  1. internal/lifecycle/boot.go::RunBootLoop body (Vault.GetAgentManifest + bundle setup
+//     + envector.NewClient + state=Active transition)
+//  2. wiring here to re-trigger boot logic on call (state.SetState(Starting) +
+//     RunBootLoop re-invoke, or a shared _init_pipelines helper called from both
+//     startup and this function)
+//
 // Until both land, /rune:activate cannot recover from dormant or trigger first-time
 // pipeline init.
 func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipelinesResult, error) {

@@ -18,45 +18,45 @@ func TestMapSDKError_Nil(t *testing.T) {
 
 func TestMapSDKError_SDKSentinels(t *testing.T) {
 	tests := []struct {
-		name     string
-		err      error
-		wantCode string
+		name      string
+		err       error
+		wantCode  string
 		wantRetry bool
 	}{
 		{
-			name:     "ErrKeysNotForEncrypt",
-			err:      envector.ErrKeysNotForEncrypt,
-			wantCode: "DECRYPTOR_UNAVAILABLE",
+			name:      "ErrKeysNotForEncrypt",
+			err:       envector.ErrKeysNotForEncrypt,
+			wantCode:  "DECRYPTOR_UNAVAILABLE",
 			wantRetry: false,
 		},
 		{
-			name:     "ErrKeysNotForDecrypt",
-			err:      envector.ErrKeysNotForDecrypt,
-			wantCode: "DECRYPTOR_UNAVAILABLE",
+			name:      "ErrKeysNotForDecrypt",
+			err:       envector.ErrKeysNotForDecrypt,
+			wantCode:  "DECRYPTOR_UNAVAILABLE",
 			wantRetry: false,
 		},
 		{
-			name:     "ErrKeysNotForRegister",
-			err:      envector.ErrKeysNotForRegister,
-			wantCode: "KEY_NOT_FOR_REGISTER",
+			name:      "ErrKeysNotForRegister",
+			err:       envector.ErrKeysNotForRegister,
+			wantCode:  "KEY_NOT_FOR_REGISTER",
 			wantRetry: false,
 		},
 		{
-			name:     "ErrClientClosed",
-			err:      envector.ErrClientClosed,
-			wantCode: "ENVECTOR_CONNECTION_LOST",
+			name:      "ErrClientClosed",
+			err:       envector.ErrClientClosed,
+			wantCode:  "ENVECTOR_CONNECTION_LOST",
 			wantRetry: true,
 		},
 		{
-			name:     "ErrKeysNotFound",
-			err:      envector.ErrKeysNotFound,
-			wantCode: "ENVECTOR_KEYS_NOT_FOUND",
+			name:      "ErrKeysNotFound",
+			err:       envector.ErrKeysNotFound,
+			wantCode:  "ENVECTOR_KEYS_NOT_FOUND",
 			wantRetry: false,
 		},
 		{
-			name:     "ErrKeysRequired",
-			err:      envector.ErrKeysRequired,
-			wantCode: "ENVECTOR_KEYS_REQUIRED",
+			name:      "ErrKeysRequired",
+			err:       envector.ErrKeysRequired,
+			wantCode:  "ENVECTOR_KEYS_REQUIRED",
 			wantRetry: false,
 		},
 	}
@@ -142,7 +142,7 @@ func TestMapSDKError_GenericError(t *testing.T) {
 	}
 }
 
-//--- Error types ---//
+// --- Error types ---//
 func TestError_ErrorString(t *testing.T) {
 	tests := []struct {
 		name string

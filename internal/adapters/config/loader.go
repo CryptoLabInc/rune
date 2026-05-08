@@ -3,8 +3,9 @@
 // Python: agents/common/config.py (365 LoC) — Go reduced from 7 sections to 3.
 //
 // Dropped sections (per scope SOT — docs/v04/overview/architecture.md):
-//   envector / embedding / llm / scribe / retriever — moved to Vault bundle
-//   (memory only) or external embedder process.
+//
+//	envector / embedding / llm / scribe / retriever — moved to Vault bundle
+//	(memory only) or external embedder process.
 package config
 
 import (
@@ -33,8 +34,9 @@ type VaultConfig struct {
 }
 
 // FilePerms — per rune-mcp.md §Config:
-//   ~/.rune/               0700
-//   ~/.rune/config.json    0600
+//
+//	~/.rune/               0700
+//	~/.rune/config.json    0600
 const (
 	DirPerm  = 0700
 	FilePerm = 0600

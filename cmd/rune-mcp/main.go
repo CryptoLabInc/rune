@@ -4,7 +4,8 @@
 // Spawn model: Claude Code launches one instance per session via stdio.
 // Lifecycle: starting → waiting_for_vault → active ↔ dormant.
 // Tools: 8 MCP tools (capture, recall, batch_capture, capture_history,
-//        delete_capture, vault_status, diagnostics, reload_pipelines).
+//
+//	delete_capture, vault_status, diagnostics, reload_pipelines).
 //
 // Wiring: Deps holds a State manager + 3 services. Adapter clients (vault /
 // envector / embedder) are populated on the services by the boot loop after
