@@ -7,12 +7,12 @@ go 1.26.2
 //   github.com/modelcontextprotocol/go-sdk v1.5.0  — MCP protocol (D2) ✅ Phase A
 //   google.golang.org/grpc v1.65.0                  — Vault / envector / embedder clients (Phase 4)
 //   google.golang.org/protobuf v1.34.0              — generated stubs (Phase 4)
-//   github.com/CryptoLabInc/envector-go-sdk         — envector FHE client (Q4 PR pending)
+//   github.com/CryptoLabInc/envector-go-sdk         — envector FHE client
 //
 // go 1.25.0 + toolchain pin required by the MCP SDK.
 
 require (
-	github.com/CryptoLabInc/envector-go-sdk v0.1.0
+	github.com/CryptoLabInc/envector-go-sdk v0.1.1
 	github.com/CryptoLabInc/rune-admin/vault v0.0.0-20260506055025-ad52b6bd549d
 	github.com/CryptoLabInc/runed v0.0.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
