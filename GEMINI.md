@@ -82,19 +82,29 @@ When both apply, **call Rune first** to surface prior context, then reason with 
 
 ## Configuration & Runtime Operations
 
-To ensure consistent behavior across different environments, follow these rules for configuration and initialization:
+In v0.4 Rune ships as a single Go binary (`bin/rune-mcp`) declared by the
+plugin / extension manifest. The host CLI (Gemini / Claude / Codex) auto-
+spawns it on session start over stdio — there is no venv, no install
+script, no manual `pip` step. Runtime preparation happens at install time;
+nothing needs to be (re)bootstrapped at session start.
 
-### Plugin Root Detection (STRICT)
-When executing setup or maintenance tasks, you MUST detect the Rune plugin root using this **STRICT** priority order. **DO NOT use `find` or slow recursive searches.** Immediately check these paths in order:
-1. **Direct Path (Primary)**: `~/.gemini/extensions/rune/` (If `<plugin_root>/scripts/bootstrap-mcp.sh` exists here, STOP searching and use this).
-2. **Environment Variable**: `$RUNE_PLUGIN_ROOT` (if set).
-3. **Local Workspace**: Current working directory.
+### Plugin Root Detection
+You only need the plugin root for diagnostics or to inspect
+`~/.gemini/extensions/rune/` artifacts. The MCP server itself is started
+by the CLI; you never invoke it manually.
 
-**Mandate**: Use the first valid path found. DO NOT explore the filesystem beyond these direct checks.
+If you do need the path (e.g. to read extension files):
+1. **Default install location**: `~/.gemini/extensions/rune/`
+2. **Environment variable**: `$RUNE_PLUGIN_ROOT` (if set)
+3. **Local workspace**: current working directory (dev mode)
 
-### Runtime Preparation & Isolation (STRICT)
-Before performing any operation that requires the Rune runtime:
-- Always run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh` to ensure dependencies and environment are ready.
-- **Environment Isolation**: In "no sandbox" mode, you MUST prevent workspace environment bleed. For ALL Python-related commands, you MUST prepend the command with environment sanitization:
-  `env -u VIRTUAL_ENV -u PYTHONPATH <plugin_root>/.venv/bin/python3 ...`
-- Use `<plugin_root>/scripts/bootstrap-mcp.sh` as the single source of truth for runtime setup. Do not attempt to manually install dependencies.
+Use the first valid path found. Do NOT shell out to `find` or recurse
+through the filesystem.
+
+### Runtime Health
+The MCP server's health is observable via the `diagnostics` and
+`vault_status` tools — call those instead of probing the binary directly.
+There is no Python environment, no venv, no `bootstrap-mcp.sh` to source.
+If the boot loop hasn't reached Active, `/rune:status` surfaces the exact
+sub-system that's failing (Vault / Embedder / enVector / etc.) and the
+recovery action.

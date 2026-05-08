@@ -1,18 +1,23 @@
 # Agent Integration Guide
 
-Rune works with all major AI agents via native MCP (Model Context Protocol) support.
+Rune works with all major AI agents via native MCP (Model Context Protocol)
+support. In v0.4 the MCP server is a single Go binary
+(`bin/rune-mcp`) that the host CLI auto-spawns over stdio — no Python
+runtime, no `pip install`, no manual `mcp add` for the supported CLIs.
 
 ## Integration Principles
 
 ### Cross-agent common (single source of truth)
-
-- Runtime prep (venv/deps/self-healing) must go through `scripts/bootstrap-mcp.sh`.
-- Do not duplicate Python setup logic per agent.
+- The Go binary at `cmd/rune-mcp/` is the only MCP server entry point.
+  Plugin / extension manifests point each CLI at the same binary.
+- Runtime preparation happens at install time (the binary is already
+  built and shipped with the plugin tarball — see Task #30 for the
+  release pipeline). Nothing needs to be (re)bootstrapped at session
+  start.
 
 ### Agent-specific adapters (thin layer only)
-
 - Codex-only tasks: `codex mcp add/remove/list` registration flows
-- Claude/Gemini/OpenAI tasks: each client's native MCP registration flow
+- Claude / Gemini / OpenAI: each client's native MCP registration flow
 
 Keep these layers separate to avoid cross-agent drift.
 
@@ -20,66 +25,77 @@ Keep these layers separate to avoid cross-agent drift.
 
 | Agent | Integration | Setup |
 |-------|-------------|-------|
-| **Claude Code** | MCP Native (stdio) | ⭐ Easy |
-| **Codex CLI** | MCP Native (stdio) | ⭐ One Command |
-| **Gemini CLI** | MCP Native (stdio) | ⭐ One Command |
-| **OpenAI GPT** | MCP Native (stdio) | ⭐ Easy |
+| **Claude Code** | MCP Native (stdio) | ⭐ Plugin install |
+| **Codex CLI** | MCP Native (stdio) | ⭐ Skill install |
+| **Gemini CLI** | MCP Native (stdio) | ⭐ Extension install |
+| **OpenAI GPT** | MCP Native (stdio) | ⭐ Programmatic |
 
-> **Note**: The MCP server uses **stdio transport only**. HTTP/SSE mode is not supported.
-
----
+> The MCP server uses **stdio transport only**. HTTP/SSE mode is not supported.
 
 ---
 
 ## Claude Code
 
-### Automatic Setup (Recommended)
+### Plugin install (recommended)
 
 ```bash
-cd rune
-./scripts/install.sh
+# From terminal (local clone)
+$ claude plugin marketplace add ./
+$ claude plugin install rune
+
+# From inside a Claude Code session (remote)
+> /plugin marketplace add https://github.com/CryptoLabInc/rune
+> /plugin install rune
 ```
 
-This prepares runtime using the shared bootstrap flow for Claude usage.
+The plugin manifest (`.claude-plugin/plugin.json`) declares the binary
+path; Claude Code spawns `${CLAUDE_PLUGIN_ROOT}/bin/rune-mcp` via stdio
+on session start. enVector Cloud credentials are delivered automatically
+via the Vault bundle — you never set `ENVECTOR_*` env vars directly.
 
-### Manual Setup
+### Configure credentials
+
+```
+> /rune:configure
+```
+
+Walks you through Vault endpoint + token + TLS choice, writes
+`~/.rune/config.json`, and triggers the boot loop.
+
+### Verify
+
+```
+> /rune:status
+```
+
+Renders per-subsystem health (Vault / EncKey / AgentDEK / Embedder /
+enVector) via the `diagnostics` MCP tool.
+
+### Dev mode (running from a local clone)
 
 ```bash
-claude mcp add --scope user --transport stdio \
-  -e RUNE_CONFIG="$HOME/.rune/config.json" \
-  -e PYTHONPATH="/path/to/rune/mcp" \
-  rune -- \
-  /path/to/rune/.venv/bin/python3 \
-  /path/to/rune/mcp/server/server.py --mode stdio
+$ claude --plugin-dir /path/to/rune
 ```
 
-> enVector Cloud credentials are delivered automatically via the Vault bundle at session start.
-
-Restart Claude Code → MCP tools auto-load.
+Loads the plugin from the working tree instead of the installed cache.
+Useful for iterating on `commands/claude/*.md` or the Go binary without
+re-installing the plugin.
 
 ---
 
 ## Codex CLI
 
-### One-Command Installation
+### Skill install
 
-```bash
-cd rune
-./scripts/install-codex.sh
+```
+> $skill-installer install https://github.com/CryptoLabInc/rune.git
 ```
 
-This automatically:
-1. Creates `.venv` and installs Python dependencies
-2. Registers Rune MCP server as `rune` in Codex
+### Configure
 
-### Codex-only Runtime Ensure
-
-```bash
-cd rune
-./scripts/ensure-codex-ready.sh --register
 ```
-
-This is a Codex-only adapter that reuses `bootstrap-mcp.sh` and then ensures Codex MCP registration.
+> $rune configure
+```
 
 ### Verify
 
@@ -88,204 +104,129 @@ codex mcp list
 # Should show rune
 ```
 
-### Configuration
-
-After installation, configure credentials:
+If `rune` is not listed after install, re-register manually:
 ```bash
-cp config/config.template.json ~/.rune/config.json
-# Edit with your Vault endpoint and token
-# enVector credentials are delivered automatically via the Vault bundle
+codex mcp add rune --command /path/to/bin/rune-mcp --transport stdio
 ```
-
 
 ---
 
 ## Gemini CLI
 
-### Option 1: Gemini SDK
+### Extension install
 
 ```bash
-pip install google-generativeai mcp
+$ gemini extensions install https://github.com/CryptoLabInc/rune.git
 ```
 
-```python
-import google.generativeai as genai
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+### Configure
 
-genai.configure(api_key="your-api-key")
-
-async def main():
-    server_params = StdioServerParameters(
-        command="/path/to/rune/.venv/bin/python3",
-        args=["/path/to/rune/mcp/server/server.py"],
-        env={"PYTHONPATH": "/path/to/rune/mcp"}
-    )
-
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            model = genai.GenerativeModel(
-                model_name='gemini-2.0-flash-exp',
-                tools=[session]  # MCP session
-            )
-
-            chat = model.start_chat()
-            response = await chat.send_message_async(
-                "Create an index called team-decisions"
-            )
-            print(response.text)
-
-import asyncio
-asyncio.run(main())
+```
+> /rune:configure
 ```
 
-### Option 2: Gemini CLI MCP Config
+### Manual `mcp_config.json` (advanced)
 
-```bash
-npm install -g @google/generative-ai-cli
-```
-
-Edit `~/.gemini/mcp_config.json`:
 ```json
 {
   "mcpServers": {
     "rune": {
-      "command": "/path/to/rune/.venv/bin/python3",
-      "args": ["/path/to/rune/mcp/server/server.py"],
-      "env": {
-        "PYTHONPATH": "/path/to/rune/mcp"
-      }
+      "command": "/path/to/bin/rune-mcp",
+      "transport": "stdio"
     }
   }
 }
 ```
 
-```bash
-gemini chat
-> Create an index called team-decisions
-# MCP tools auto-called
-```
+> The legacy `gemini-extension.json` still references
+> `scripts/bootstrap-mcp.sh`; rewriting it for the Go binary is tracked
+> as a follow-up under the Gemini track.
 
 ---
 
 ## OpenAI GPT
 
-**Update 2025**: OpenAI has [native MCP support](https://venturebeat.com/programming-development/openai-updates-its-new-responses-api-rapidly-with-mcp-support-gpt-4o-native-image-gen-and-more-enterprise-features) via Responses API.
-
-### Option 1: OpenAI Agents SDK (Recommended)
-
-```bash
-pip install openai-agents
-```
-
-```python
-from openai_agents import Agent
-from openai_agents.mcp import MCPServerStdio
-
-mcp_server = MCPServerStdio(
-    command="/path/to/rune/.venv/bin/python3",
-    args=["/path/to/rune/mcp/server/server.py"],
-    env={"PYTHONPATH": "/path/to/rune/mcp"}
-)
-
-agent = Agent(
-    model="gpt-4o",
-    mcp_servers=[mcp_server]
-)
-
-response = agent.run("Create an index called team-decisions")
-print(response.final_output)
-```
-
-### Option 2: Responses API (stdio via MCP SDK)
-
-```bash
-pip install openai mcp
-```
+OpenAI's Responses API has [native MCP support](https://venturebeat.com/programming-development/openai-updates-its-new-responses-api-rapidly-with-mcp-support-gpt-4o-native-image-gen-and-more-enterprise-features),
+so you point it at the same Go binary via stdio:
 
 ```python
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# Connect to Rune MCP server via stdio
 server_params = StdioServerParameters(
-    command="/path/to/rune/.venv/bin/python3",
-    args=["/path/to/rune/mcp/server/server.py"],
-    env={"PYTHONPATH": "/path/to/rune/mcp"}
+    command="/path/to/bin/rune-mcp",
+    args=[],  # binary takes no args; reads ~/.rune/config.json
 )
 
-# Use with OpenAI function calling by listing MCP tools
 async with stdio_client(server_params) as (read, write):
     async with ClientSession(read, write) as session:
         tools = await session.list_tools()
-        # Convert MCP tools to OpenAI function format and call as needed
+        # forward tools to OpenAI function calling
 ```
+
+The OpenAI Agents SDK pattern is identical — pass the same `command`
+into `MCPServerStdio`.
 
 ---
 
 ## Multi-Agent Collaboration
 
-Multiple agents can share the same Rune infrastructure via stdio:
+Each agent spawns its own MCP server process; shared state is
+maintained via enVector Cloud (encrypted vectors) and Rune-Vault
+(decryption keys).
 
 ```
-# Each agent launches its own MCP server process (stdio)
-# All connect to the same enVector Cloud index + Rune-Vault
+Claude ──→ rune-mcp (stdio) ──┐
+                              ├──→ enVector Cloud (encrypted)
+Gemini ──→ rune-mcp (stdio) ──┤       └──→ Rune-Vault (secret key)
+                              │
+GPT    ──→ rune-mcp (stdio) ──┘
 ```
 
-**Architecture**:
-```
-Claude ──→ MCP Server (stdio) ──┐
-                                ├──→ enVector Cloud (encrypted)
-Gemini ──→ MCP Server (stdio) ──┤       └──→ Rune-Vault (secret key)
-                                │
-GPT ─────→ MCP Server (stdio) ──┘
-```
-
-Each agent spawns its own MCP server process. Shared state is maintained via enVector Cloud (encrypted vectors) and Rune-Vault (decryption keys).
+All three connect to the same team index + Vault, so a capture from
+one agent is recallable by another.
 
 ---
 
 ## Troubleshooting
 
-### Re-run shared bootstrap (all agents)
-```bash
-cd rune
-SETUP_ONLY=1 ./scripts/bootstrap-mcp.sh
-```
-
 ### MCP server won't start
+
 ```bash
-cd rune
-source .venv/bin/activate
-python mcp/server/server.py --help
+# Run the binary directly to see startup errors
+/path/to/bin/rune-mcp
+# (it will block on stdin — Ctrl-D to exit; you're looking for slog
+# error output before the block)
 ```
 
-### Codex-only registration repair
+If you set `RUNE_MCP_LOG_FILE=` in the spawning shell, the server tees
+its slog to `~/.rune/logs/rune-mcp.log` so you can `tail -f` while the
+host CLI runs it.
+
+### Codex registration repair
+
 ```bash
-cd rune
-./scripts/ensure-codex-ready.sh --register
 codex mcp list
+codex mcp add rune --command /path/to/bin/rune-mcp --transport stdio
 ```
 
-### Missing environment variables
+### Missing or wrong credentials
+
 ```bash
 cat ~/.rune/config.json
-
-# Or set environment variables directly:
-export RUNEVAULT_ENDPOINT="vault-yourteam.oci.envector.io:50051"
-export RUNEVAULT_TOKEN="your-token"
-# Optional: explicit gRPC target override (auto-derived from RUNEVAULT_ENDPOINT if omitted)
-# export RUNEVAULT_GRPC_TARGET="vault-host:50051"
-
-# enVector credentials are delivered automatically via the Vault bundle.
-# You do NOT need to set ENVECTOR_ENDPOINT or ENVECTOR_API_KEY.
+# vault.endpoint, vault.token, ca_cert, tls_disable, state
 ```
+
+enVector credentials are delivered automatically via the Vault bundle
+at boot — they live in memory only and are not stored locally. You do
+NOT need to set `ENVECTOR_ENDPOINT` or `ENVECTOR_API_KEY`.
 
 ### Verify MCP tools are available
 
-In Claude Code, after plugin installation:
+In Claude Code after plugin install:
 ```
-/rune:status
+/plugin            # confirm 'rune' loaded, Errors 0
+/rune:status      # confirm Active + diagnostics snapshot
 ```
 
 ---
@@ -296,4 +237,3 @@ In Claude Code, after plugin installation:
 - [Google Cloud MCP Announcement](https://cloud.google.com/blog/products/ai-machine-learning/announcing-official-mcp-support-for-google-services)
 - [OpenAI Responses API MCP](https://venturebeat.com/programming-development/openai-updates-its-new-responses-api-rapidly-with-mcp-support-gpt-4o-native-image-gen-and-more-enterprise-features)
 - [Gemini CLI MCP Docs](https://geminicli.com/docs/tools/mcp-server/)
-- [FastMCP](https://github.com/jlowin/fastmcp)

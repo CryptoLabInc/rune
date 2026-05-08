@@ -289,22 +289,18 @@ Then reinstall from the [Install](#install) section above.
 ## Troubleshooting
 
 ```
-/rune:status              # or: $rune status
+/rune:status              # or: $rune status — full health snapshot via diagnostics MCP tool
+/rune:reset               # or: $rune reset — clear config and return to dormant
+/rune:configure           # or: $rune configure — re-enter Vault credentials
 ```
 
-```bash
-# Check infrastructure
-cd rune && ./scripts/check-infrastructure.sh
-
-# Reset and reconfigure
-/rune:reset               # or: $rune reset
-/rune:configure           # or: $rune configure
-```
+`/rune:status` reports per-subsystem state (vault / encryption key / embedder /
+enVector reachability). Failures surface a recovery action on the same line.
 
 ## Related Projects
 
 - [Rune-Admin](https://github.com/CryptoLabInc/rune-admin) — Infrastructure deployment and admin tools
-- [pyenvector](https://socket.dev/pypi/package/pyenvector) — FHE encryption SDK
+- [envector-go-sdk](https://github.com/CryptoLabInc/envector-go-sdk) — FHE encryption SDK (Go)
 - [enVector Cloud](https://envector.io) — Encrypted vector database
 
 ## Support
