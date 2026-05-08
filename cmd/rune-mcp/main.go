@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -39,6 +40,30 @@ const version = "0.4.0-alpha"
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Optional file tee for slog. Default off — production stays on
+	// stderr only (Claude Code captures it). Devs opt in via env var:
+	//   RUNE_MCP_LOG_FILE unset       → stderr only (default)
+	//   RUNE_MCP_LOG_FILE=""          → tee to ~/.rune/logs/rune-mcp.log
+	//   RUNE_MCP_LOG_FILE=/some/path  → tee to that path
+	// Failures (mkdir / open) are non-fatal — slog falls back to stderr.
+	if path, ok := os.LookupEnv("RUNE_MCP_LOG_FILE"); ok {
+		if path == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				path = filepath.Join(home, ".rune", "logs", "rune-mcp.log")
+			}
+		}
+		if path != "" {
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err == nil {
+				if f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+					slog.SetDefault(slog.New(slog.NewTextHandler(
+						io.MultiWriter(os.Stderr, f),
+						&slog.HandlerOptions{Level: slog.LevelInfo},
+					)))
+				}
+			}
+		}
+	}
 
 	// SIGINT / SIGTERM → cancel ctx → srv.Run unblocks.
 	// stdin EOF (Claude window closed) also unblocks Run via the StdioTransport.
