@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 
 GREEN=$'\033[0;32m'
 RED=$'\033[0;31m'
