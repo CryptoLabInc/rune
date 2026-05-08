@@ -31,9 +31,13 @@ import (
 
 // SensitivePatterns — runtime-compiled. Order matters only for callers
 // that introspect (none today); both apply on every string.
+//
+// The labelled-secret pattern uses `\b` so substrings inside a longer
+// identifier (mykey, keystore, keyboard, tokenizer) are not mistakenly
+// treated as the bare `key` / `token` label and over-redacted.
 var SensitivePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(sk-|pk-|api_|envector_|evt_)[a-zA-Z0-9_-]{10,}`),
-	regexp.MustCompile(`(?i)(token|key|secret|password)["\s:=]+[a-zA-Z0-9_-]{20,}`),
+	regexp.MustCompile(`(?i)\b(token|key|secret|password)["\s:=]+[a-zA-Z0-9_-]{20,}`),
 }
 
 // redact applies every SensitivePatterns regex, replacing each match
@@ -112,16 +116,42 @@ func redactAttr(a slog.Attr) slog.Attr {
 			out[i] = redactAttr(g)
 		}
 		return slog.Attr{Key: a.Key, Value: slog.GroupValue(out...)}
+	case slog.KindLogValuer:
+		// slog.Logger does not pre-resolve LogValuer when a wrapping
+		// Handler sits above the leaf — the Resolve happens inside the
+		// inner Handler.Handle, after our filter. So secrets wrapped in
+		// LogValuer would otherwise leak. Resolve here, then recurse so
+		// the resolved value (may be string / group / any) flows back
+		// through the same redactor.
+		return redactAttr(slog.Attr{Key: a.Key, Value: a.Value.Resolve()})
 	case slog.KindAny:
-		// Stringer values may hold secrets too. LogValuer is resolved
-		// upstream before slog calls us; plain Stringer is best-effort.
+		// Stringer values may hold secrets too. Best-effort: a panicking
+		// Stringer must not take the whole logger down — log lines are
+		// for incident response, not the source of new incidents. The
+		// recover scope is per-attr so one bad attr only loses its own
+		// redaction, not the rest of the record.
 		if v := a.Value.Any(); v != nil {
 			if s, ok := v.(fmt.Stringer); ok {
-				return slog.String(a.Key, redact(s.String()))
+				if str, ok := safeStringer(s); ok {
+					return slog.String(a.Key, redact(str))
+				}
 			}
 		}
 	}
 	return a
+}
+
+// safeStringer returns s.String() with panics swallowed. If String
+// panics, ok=false and the caller should leave the attr unredacted —
+// dropping the attr entirely would be worse than logging it raw.
+func safeStringer(s fmt.Stringer) (out string, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = ""
+			ok = false
+		}
+	}()
+	return s.String(), true
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

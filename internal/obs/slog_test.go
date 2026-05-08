@@ -48,6 +48,28 @@ func TestRedact_LabeledSecrets(t *testing.T) {
 	}
 }
 
+// TestRedact_NoFalsePositive — substrings inside longer identifiers
+// must not trigger the labelled-secret pattern. mykey/keystore/keyboard
+// /tokenizer all share a substring with the bare label list but are
+// not themselves secret declarations.
+func TestRedact_NoFalsePositive(t *testing.T) {
+	inputs := []string{
+		"mykey: ABCDEFGHIJKLMNOPQRSTUVWX",
+		"keystore=ABCDEFGHIJKLMNOPQRSTUVWX",
+		"keyboard=ABCDEFGHIJKLMNOPQRSTUVWX",
+		"tokenizer: ABCDEFGHIJKLMNOPQRSTUVWX",
+		"my_key=ABCDEFGHIJKLMNOPQRSTUVWX",
+	}
+	for _, in := range inputs {
+		t.Run(in, func(t *testing.T) {
+			got := redact(in)
+			if got != in {
+				t.Fatalf("redact(%q) modified the string to %q — false positive", in, got)
+			}
+		})
+	}
+}
+
 // captureHandler — collects emitted records for assertion.
 type captureHandler struct {
 	buf     *bytes.Buffer
@@ -125,6 +147,53 @@ func TestFilteringHandler_WithAttrs(t *testing.T) {
 	}
 	if strings.Contains(out, "api_ABCDEFGHIJKLMN") {
 		t.Errorf("raw token should not appear: %q", out)
+	}
+}
+
+// secretValuer wraps a secret in a slog.LogValuer. The Resolve()
+// returns a string; without KindLogValuer handling in redactAttr the
+// secret would land in the inner handler unredacted.
+type secretValuer string
+
+func (s secretValuer) LogValue() slog.Value { return slog.StringValue(string(s)) }
+
+func TestFilteringHandler_RedactsLogValuer(t *testing.T) {
+	cap := newCapture()
+	logger := slog.New(NewHandler(cap, slog.LevelInfo))
+	logger.Info("vault dial",
+		slog.Any("token", secretValuer("evt_AABBCCDDEEFF112233")),
+	)
+
+	out := cap.buf.String()
+	if !strings.Contains(out, "evt_AABB***") {
+		t.Errorf("expected redacted token from LogValuer, got: %q", out)
+	}
+	if strings.Contains(out, "evt_AABBCCDDEEFF112233") {
+		t.Errorf("raw token leaked through LogValuer: %q", out)
+	}
+}
+
+// panickyStringer panics from String(). The handler must not crash
+// the program — losing redaction on this attr is acceptable; taking
+// down the logger is not.
+type panickyStringer struct{}
+
+func (panickyStringer) String() string { panic("intentional test panic") }
+
+func TestFilteringHandler_StringerPanicNonFatal(t *testing.T) {
+	cap := newCapture()
+	logger := slog.New(NewHandler(cap, slog.LevelInfo))
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("logger should swallow Stringer panic, got: %v", r)
+		}
+	}()
+
+	logger.Info("attempt", slog.Any("payload", panickyStringer{}))
+
+	if cap.buf.Len() == 0 {
+		t.Errorf("expected the rest of the record to still be logged after Stringer panic")
 	}
 }
 
