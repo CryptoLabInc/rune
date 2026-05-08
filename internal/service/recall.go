@@ -635,9 +635,9 @@ func calculateConfidence(results []domain.SearchHit) float64 {
 	}
 
 	certaintyWeights := map[string]float64{
-		"supported":            1.0,
-		"partially_supported":  0.6,
-		"unknown":              0.3,
+		"supported":           1.0,
+		"partially_supported": 0.6,
+		"unknown":             0.3,
 	}
 
 	totalScore := 0.0

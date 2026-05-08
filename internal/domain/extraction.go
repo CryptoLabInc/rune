@@ -61,7 +61,6 @@ func (r *ExtractionResult) IsBundle() bool {
 	return r.GroupType == "bundle" && len(r.Phases) > 1
 }
 
-
 // ParseExtractionFromAgent builds Detection + ExtractionResult from the flat
 // CaptureRequest.Extracted dict sent by the agent. Wire → internal conversion.
 //
