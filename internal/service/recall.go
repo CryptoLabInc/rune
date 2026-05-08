@@ -36,10 +36,33 @@ func NewRecallService() *RecallService {
 	return &RecallService{Now: time.Now}
 }
 
-// Handle — Python: server.py:L910-1034 tool_recall + searcher.search().
+// External-IO call deadlines (per call, not aggregate). Each external op
+// gets a fresh context derived from the caller's; the constants are
+// upper bounds — a healthy stack returns in milliseconds. Picking these
+// values:
 //
-// TODO: External IO calls (Embedder, Envector, Vault) do not have explicit timeouts.
-// We should add context timeouts (context.WithTimeout) for these operations after we determine optimal duration
+//   - embedder: runed has typically <100ms latency on warm queries;
+//     10s tolerates first-call cold starts when ggml loads weights.
+//   - envector Score: FHE inner-product is the heaviest hop on the
+//     recall path — 30s mirrors Python's WARMUP_TIMEOUT bound.
+//   - envector GetMetadata: shard/row lookup of cipher metadata; 15s.
+//   - vault DecryptScores: FHE decrypt, also heavy; 30s.
+//   - vault DecryptMetadata: AES-only, fast even when batched; 30s
+//     bounds pathological large batches.
+//
+// These exist so a hung dependency surfaces as a typed error in seconds
+// instead of stalling the MCP request indefinitely (gRPC keepalive
+// alone won't fail an active call when the server replies but never
+// finishes).
+const (
+	embedderCallTimeout         = 10 * time.Second
+	envectorScoreTimeout        = 30 * time.Second
+	envectorMetadataTimeout     = 15 * time.Second
+	vaultDecryptScoresTimeout   = 30 * time.Second
+	vaultDecryptMetadataTimeout = 30 * time.Second
+)
+
+// Handle — Python: server.py:L910-1034 tool_recall + searcher.search().
 func (s *RecallService) Handle(ctx context.Context, args *domain.RecallArgs) (*domain.RecallResult, error) {
 	// Phase 2: parse query
 	parsed := policy.Parse(args.Query)
@@ -50,7 +73,9 @@ func (s *RecallService) Handle(ctx context.Context, args *domain.RecallArgs) (*d
 	}
 
 	// Phase 3: embed expansions
-	vectors, err := s.Embedder.EmbedBatch(ctx, expansions)
+	embedCtx, cancel := context.WithTimeout(ctx, embedderCallTimeout)
+	vectors, err := s.Embedder.EmbedBatch(embedCtx, expansions)
+	cancel()
 	if err != nil {
 		return nil, fmt.Errorf("embed expansions: %w", err)
 	}
@@ -126,7 +151,9 @@ func (s *RecallService) searchWithExpansions(
 		}
 	}
 	if !originalInExps && s.Embedder != nil {
-		vec, err := s.Embedder.EmbedSingle(ctx, original)
+		embedCtx, cancel := context.WithTimeout(ctx, embedderCallTimeout)
+		vec, err := s.Embedder.EmbedSingle(embedCtx, original)
+		cancel()
 		if err == nil {
 			hits, err := s.searchSingle(ctx, vec, topk)
 			if err == nil {
@@ -158,7 +185,9 @@ func (s *RecallService) searchWithExpansions(
 // as to where the pipeline shed rows.
 func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk int) ([]domain.SearchHit, error) {
 	// Score
-	blobs, err := s.Envector.Score(ctx, vec)
+	scoreCtx, cancel := context.WithTimeout(ctx, envectorScoreTimeout)
+	blobs, err := s.Envector.Score(scoreCtx, vec)
+	cancel()
 	if err != nil {
 		slog.Warn("recall: envector score failed", "err", err)
 		return nil, fmt.Errorf("envector score: %w", err)
@@ -179,7 +208,9 @@ func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk in
 	// proto3 string-validation path and trips
 	// "grpc: error while marshaling: string field contains invalid UTF-8".
 	encryptedBlobB64 := base64.StdEncoding.EncodeToString(blobs[0])
-	entries, err := s.Vault.DecryptScores(ctx, encryptedBlobB64, topk)
+	decCtx, cancel := context.WithTimeout(ctx, vaultDecryptScoresTimeout)
+	entries, err := s.Vault.DecryptScores(decCtx, encryptedBlobB64, topk)
+	cancel()
 	if err != nil {
 		slog.Warn("recall: vault decrypt_scores failed", "err", err)
 		return nil, fmt.Errorf("vault decrypt scores: %w", err)
@@ -194,7 +225,9 @@ func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk in
 	for i, e := range entries {
 		refs[i] = envector.MetadataRef{ShardIdx: uint64(e.ShardIdx), RowIdx: uint64(e.RowIdx)}
 	}
-	metaEntries, err := s.Envector.GetMetadata(ctx, refs, []string{"metadata"})
+	metaCtx, cancel := context.WithTimeout(ctx, envectorMetadataTimeout)
+	metaEntries, err := s.Envector.GetMetadata(metaCtx, refs, []string{"metadata"})
+	cancel()
 	if err != nil {
 		slog.Warn("recall: envector get_metadata failed", "err", err, "refs", len(refs))
 		return nil, fmt.Errorf("envector get_metadata: %w", err)
@@ -299,11 +332,15 @@ func (s *RecallService) resolveMetadata(ctx context.Context, entries []envector.
 
 	// Batch decrypt AES envelopes
 	if len(aesList) > 0 && s.Vault != nil {
-		decrypted, err := s.Vault.DecryptMetadata(ctx, aesList)
+		batchCtx, batchCancel := context.WithTimeout(ctx, vaultDecryptMetadataTimeout)
+		decrypted, err := s.Vault.DecryptMetadata(batchCtx, aesList)
+		batchCancel()
 		if err != nil {
 			slog.Warn("batch decrypt failed, trying per-entry", "err", err)
 			for j, aesIdx := range aesIndices {
-				single, singleErr := s.Vault.DecryptMetadata(ctx, []string{aesList[j]})
+				singleCtx, singleCancel := context.WithTimeout(ctx, vaultDecryptMetadataTimeout)
+				single, singleErr := s.Vault.DecryptMetadata(singleCtx, []string{aesList[j]})
+				singleCancel()
 				if singleErr == nil && len(single) > 0 {
 					var parsed map[string]any
 					if json.Unmarshal([]byte(single[0]), &parsed) == nil {
@@ -441,7 +478,9 @@ func (s *RecallService) expandPhaseChains(ctx context.Context, results []domain.
 
 	for _, g := range incomplete {
 		query := fmt.Sprintf("Group: %s", g.gid)
-		vec, err := s.Embedder.EmbedSingle(ctx, query)
+		embedCtx, cancel := context.WithTimeout(ctx, embedderCallTimeout)
+		vec, err := s.Embedder.EmbedSingle(embedCtx, query)
+		cancel()
 		if err != nil {
 			continue
 		}

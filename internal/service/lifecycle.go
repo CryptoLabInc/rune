@@ -486,18 +486,17 @@ type WarmupInfo struct {
 // WarmupTimeout — Python WARMUP_TIMEOUT (server.py:L1059). 60s.
 const WarmupTimeout = 60 * time.Second
 
-// ReloadPipelines — re-init + warmup
+// ReloadPipelines — re-trigger the boot loop from Dormant + warmup envector.
 //
-// TODO: currently a no-op for state recovery — only envector warmup probe runs.
-// Full re-init requires:
-//  1. internal/lifecycle/boot.go::RunBootLoop body (Vault.GetAgentManifest + bundle setup
-//     + envector.NewClient + state=Active transition)
-//  2. wiring here to re-trigger boot logic on call (state.SetState(Starting) +
-//     RunBootLoop re-invoke, or a shared _init_pipelines helper called from both
-//     startup and this function)
+// On a terminal Dormant state (boot loop's goroutine has exited), call
+// Manager.Retrigger to spawn a fresh RunBootLoop bound to the same ctx +
+// Deps; main.go wires the spawn callback at startup. Manager.Retrigger
+// is a silent no-op when state is Starting / WaitingForVault / Active —
+// safe to call unconditionally if the trigger surface ever widens.
 //
-// Until both land, /rune:activate cannot recover from dormant or trigger first-time
-// pipeline init.
+// /rune:activate from a freshly-spawned MCP server (no ~/.rune/config.json
+// at boot, then user ran /rune:configure) reaches Active via this path.
+// No process restart is required.
 func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipelinesResult, error) {
 	// Dormant terminal: the boot loop has exited. Ask Manager to spawn a
 	// fresh attempt (Manager.Retrigger silently no-ops on non-dormant
