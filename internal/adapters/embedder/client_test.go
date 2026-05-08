@@ -29,8 +29,8 @@ type fakeRuned struct {
 	infoFn       func(*runedv1.InfoRequest) (*runedv1.InfoResponse, error)
 	healthFn     func(*runedv1.HealthRequest) (*runedv1.HealthResponse, error)
 
-	infoCalls   int32 // atomic — Info should be invoked exactly once across the lifetime of an infoCache
-	embedCalls  int32 // atomic — used by retry test to count attempts
+	infoCalls       int32 // atomic — Info should be invoked exactly once across the lifetime of an infoCache
+	embedCalls      int32 // atomic — used by retry test to count attempts
 	embedBatchCalls int32 // atomic — used by batch-split test
 }
 

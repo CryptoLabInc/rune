@@ -187,7 +187,7 @@ const (
 //   - vault endpoint/token empty      → terminal Dormant (await /rune:configure)
 //   - vault dial / GetAgentManifest   → state=WaitingForVault, exp backoff retry
 //   - keymanager / embedder / envector init → exp backoff retry (might be
-//                                             transient — daemon down, etc.)
+//     transient — daemon down, etc.)
 //   - other config error (parse fail) → exp backoff retry (user might be editing)
 //   - ctx cancellation                → return immediately
 //

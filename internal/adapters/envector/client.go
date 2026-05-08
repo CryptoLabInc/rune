@@ -47,7 +47,7 @@ type Client interface {
 	Insert(ctx context.Context, req InsertRequest) (*InsertResult, error)
 	Score(ctx context.Context, vec []float32) ([][]byte, error)
 	GetMetadata(ctx context.Context, refs []MetadataRef, fields []string) ([]MetadataEntry, error)
-	OpenIndex(ctx context.Context) error               // opens (or creates) the server-side index
+	OpenIndex(ctx context.Context) error                // opens (or creates) the server-side index
 	GetIndexList(ctx context.Context) ([]string, error) // used by diagnostics + warmup
 	Close() error
 }
@@ -65,7 +65,7 @@ type ClientConfig struct {
 }
 
 type client struct {
-	sdk *envector.Client
+	sdk  *envector.Client
 	keys *envector.Keys
 	idx  *envector.Index
 	cfg  ClientConfig

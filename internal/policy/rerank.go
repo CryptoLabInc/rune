@@ -41,7 +41,6 @@ var TimeRanges = map[domain.TimeScope]time.Duration{
 //
 // BIT-IDENTICAL REQUIREMENT: Python timedelta.days is integer floor.
 // Go Hours()/24 is float — must math.Floor to match.
-//
 func ApplyRecencyWeighting(hits []domain.SearchHit, now time.Time) []domain.SearchHit {
 	for i := range hits {
 		r := &hits[i]

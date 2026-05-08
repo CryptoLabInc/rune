@@ -2,8 +2,9 @@
 // owns Deps injection + state-aware response shaping.
 //
 // Spec:
-//   docs/v04/spec/components/rune-mcp.md (MCP server 구현)
-//   docs/v04/spec/flows/{capture,recall,lifecycle}.md
+//
+//	docs/v04/spec/components/rune-mcp.md (MCP server 구현)
+//	docs/v04/spec/flows/{capture,recall,lifecycle}.md
 //
 // SDK: github.com/modelcontextprotocol/go-sdk v1.5.0+ (D2). Stdio transport.
 // Input schema is auto-inferred from the Go input struct (jsonschema tags
@@ -200,4 +201,3 @@ func isValidToolName(name string) bool {
 	}
 	return true
 }
-

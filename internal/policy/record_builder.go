@@ -17,7 +17,7 @@ import (
 // MAX_INPUT_CHARS — Python L227. Truncate cleanText before extraction.
 const MaxInputChars = 12_000
 
-// QuotePatterns — 4 regex (Python L72-77): double "", single '', Japanese 「」,
+// QuotePatterns — 4 regex (Python L72-77): double "", single ”, Japanese 「」,
 // French «». Min 10 chars.
 var QuotePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`"([^"]{10,})"`),
