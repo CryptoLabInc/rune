@@ -1,6 +1,6 @@
 ---
 description: Check Rune plugin activation status and infrastructure health
-allowed-tools: Bash(python3:*), Bash(cat ~/.rune/*), Bash(ls:*), Bash(scripts/*), Read, mcp__rune__diagnostics, mcp__rune__vault_status
+allowed-tools: Bash(cat ~/.rune/*), Bash(ls:*), Read, mcp__envector__diagnostics, mcp__envector__vault_status
 ---
 
 # /rune:status — Plugin Status
@@ -37,10 +37,6 @@ System Health:
   [check] Retriever     : ready / not initialized
   [check] LLM Provider  : <provider or "none">
   [check] enVector Cloud: reachable (<latency>ms) / unreachable
-
-Infrastructure:
-  [check] Python venv: <installedFrom>/.venv
-  [check] MCP server logs: <recent or "stale/missing">
 
 Recommendations:
   - <actionable suggestions based on what's missing>

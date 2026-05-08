@@ -1,6 +1,6 @@
 ---
 description: View recent capture history
-allowed-tools: mcp__plugin_rune_envector__capture_history
+allowed-tools: mcp__envector__capture_history
 ---
 
 # /rune:history — View Capture History

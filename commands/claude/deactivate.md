@@ -22,6 +22,5 @@ Switch from active to dormant state. Configuration is preserved — use `/rune:a
 
 4. Call `reload_pipelines` as a **native MCP tool** (`mcp__envector__reload_pipelines`) — invoke it directly like any other tool, do NOT use `claude mcp call` via Bash (that subcommand doesn't exist).
    - This ensures MCP tools (`capture`/`recall`) immediately return errors instead of processing.
-   - If `reload_pipelines` is not available as a tool (MCP server not running), note that MCP pipelines will remain live until session restart.
 
 5. Respond: "Rune deactivated. Organizational memory is paused. Config preserved — `/rune:activate` to resume."
