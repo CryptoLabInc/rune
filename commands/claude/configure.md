@@ -1,6 +1,6 @@
 ---
 description: Configure Rune — collect Vault credentials and write ~/.rune/config.json (Go v0.4)
-allowed-tools: Bash(mkdir:*), Bash(chmod:*), Bash(cp:*), Bash(test:*), Read, Write, AskUserQuestion, Edit, mcp__envector__reload_pipelines
+allowed-tools: Bash(mkdir:*), Bash(chmod:*), Bash(cp:*), Bash(test:*), Read, Write, AskUserQuestion, Edit, mcp__envector__reload_pipelines, mcp__envector__diagnostics
 ---
 
 # /rune:configure — Setup & Configuration
@@ -121,20 +121,48 @@ If `reload_pipelines` returns an error or state stays dormant:
     connectivity from this host.
 - Suggest `/rune:status` for the full health snapshot.
 
-### 5. Completion Summary
+### 5. Verify Health (call diagnostics)
 
-Show:
+After `reload_pipelines` returns, call `mcp__envector__diagnostics` to
+get a real-time per-subsystem health snapshot. This is what the
+completion summary renders — `reload_pipelines` is the trigger,
+`diagnostics` is the ground-truth probe.
+
+The diagnostics result has these sections (only render the ones with
+meaningful content):
+
+- `state` + `dormant_reason` + `dormant_since`
+- `vault.healthy` + `vault.endpoint` (+ `vault.error` if unhealthy)
+- `keys.enc_key_loaded` + `keys.key_id` + `keys.agent_dek_loaded`
+- `pipelines.scribe_initialized` + `pipelines.retriever_initialized`
+- `embedding.model` + `embedding.mode` + `embedding.vector_dim` (+ `embedding.daemon_version` if present)
+- `envector.reachable` + `envector.latency_ms` (+ `envector.error` / `envector.hint` if not)
+
+### 6. Completion Summary
+
+Render the snapshot in this layout (use ✓ for healthy, ✗ for failures
+with the specific error on the same line; omit a row when the field
+isn't populated):
+
 ```
 Rune Configuration Complete
 ============================
-  Config    : ~/.rune/config.json
-  Plugin    : ${CLAUDE_PLUGIN_ROOT}
-  Vault     : <endpoint>
-  TLS       : <enabled (system CA) | enabled (custom CA: <path>) | disabled>
-  State     : <active | dormant: <reason>>
+  Config        : ~/.rune/config.json
+  Plugin        : ${CLAUDE_PLUGIN_ROOT}
+  Vault         : <endpoint>
+  TLS           : <enabled (system CA) | enabled (custom CA: <path>) | disabled>
+  State         : <active | dormant: <reason>>
+
+  Vault         : ✓ healthy / ✗ <error>
+  Encryption    : ✓ loaded (key_id: <id>) / ✗ not loaded
+  Agent DEK     : ✓ loaded / ✗ not loaded
+  Scribe        : ✓ initialized / ✗ not initialized
+  Retriever     : ✓ initialized / ✗ not initialized
+  Embedder      : ✓ <model> (<mode>, dim=<vector_dim>) / ✗ not initialized
+  enVector      : ✓ reachable (<latency_ms>ms) / ✗ <error> — <hint>
 
 Next steps:
-  - /rune:status      — verify connection + pipeline health
+  - /rune:status      — re-check pipeline health later
   - /rune:capture     — capture your first decision
   - /rune:recall      — query organizational memory
 ```
