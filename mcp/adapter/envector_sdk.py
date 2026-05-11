@@ -116,6 +116,7 @@ class EnVectorSDKAdapter:
             auto_key_setup: bool = True,
             agent_id: str = None,
             agent_dek: bytes = None,
+            index_type: str = None,
         ):
         """
         Initializes the EnVectorSDKAdapter with an optional endpoint.
@@ -131,6 +132,7 @@ class EnVectorSDKAdapter:
                                    Set to False when keys are provided externally (e.g., from Vault).
             agent_id (str): Per-agent identifier for app-layer metadata encryption.
             agent_dek (bytes): Per-agent AES-256 DEK (32 bytes) for metadata encryption.
+            index_type (str, optional): Index structure type passed to ev.init() ("ivf_vct", "flat", etc.).
         """
         if not key_path:
             key_path = str(KEY_PATH)
@@ -147,6 +149,8 @@ class EnVectorSDKAdapter:
             "auto_key_setup": auto_key_setup,
             "access_token": access_token,
         }
+        if index_type is not None:
+            self._init_params["index_type"] = index_type
 
         ev.init(**self._init_params)
 

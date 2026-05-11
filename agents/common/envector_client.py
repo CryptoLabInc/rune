@@ -36,6 +36,8 @@ class EnVectorClient:
         auto_key_setup: bool = True,
         agent_id: Optional[str] = None,
         agent_dek: Optional[bytes] = None,
+        eval_mode: str = "mm",
+        index_type: str = "ivf_vct",
     ):
         """
         Initialize EnVector client.
@@ -48,6 +50,8 @@ class EnVectorClient:
             auto_key_setup: Auto-generate keys if not found
             agent_id: Per-agent identifier for app-layer metadata encryption
             agent_dek: Per-agent AES-256 DEK (32 bytes) from Vault
+            eval_mode: FHE evaluation mode ("mm" or "rmp")
+            index_type: Index structure type ("ivf_vct" or "flat")
         """
         self._address = address
         self._key_path = Path(key_path).expanduser()
@@ -56,6 +60,8 @@ class EnVectorClient:
         self._auto_key_setup = auto_key_setup
         self._agent_id = agent_id
         self._agent_dek = agent_dek
+        self._eval_mode = eval_mode
+        self._index_type = index_type
         self._adapter = None
         self._initialized = False
 
@@ -74,12 +80,13 @@ class EnVectorClient:
                 address=self._address,
                 key_id=self._key_id,
                 key_path=str(self._key_path),
-                eval_mode="rmp",
+                eval_mode=self._eval_mode,
                 query_encryption=False,  # Plain queries for simplicity
                 access_token=self._access_token,
                 auto_key_setup=self._auto_key_setup,
                 agent_id=self._agent_id,
                 agent_dek=self._agent_dek,
+                index_type=self._index_type,
             )
             self._initialized = True
             logger.info("Connected to %s", self._address)
