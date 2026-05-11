@@ -35,6 +35,10 @@ System Health:
   [check] Agent DEK     : loaded / not loaded
   [check] Scribe        : ready / not initialized
   [check] Retriever     : ready / not initialized
+  [check] Embedder      : <status> (model: <model>, dim=<vector_dim>, uptime: <human>, requests: <n>)
+                          socket: <socket_path>
+                          info error:   <info_error>    (only when present)
+                          health error: <health_error>  (only when present)
   [check] LLM Provider  : <provider or "none">
   [check] enVector Cloud: reachable (<latency>ms) / unreachable
 
@@ -43,6 +47,13 @@ Recommendations:
 ```
 
 Use checkmarks for healthy items, X marks for issues.
+
+**Embedder rendering rules** (from diagnostics `embedding` section):
+- Check when `status == "OK"` and neither `info_error` nor `health_error` is set
+- X mark when `status` is `LOADING` / `DEGRADED` / `SHUTTING_DOWN` / `UNSPECIFIED`, or when any error field is populated
+- Show `socket_path` always when populated - it's the only way users can tell which runed instance they're talking to. Recall: runed is a shared singleton across sessions, so divergent socket paths between teammates indicate a misconfiguration.
+- Format `uptime_seconds` as a human-readable duration (e.g. `8h8m`, `37s`)
+- Omit `model` / `dim` rows when the embedder is not initialized (i.e. `model` empty AND `socket_path` empty — pre-boot)
 
 **Dormant Reason Display**: When `dormant_reason` is present in config or diagnostics, translate reason code into a user-friendly message:
 - `vault_unreachable`: "Vault server could not be reached. Check if it's running and the endpoint is correct."

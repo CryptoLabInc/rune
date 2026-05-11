@@ -146,6 +146,12 @@ type EmbeddingInfo struct {
 	Mode          string `json:"mode"` // "external gRPC"
 	VectorDim     int    `json:"vector_dim,omitempty"`
 	DaemonVersion string `json:"daemon_version,omitempty"`
+	SocketPath    string `json:"socket_path,omitempty"`
+	Status        string `json:"status,omitempty"` // Health: OK / LOADING / DEGRADED / SHUTTING_DOWN
+	UptimeSeconds int64  `json:"uptime_seconds,omitempty"`
+	TotalRequests int64  `json:"total_requests,omitempty"`
+	InfoError     string `json:"info_error,omitempty"`
+	HealthError   string `json:"health_error,omitempty"`
 }
 
 // EnvectorInfo — reachability probe
@@ -245,18 +251,26 @@ func (s *LifecycleService) collectEmbedding(ctx context.Context, timeout time.Du
 	if s.Embedder == nil {
 		return info
 	}
+	info.SocketPath = s.Embedder.SocketPath()
 
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	snap, err := s.Embedder.Info(ctx2)
-	if err != nil {
-		return info
+	if snap, err := s.Embedder.Info(ctx2); err != nil {
+		info.InfoError = err.Error()
+	} else {
+		info.Model = snap.ModelIdentity
+		info.VectorDim = snap.VectorDim
+		info.DaemonVersion = snap.DaemonVersion
 	}
 
-	info.Model = snap.ModelIdentity
-	info.VectorDim = snap.VectorDim
-	info.DaemonVersion = snap.DaemonVersion
+	if health, err := s.Embedder.Health(ctx2); err != nil {
+		info.HealthError = err.Error()
+	} else {
+		info.Status = health.Status
+		info.UptimeSeconds = health.UptimeSeconds
+		info.TotalRequests = health.TotalRequests
+	}
 
 	return info
 }

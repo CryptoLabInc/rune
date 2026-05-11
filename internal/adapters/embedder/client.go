@@ -51,6 +51,7 @@ type Client interface {
 	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
 	Info(ctx context.Context) (InfoSnapshot, error)
 	Health(ctx context.Context) (HealthSnapshot, error)
+	SocketPath() string
 	Close() error
 }
 
@@ -153,6 +154,8 @@ func (c *client) embedBatchOnce(ctx context.Context, texts []string) ([][]float3
 }
 
 func (c *client) Info(ctx context.Context) (InfoSnapshot, error) { return c.info.Get(ctx) }
+
+func (c *client) SocketPath() string { return c.sockPath }
 
 // Health issues a Health RPC. Status maps proto enum (STATUS_OK / STATUS_LOADING /
 // STATUS_DEGRADED / STATUS_SHUTTING_DOWN / STATUS_UNSPECIFIED) to the
