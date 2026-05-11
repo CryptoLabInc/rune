@@ -249,6 +249,7 @@ class LatencyBenchmark:
             agent_id=agent_id,
             agent_dek=agent_dek,
             eval_mode=EVAL_MODE,
+            index_type=INDEX_TYPE,
         )
 
         print("OK")
