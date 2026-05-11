@@ -118,6 +118,7 @@ class EnVectorClient:
         vectors: List[List[float]],
         metadata: Optional[List[Dict]] = None,
         await_searchable: bool = False,
+        use_row_insert: bool = False,
     ) -> Dict[str, Any]:
         """
         Insert vectors into an index.
@@ -127,11 +128,15 @@ class EnVectorClient:
             vectors: List of embedding vectors
             metadata: Optional list of metadata dicts (one per vector)
             await_searchable: If True, block until data is searchable (MERGED_SAVED)
+            use_row_insert: If True, use single-row insert API path (len(vectors) must be 1)
 
         Returns:
             Result dict with ok/error status
         """
         self._ensure_initialized()
+
+        if use_row_insert and len(vectors) != 1:
+            raise ValueError(f"use_row_insert=True requires exactly 1 vector, got {len(vectors)}")
 
         if metadata:
             meta_list = [
@@ -146,6 +151,7 @@ class EnVectorClient:
             vectors=vectors,
             metadata=meta_list,
             await_searchable=await_searchable,
+            use_row_insert=use_row_insert,
         )
 
     def insert_with_text(

@@ -216,6 +216,7 @@ class EnVectorSDKAdapter:
         vectors: List[List[float]],
         metadata: List[Any] = None,
         await_searchable: bool = False,
+        use_row_insert: bool = False,
     ):
         """
         Calls the enVector SDK to perform an insert operation.
@@ -224,6 +225,7 @@ class EnVectorSDKAdapter:
             vectors (List[List[float]]): The list of vectors to insert.
             metadata (List[Any], optional): The list of metadata associated with the vectors. Defaults to None.
             await_searchable (bool): If True, block until data reaches MERGED_SAVED (searchable) state.
+            use_row_insert (bool): If True, use single-row insert API path instead of batch path.
 
         Returns:
             Dict[str, Any]: If succeed, converted format of the insert results. Otherwise, error message.
@@ -234,6 +236,7 @@ class EnVectorSDKAdapter:
                 vectors=vectors,
                 metadata=metadata,
                 await_searchable=await_searchable,
+                use_row_insert=use_row_insert,
             )
             return self._to_json_available({"ok": True, "results": results})
         except Exception as e:
@@ -255,6 +258,7 @@ class EnVectorSDKAdapter:
         vectors: List[List[float]],
         metadata: List[Any] = None,
         await_searchable: bool = False,
+        use_row_insert: bool = False,
     ):
         """
         Invokes the enVector SDK's insert functionality.
@@ -264,6 +268,7 @@ class EnVectorSDKAdapter:
             vectors (Union[List[List[float]], List[CipherBlock]]): The list of vectors to insert.
             metadata (List[Any], optional): The list of metadata associated with the vectors. Defaults to None.
             await_searchable (bool): If True, block until data reaches MERGED_SAVED (searchable) state.
+            use_row_insert (bool): If True, use single-row insert API path instead of batch path.
 
         Returns:
             Any: Raw insert results from the enVector SDK.
@@ -282,6 +287,7 @@ class EnVectorSDKAdapter:
                 metadata=metadata,
                 await_completion=await_searchable,
                 execute_until="segmentation",
+                use_row_insert=use_row_insert,
             )
 
         return self._with_reconnect(_do_insert)

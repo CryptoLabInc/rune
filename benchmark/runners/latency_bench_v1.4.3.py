@@ -300,10 +300,8 @@ class LatencyBenchmark:
         """
         Run one capture iteration and return per-phase latencies (ms).
 
-        insert_mode=single: index.insert(data=[vec]) once per call
-        insert_mode=batch:  index.insert(data=[vec]*batch_size) once per call
-                            measures latency of inserting batch_size identical
-                            vectors in a single gRPC call vs single per call.
+        insert_mode=single: use_row_insert=True,  data=[vec]            — row insert API
+        insert_mode=batch:  use_row_insert=False, data=[vec]*batch_size — batch insert API
 
         Phases: embed / score / vault_topk / insert / total
         """
@@ -336,11 +334,13 @@ class LatencyBenchmark:
             vectors = [vec]
             metadata = [self._build_insert_metadata(text, title, domain)]
 
+        use_row = self.insert_mode == "single"
         with _Timer() as t_insert:
             self._ev_client.insert(
                 index_name=self._index_name,
                 vectors=vectors,
                 metadata=metadata,
+                use_row_insert=use_row,
             )
         insert_ms = t_insert.elapsed_ms
 

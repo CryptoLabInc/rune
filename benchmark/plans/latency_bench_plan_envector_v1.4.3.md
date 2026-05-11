@@ -23,8 +23,8 @@ v1.2.2 plan과 달라진 환경:
 > v1.2.2 수치와의 차이를 단일 요인으로 해석해선 안 된다.
 
 > **[insert_mode 정의]** Rune `batch_capture` MCP tool(embed+score만 수행, insert 없음)과 무관.
-> - `single insert`: `index.insert(data=[vec])` — 벡터 1개씩 insert 호출
-> - `batch insert`: `index.insert(data=[v1,...,vN])` — N개 벡터를 한 번의 insert 호출로 전달
+> - `single insert`: `use_row_insert=True`, `data=[vec]` — row insert API 경로 (벡터 1개)
+> - `batch insert`: `use_row_insert=False`, `data=[v1,...,vN]` — batch insert API 경로 (벡터 N개)
 
 ---
 
