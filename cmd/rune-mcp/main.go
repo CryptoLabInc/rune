@@ -145,6 +145,9 @@ func buildDeps() *mcp.Deps {
 	cap.State = mgr
 	cap.CaptureLog = captureLog
 
+	rec := service.NewRecallService()
+	rec.State = mgr
+
 	life := service.NewLifecycleService()
 	life.State = mgr
 	life.ConfigDir = runeDir
@@ -152,7 +155,7 @@ func buildDeps() *mcp.Deps {
 	return &mcp.Deps{
 		State:     mgr,
 		Capture:   cap,
-		Recall:    service.NewRecallService(),
+		Recall:    rec,
 		Lifecycle: life,
 	}
 }

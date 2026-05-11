@@ -143,7 +143,10 @@ func (s *CaptureService) Handle(ctx context.Context, req *domain.CaptureRequest)
 		Vectors:  vectors,
 		Metadata: envelopes,
 	}
-	insertResult, err := s.Envector.Insert(ctx, insertReq)
+	insertResult, err := withEnvectorRetry(ctx, s.State, "insert",
+		func() (*envector.InsertResult, error) {
+			return s.Envector.Insert(ctx, insertReq)
+		})
 	if err != nil {
 		return nil, fmt.Errorf("envector insert: %w", err)
 	}
@@ -269,7 +272,10 @@ func (s *CaptureService) runNoveltyCheck(ctx context.Context, embeddingText stri
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil
 	}
 
-	blobs, err := s.Envector.Score(ctx, vec)
+	blobs, err := withEnvectorRetry(ctx, s.State, "score (novelty)",
+		func() ([][]byte, error) {
+			return s.Envector.Score(ctx, vec)
+		})
 	if err != nil || len(blobs) == 0 {
 		slog.Warn("novelty check: score failed (non-fatal)", "err", err)
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil

@@ -498,15 +498,10 @@ const WarmupTimeout = 60 * time.Second
 // at boot, then user ran /rune:configure) reaches Active via this path.
 // No process restart is required.
 func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipelinesResult, error) {
-	// Dormant terminal: the boot loop has exited. Ask Manager to spawn a
-	// fresh attempt (Manager.Retrigger silently no-ops on non-dormant
-	// states, so this is also safe to call unconditionally if we ever
-	// expand the trigger surface). Then poll for up to 5s so the response
-	// reflects the new state instead of the stale dormant snapshot.
-	if s.State.Current() == lifecycle.StateDormant {
-		s.State.Retrigger()
-		s.waitForBootProgress(ctx, 5*time.Second)
-	}
+  // Always re-trigger so config changes such as new vault endpoint and rotated token are picked
+  // without restarting MCP
+	s.State.Retrigger()
+	s.waitForBootProgress(ctx, 5*time.Second)
 
 	result := &ReloadPipelinesResult{
 		OK:    true,

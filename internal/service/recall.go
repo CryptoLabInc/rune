@@ -184,14 +184,19 @@ func (s *RecallService) searchWithExpansions(
 // breadcrumb, since callers used to see only "no results" with no signal
 // as to where the pipeline shed rows.
 func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk int) ([]domain.SearchHit, error) {
-	// Score
-	scoreCtx, cancel := context.WithTimeout(ctx, envectorScoreTimeout)
-	blobs, err := s.Envector.Score(scoreCtx, vec)
-	cancel()
+  // Score
+  // Re-trigger boot and retry once with updated enVector client
+	blobs, err := withEnvectorRetry(ctx, s.State, "score",
+		func() ([][]byte, error) {
+			scoreCtx, cancel := context.WithTimeout(ctx, envectorScoreTimeout)
+			defer cancel()
+			return s.Envector.Score(scoreCtx, vec)
+		})
 	if err != nil {
 		slog.Warn("recall: envector score failed", "err", err)
 		return nil, fmt.Errorf("envector score: %w", err)
 	}
+
 	slog.Info("recall: envector score returned",
 		"blobs", len(blobs),
 		"first_blob_bytes", firstBlobLen(blobs),
@@ -225,13 +230,19 @@ func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk in
 	for i, e := range entries {
 		refs[i] = envector.MetadataRef{ShardIdx: uint64(e.ShardIdx), RowIdx: uint64(e.RowIdx)}
 	}
-	metaCtx, cancel := context.WithTimeout(ctx, envectorMetadataTimeout)
-	metaEntries, err := s.Envector.GetMetadata(metaCtx, refs, []string{"metadata"})
-	cancel()
+
+  // Re-trigger boot and retry once with updated enVector client
+	metaEntries, err := withEnvectorRetry(ctx, s.State, "get_metadata",
+		func() ([]envector.MetadataEntry, error) {
+			metaCtx, cancel := context.WithTimeout(ctx, envectorMetadataTimeout)
+			defer cancel()
+			return s.Envector.GetMetadata(metaCtx, refs, []string{"metadata"})
+		})
 	if err != nil {
 		slog.Warn("recall: envector get_metadata failed", "err", err, "refs", len(refs))
 		return nil, fmt.Errorf("envector get_metadata: %w", err)
 	}
+
 	slog.Info("recall: envector get_metadata returned",
 		"metaEntries", len(metaEntries),
 		"refs", len(refs),
