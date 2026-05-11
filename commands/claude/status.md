@@ -39,7 +39,6 @@ System Health:
                           socket: <socket_path>
                           info error:   <info_error>    (only when present)
                           health error: <health_error>  (only when present)
-  [check] LLM Provider  : <provider or "none">
   [check] enVector Cloud: reachable (<latency>ms) / unreachable
 
 Recommendations:

@@ -133,11 +133,10 @@ type KeysInfo struct {
 	AgentDEKLoaded bool   `json:"agent_dek_loaded"`
 }
 
-// PipelinesInfo — scribe/retriever init + active provider.
+// PipelinesInfo — scribe/retriever init state.
 type PipelinesInfo struct {
-	ScribeInitialized    bool   `json:"scribe_initialized"`
-	RetrieverInitialized bool   `json:"retriever_initialized"`
-	ActiveLLMProvider    string `json:"active_llm_provider,omitempty"` // always empty (Go agent-delegated)
+	ScribeInitialized    bool `json:"scribe_initialized"`
+	RetrieverInitialized bool `json:"retriever_initialized"`
 }
 
 // EmbeddingInfo — external embedder info snapshot
