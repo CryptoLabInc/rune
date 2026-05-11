@@ -249,7 +249,7 @@ class LatencyBenchReport:
 
     def to_markdown(self) -> str:
         lines: list[str] = []
-        lines.append("# Rune × envector-msa-1.4.0 Latency Report\n")
+        lines.append("# Rune × envector-msa-1.2.2 Latency Report\n")
         lines.append("## Environment\n")
         for k, v in self.env.items():
             lines.append(f"- **{k}**: {v}")

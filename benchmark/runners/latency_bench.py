@@ -52,7 +52,7 @@ BENCHMARK_DIR = Path(__file__).resolve().parent.parent
 RUNE_DIR = BENCHMARK_DIR.parent
 MCP_DIR = RUNE_DIR / "mcp"
 
-for _p in (str(RUNE_DIR), str(MCP_DIR)):
+for _p in (str(RUNE_DIR), str(MCP_DIR), str(BENCHMARK_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
