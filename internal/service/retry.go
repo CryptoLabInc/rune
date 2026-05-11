@@ -26,6 +26,11 @@ func IsEnvectorRetryable(err error) bool {
 	return e.Retryable
 }
 
+func isEnvectorAdapterErr(err error) bool {
+	var e *envector.Error
+	return errors.As(err, &e)
+}
+
 // Re-trigger boot loop if enVector connection failure occurred since it might be
 // caused by outdated configurations
 func withEnvectorRetry[T any](

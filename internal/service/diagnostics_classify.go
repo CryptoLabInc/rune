@@ -41,12 +41,12 @@ func ClassifyEnvectorError(err error, elapsed time.Duration) (EnvectorErrorType,
 
 	switch st.Code() {
 	case codes.Unavailable:
-		return EnvErrConnectionRefused, "Check that the enVector endpoint is correct and reachable from this machine"
+		return EnvErrConnectionRefused, "enVector cluster appears unreachable from this host - check network connectivity"
 	case codes.Unauthenticated:
-		return EnvErrAuthFailure, "enVector API key may be invalid or expired"
+		return EnvErrAuthFailure, "enVector API key was rejected - contact your Vault administrator"
 	case codes.DeadlineExceeded:
-		return EnvErrDeadlineExceeded, "The enVector gRPC deadline was exceeded. Run /rune:activate to pre-warm, then retry /rune:status"
+		return EnvErrDeadlineExceeded, "enVector gRPC deadline exceeded - check network latency to the cluster"
 	default:
-		return EnvErrUnknown, "Run /rune:activate to reinitialize the connection, or check network connectivity"
+		return EnvErrUnknown, "enVector probe failed after recovery attempt - check network connectivity"
 	}
 }

@@ -184,8 +184,8 @@ func (s *RecallService) searchWithExpansions(
 // breadcrumb, since callers used to see only "no results" with no signal
 // as to where the pipeline shed rows.
 func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk int) ([]domain.SearchHit, error) {
-  // Score
-  // Re-trigger boot and retry once with updated enVector client
+	// Score
+	// Re-trigger boot and retry once with updated enVector client
 	blobs, err := withEnvectorRetry(ctx, s.State, "score",
 		func() ([][]byte, error) {
 			scoreCtx, cancel := context.WithTimeout(ctx, envectorScoreTimeout)
@@ -231,7 +231,7 @@ func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk in
 		refs[i] = envector.MetadataRef{ShardIdx: uint64(e.ShardIdx), RowIdx: uint64(e.RowIdx)}
 	}
 
-  // Re-trigger boot and retry once with updated enVector client
+	// Re-trigger boot and retry once with updated enVector client
 	metaEntries, err := withEnvectorRetry(ctx, s.State, "get_metadata",
 		func() ([]envector.MetadataEntry, error) {
 			metaCtx, cancel := context.WithTimeout(ctx, envectorMetadataTimeout)
