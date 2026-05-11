@@ -630,7 +630,7 @@ class MCPServerApp:
 
             if self.envector is not None:
                 import concurrent.futures as _cf
-                ENVECTOR_DIAGNOSIS_TIMEOUT = 5.0  # seconds
+                ENVECTOR_DIAGNOSIS_TIMEOUT = 15.0  # seconds
                 _pool = _cf.ThreadPoolExecutor(max_workers=1)
                 try:
                     t0 = time.monotonic()
