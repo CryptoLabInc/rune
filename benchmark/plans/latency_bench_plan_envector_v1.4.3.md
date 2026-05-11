@@ -63,7 +63,26 @@ Total end-to-end
 
 - Vault gRPC 연결 latency (원격 서버 RTT 포함)
 
-### Feature 5: `searchable` (insert → MERGED_SAVED 대기)
+### Feature 5: `multi_capture` (다중 phase 동시 embed+insert)
+
+```
+[1] texts → embed(texts): N개 벡터 배치 임베딩 (embed_single × N 아님)
+[2] Novelty Check → envector score (primary record = texts[0])
+[3] Vault TopK Decrypt (gRPC)
+[4] FHE Encrypt → index.insert(vectors=vecs, use_row_insert=False): N개 배치 삽입
+────
+Total end-to-end
+```
+
+> **[목적]** 실제 capture에서 multi-phase decision 처리 경로를 재현.
+> server.py의 `record_builder.build_phases()` → `insert_with_text(texts=[...])` 경로.
+> single capture(`embed_single` × 1)와 비교해 배치 embed/insert 오버헤드 측정.
+
+> **[시나리오]**
+> T13 = 2-phase (DB + 캐시 레이어 두 단계 결정)
+> T14 = 5-phase (마이크로서비스 전환 ADR 수준 복잡 결정)
+
+### Feature 6: `searchable` (insert → MERGED_SAVED 대기)
 
 ```
 [1] 텍스트 → Embedding (로컬)
@@ -103,6 +122,8 @@ Total end-to-end (MERGED_SAVED 시점까지)
 | T10 | searchable | — | 짧은 영어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |
 | T11 | searchable | — | 긴 영어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |
 | T12 | searchable | — | 한국어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |
+| T13 | multi_capture | — | 2-phase: embed(2texts) + insert 2 vectors batch |
+| T14 | multi_capture | — | 5-phase: embed(5texts) + insert 5 vectors batch |
 
 ---
 

@@ -147,6 +147,55 @@ SCENARIOS_RECALL = [
 RECALL_TOPK_VARIANTS = [1, 3, 5, 10]
 BATCH_SIZES = [1, 5, 10, 20]
 
+_MULTI_2_PHASE = [
+    (
+        "We chose PostgreSQL as the primary database. "
+        "Team familiarity and mature ecosystem were decisive factors."
+    ),
+    (
+        "Redis selected for session caching layer. "
+        "TTL set to 30 minutes. Memcached rejected due to lack of data structure support."
+    ),
+]
+
+_MULTI_5_PHASE = [
+    (
+        "Context: monolith hit 10k RPS ceiling. "
+        "Decision: migrate to event-driven microservices architecture."
+    ),
+    (
+        "Auth service extracted first. OAuth2 with JWT chosen. "
+        "Session cookies rejected for statelessness requirement."
+    ),
+    (
+        "Order service adopts CQRS. Write path via Kafka, "
+        "read path via PostgreSQL read replicas."
+    ),
+    (
+        "API gateway with per-tenant rate limiting (1000 req/s). "
+        "Nginx selected over custom solution for operational maturity."
+    ),
+    (
+        "Deployment on Kubernetes with Helm charts. "
+        "Blue-green strategy for zero-downtime releases. Rollback within one sprint."
+    ),
+]
+
+SCENARIOS_MULTI_CAPTURE = [
+    {
+        "id": "T13_multi_2phase",
+        "texts": _MULTI_2_PHASE,
+        "domain": "architecture",
+        "metadata": {"label": "2-phase multi-capture", "phase_count": 2},
+    },
+    {
+        "id": "T14_multi_5phase",
+        "texts": _MULTI_5_PHASE,
+        "domain": "architecture",
+        "metadata": {"label": "5-phase multi-capture", "phase_count": 5},
+    },
+]
+
 
 # ── timing helper ─────────────────────────────────────────────────────────────
 
@@ -728,6 +777,105 @@ class LatencyBenchmark:
             metadata={"label": "Vault gRPC health check", "runs": len(valid)},
         )
 
+    # ── multi-phase capture ────────────────────────────────────────────────────
+
+    async def _multi_capture_phases(
+        self, texts: list[str], domain: str
+    ) -> dict[str, float]:
+        """
+        Multi-phase capture: N records embedded and inserted as a batch.
+
+        Mirrors the real capture path when a decision has multiple phases
+        (server.py: record_builder.build_phases → insert_with_text(texts)).
+
+        Phases:
+          embed_batch  — embed(texts): single gRPC call, N vectors at once
+          score        — novelty check on primary record (texts[0])
+          vault_topk   — Vault decrypt on primary record's score
+          insert_batch — insert all N vectors in one batch API call
+          total        — wall clock including all phases
+        """
+        total_start = time.perf_counter()
+        insights = [t[:120] for t in texts]
+
+        # [1] Batch embed — uses embed(texts), not embed_single
+        with _Timer() as t_embed:
+            vecs = self._embedding.embed(insights)
+        embed_ms = t_embed.elapsed_ms
+
+        # [2] Novelty score on primary record (first phase)
+        with _Timer() as t_score:
+            score_res = self._ev_client.score(self._index_name, vecs[0])
+        score_ms = t_score.elapsed_ms
+
+        # [3] Vault TopK decrypt
+        vault_ms = 0.0
+        blobs = score_res.get("encrypted_blobs", []) if score_res.get("ok") else []
+        if blobs:
+            with _Timer() as t_vault:
+                await self._vault.decrypt_search_results(blobs[0], top_k=3)
+            vault_ms = t_vault.elapsed_ms
+
+        # [4] Insert all N vectors as batch (use_row_insert=False)
+        metadata = [
+            self._build_insert_metadata(t, f"phase-{i + 1}", domain)
+            for i, t in enumerate(texts)
+        ]
+        with _Timer() as t_insert:
+            self._ev_client.insert(
+                index_name=self._index_name,
+                vectors=vecs,
+                metadata=metadata,
+                use_row_insert=False,
+            )
+        insert_ms = t_insert.elapsed_ms
+
+        total_ms = (time.perf_counter() - total_start) * 1000.0
+        return {
+            "embed_batch": embed_ms,
+            "score": score_ms,
+            "vault_topk": vault_ms,
+            "insert_batch": insert_ms,
+            "total": total_ms,
+        }
+
+    async def run_multi_capture_scenario(self, scenario: dict) -> LatencyScenarioResult:
+        """T13-T14: multi-phase capture latency (batch embed + batch insert)."""
+        sid = scenario["id"]
+        texts = scenario["texts"]
+        domain = scenario["domain"]
+        meta = scenario.get("metadata", {})
+
+        print(f"  [{sid}] ", end="", flush=True)
+        all_timings: list[dict[str, float]] = []
+
+        for i in range(self.runs):
+            label = self._warmup_label(i)
+            print(f"{label} ", end="", flush=True)
+            try:
+                t = await self._multi_capture_phases(texts, domain)
+                all_timings.append(t)
+            except Exception as e:
+                print(f"\n    ERROR on {label}: {e}")
+                return LatencyScenarioResult(
+                    scenario_id=sid,
+                    feature="multi_capture",
+                    metadata=meta,
+                    error=str(e),
+                )
+
+        print("done")
+        phases = self._build_phase_list(
+            ["embed_batch", "score", "vault_topk", "insert_batch", "total"],
+            all_timings,
+        )
+        return LatencyScenarioResult(
+            scenario_id=sid,
+            feature="multi_capture",
+            phases=phases,
+            metadata={**meta, "runs": self.runs - self.warmup},
+        )
+
     # ── network baseline ───────────────────────────────────────────────────────
 
     def _measure_network_rtt(self) -> str:
@@ -781,6 +929,7 @@ class LatencyBenchmark:
         run_batch = run_all or feature_filter == "batch_capture"
         run_vault = run_all or feature_filter == "vault_status"
         run_searchable = run_all or feature_filter == "searchable"
+        run_multi = run_all or feature_filter == "multi_capture"
 
         if run_capture:
             print("\n[capture]")
@@ -812,6 +961,12 @@ class LatencyBenchmark:
             print("\n[searchable]")
             for sc in SCENARIOS_CAPTURE[:3]:  # T1, T2, T3 — short/long/Korean
                 r = await self.run_searchable_scenario(sc)
+                report.add(r)
+
+        if run_multi:
+            print("\n[multi_capture]")
+            for sc in SCENARIOS_MULTI_CAPTURE:
+                r = await self.run_multi_capture_scenario(sc)
                 report.add(r)
 
         return report
@@ -887,7 +1042,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--feature",
-        choices=["capture", "recall", "batch_capture", "vault_status", "searchable"],
+        choices=["capture", "recall", "batch_capture", "vault_status", "searchable", "multi_capture"],
         default=None,
         help="Run only this feature (default: all)",
     )
