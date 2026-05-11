@@ -63,6 +63,25 @@ Total end-to-end
 
 - Vault gRPC 연결 latency (원격 서버 RTT 포함)
 
+### Feature 5: `searchable` (insert → MERGED_SAVED 대기)
+
+```
+[1] 텍스트 → Embedding (로컬)
+[2] Novelty Check → envector score (FHE)
+[3] Vault TopK Decrypt (gRPC)
+[4] FHE Encrypt → index.insert(await_searchable=True)
+     — RPC 제출 + 서버 MERGED_SAVED 상태까지 대기 포함
+────
+Total end-to-end (MERGED_SAVED 시점까지)
+```
+
+> **[주의]** `EnVectorClient.insert()`는 request_id를 반환하지 않으므로
+> RPC 제출 시간과 서버 대기 시간을 분리 측정할 수 없다.
+> 세부 분해가 필요한 경우 `benchmark/runners/insert_row_only.py` 사용.
+
+> **[시나리오]** T1–T3 입력(짧은 영어, 긴 영어, 한국어)을 그대로 재사용.
+> T10 = T1 입력 / T11 = T2 입력 / T12 = T3 입력.
+
 ---
 
 ## 테스트 시나리오
@@ -81,6 +100,9 @@ Total end-to-end
 | T7 | recall  | — | topk scaling (1, 3, 5, 10) |
 | T8 | batch_capture | — | embed+score, batch_size 1/5/10/20, no insert |
 | T9 | vault_status | — | gRPC health check |
+| T10 | searchable | — | 짧은 영어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |
+| T11 | searchable | — | 긴 영어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |
+| T12 | searchable | — | 한국어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |
 
 ---
 

@@ -617,12 +617,15 @@ class LatencyBenchmark:
         Measure time from capture start until data is searchable (MERGED_SAVED).
 
         Phases:
-          embed        — embed locally
-          score        — FHE novelty check
-          vault_topk   — Vault decrypt
-          insert       — RPC submission (split/persist)
-          wait_searchable — server-side merge until MERGED_SAVED
-          total        — wall clock including all phases
+          embed              — embed locally
+          score              — FHE novelty check
+          vault_topk         — Vault decrypt
+          insert_searchable  — insert(await_searchable=True): RPC + MERGED_SAVED wait
+          total              — wall clock including all phases
+
+        Note: EnVectorClient.insert() does not return a request_id, so RPC
+        submission time and server-side wait cannot be measured separately.
+        Use benchmark/runners/insert_row_only.py for fine-grained decomposition.
         """
         reusable_insight = text[:120]
         total_start = time.perf_counter()
@@ -644,39 +647,29 @@ class LatencyBenchmark:
 
         metadata = [self._build_insert_metadata(text, title, domain)]
 
-        # [4] Insert submission (no await)
+        # Single insert — blocks until MERGED_SAVED (searchable)
         with _Timer() as t_insert:
-            self._ev_client.insert(
-                index_name=self._index_name,
-                vectors=[vec],
-                metadata=metadata,
-                await_searchable=False,
-            )
-        insert_ms = t_insert.elapsed_ms
-
-        # [5] Wait until MERGED_SAVED (searchable)
-        with _Timer() as t_wait:
             self._ev_client.insert(
                 index_name=self._index_name,
                 vectors=[vec],
                 metadata=metadata,
                 await_searchable=True,
             )
-        wait_ms = t_wait.elapsed_ms
+        insert_searchable_ms = t_insert.elapsed_ms
 
         total_ms = (time.perf_counter() - total_start) * 1000.0
         return {
             "embed": embed_ms,
             "score": score_ms,
             "vault_topk": vault_ms,
-            "insert": insert_ms,
-            "wait_searchable": wait_ms,
+            "insert_searchable": insert_searchable_ms,
             "total": total_ms,
         }
 
     async def run_searchable_scenario(self, scenario: dict) -> LatencyScenarioResult:
         """T10-T12: measure capture → searchable latency (insert submit + MERGED_SAVED wait)."""
-        sid = scenario["id"].replace("T", "T1", 1) + "_searchable"
+        _parts = scenario["id"].split("_", 1)
+        sid = f"T{int(_parts[0][1:]) + 9}_{_parts[1]}_searchable"
         text = scenario["text"]
         title = scenario["title"]
         domain = scenario["domain"]
@@ -702,7 +695,7 @@ class LatencyBenchmark:
 
         print("done")
         phases = self._build_phase_list(
-            ["embed", "score", "vault_topk", "insert", "wait_searchable", "total"],
+            ["embed", "score", "vault_topk", "insert_searchable", "total"],
             all_timings,
         )
         return LatencyScenarioResult(
