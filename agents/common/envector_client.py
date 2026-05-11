@@ -116,7 +116,8 @@ class EnVectorClient:
         self,
         index_name: str,
         vectors: List[List[float]],
-        metadata: Optional[List[Dict]] = None
+        metadata: Optional[List[Dict]] = None,
+        await_searchable: bool = False,
     ) -> Dict[str, Any]:
         """
         Insert vectors into an index.
@@ -125,6 +126,7 @@ class EnVectorClient:
             index_name: Target index name
             vectors: List of embedding vectors
             metadata: Optional list of metadata dicts (one per vector)
+            await_searchable: If True, block until data is searchable (MERGED_SAVED)
 
         Returns:
             Result dict with ok/error status
@@ -132,7 +134,6 @@ class EnVectorClient:
         self._ensure_initialized()
 
         if metadata:
-            # Serialize metadata to JSON strings
             meta_list = [
                 json.dumps(m) if isinstance(m, dict) else str(m)
                 for m in metadata
@@ -143,7 +144,8 @@ class EnVectorClient:
         return self._adapter.call_insert(
             index_name=index_name,
             vectors=vectors,
-            metadata=meta_list
+            metadata=meta_list,
+            await_searchable=await_searchable,
         )
 
     def insert_with_text(

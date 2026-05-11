@@ -210,19 +210,31 @@ class EnVectorSDKAdapter:
 
     #------------------- Insert ------------------#
 
-    def call_insert(self, index_name: str, vectors: List[List[float]], metadata: List[Any] = None):
+    def call_insert(
+        self,
+        index_name: str,
+        vectors: List[List[float]],
+        metadata: List[Any] = None,
+        await_searchable: bool = False,
+    ):
         """
         Calls the enVector SDK to perform an insert operation.
 
         Args:
             vectors (List[List[float]]): The list of vectors to insert.
             metadata (List[Any], optional): The list of metadata associated with the vectors. Defaults to None.
+            await_searchable (bool): If True, block until data reaches MERGED_SAVED (searchable) state.
 
         Returns:
             Dict[str, Any]: If succeed, converted format of the insert results. Otherwise, error message.
         """
         try:
-            results = self.invoke_insert(index_name=index_name, vectors=vectors, metadata=metadata)
+            results = self.invoke_insert(
+                index_name=index_name,
+                vectors=vectors,
+                metadata=metadata,
+                await_searchable=await_searchable,
+            )
             return self._to_json_available({"ok": True, "results": results})
         except Exception as e:
             # Handle exceptions and return an appropriate error message
@@ -237,7 +249,13 @@ class EnVectorSDKAdapter:
         ct = aes_encrypt(metadata_str, self._agent_dek)
         return json.dumps({"a": self._agent_id, "c": ct})
 
-    def invoke_insert(self, index_name: str, vectors: List[List[float]], metadata: List[Any] = None):
+    def invoke_insert(
+        self,
+        index_name: str,
+        vectors: List[List[float]],
+        metadata: List[Any] = None,
+        await_searchable: bool = False,
+    ):
         """
         Invokes the enVector SDK's insert functionality.
 
@@ -245,6 +263,7 @@ class EnVectorSDKAdapter:
             index_name (str): The name of the index to insert into.
             vectors (Union[List[List[float]], List[CipherBlock]]): The list of vectors to insert.
             metadata (List[Any], optional): The list of metadata associated with the vectors. Defaults to None.
+            await_searchable (bool): If True, block until data reaches MERGED_SAVED (searchable) state.
 
         Returns:
             Any: Raw insert results from the enVector SDK.
@@ -257,9 +276,13 @@ class EnVectorSDKAdapter:
                 metadata = [self._app_encrypt_metadata(m) for m in metadata]
 
         def _do_insert():
-            index = ev.Index(index_name) # Create an index instance with the given index name
-            # Insert vectors with optional metadata
-            return index.insert(data=vectors, metadata=metadata) # Return list of inserted vectors' IDs
+            index = ev.Index(index_name)
+            return index.insert(
+                data=vectors,
+                metadata=metadata,
+                await_completion=await_searchable,
+                execute_until="segmentation",
+            )
 
         return self._with_reconnect(_do_insert)
 

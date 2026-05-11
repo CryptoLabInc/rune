@@ -610,6 +610,108 @@ class LatencyBenchmark:
             ))
         return results
 
+    async def _searchable_capture_phases(
+        self, text: str, title: str, domain: str
+    ) -> dict[str, float]:
+        """
+        Measure time from capture start until data is searchable (MERGED_SAVED).
+
+        Phases:
+          embed        — embed locally
+          score        — FHE novelty check
+          vault_topk   — Vault decrypt
+          insert       — RPC submission (split/persist)
+          wait_searchable — server-side merge until MERGED_SAVED
+          total        — wall clock including all phases
+        """
+        reusable_insight = text[:120]
+        total_start = time.perf_counter()
+
+        with _Timer() as t_embed:
+            vec = self._embedding.embed_single(reusable_insight)
+        embed_ms = t_embed.elapsed_ms
+
+        with _Timer() as t_score:
+            score_res = self._ev_client.score(self._index_name, vec)
+        score_ms = t_score.elapsed_ms
+
+        vault_ms = 0.0
+        blobs = score_res.get("encrypted_blobs", []) if score_res.get("ok") else []
+        if blobs:
+            with _Timer() as t_vault:
+                await self._vault.decrypt_search_results(blobs[0], top_k=3)
+            vault_ms = t_vault.elapsed_ms
+
+        metadata = [self._build_insert_metadata(text, title, domain)]
+
+        # [4] Insert submission (no await)
+        with _Timer() as t_insert:
+            self._ev_client.insert(
+                index_name=self._index_name,
+                vectors=[vec],
+                metadata=metadata,
+                await_searchable=False,
+            )
+        insert_ms = t_insert.elapsed_ms
+
+        # [5] Wait until MERGED_SAVED (searchable)
+        with _Timer() as t_wait:
+            self._ev_client.insert(
+                index_name=self._index_name,
+                vectors=[vec],
+                metadata=metadata,
+                await_searchable=True,
+            )
+        wait_ms = t_wait.elapsed_ms
+
+        total_ms = (time.perf_counter() - total_start) * 1000.0
+        return {
+            "embed": embed_ms,
+            "score": score_ms,
+            "vault_topk": vault_ms,
+            "insert": insert_ms,
+            "wait_searchable": wait_ms,
+            "total": total_ms,
+        }
+
+    async def run_searchable_scenario(self, scenario: dict) -> LatencyScenarioResult:
+        """T10-T12: measure capture → searchable latency (insert submit + MERGED_SAVED wait)."""
+        sid = scenario["id"].replace("T", "T1", 1) + "_searchable"
+        text = scenario["text"]
+        title = scenario["title"]
+        domain = scenario["domain"]
+        meta = scenario.get("metadata", {})
+
+        print(f"  [{sid}] ", end="", flush=True)
+        all_timings: list[dict[str, float]] = []
+
+        for i in range(self.runs):
+            label = self._warmup_label(i)
+            print(f"{label} ", end="", flush=True)
+            try:
+                t = await self._searchable_capture_phases(text, title, domain)
+                all_timings.append(t)
+            except Exception as e:
+                print(f"\n    ERROR on {label}: {e}")
+                return LatencyScenarioResult(
+                    scenario_id=sid,
+                    feature="searchable",
+                    metadata=meta,
+                    error=str(e),
+                )
+
+        print("done")
+        phases = self._build_phase_list(
+            ["embed", "score", "vault_topk", "insert", "wait_searchable", "total"],
+            all_timings,
+        )
+        return LatencyScenarioResult(
+            scenario_id=sid,
+            feature="searchable",
+            phases=phases,
+            metadata={**meta, "runs": self.runs - self.warmup},
+        )
+
     async def run_vault_status(self) -> LatencyScenarioResult:
         """T9: health check latency."""
         sid = "T9_vault_status"
@@ -685,6 +787,7 @@ class LatencyBenchmark:
         run_recall = run_all or feature_filter == "recall"
         run_batch = run_all or feature_filter == "batch_capture"
         run_vault = run_all or feature_filter == "vault_status"
+        run_searchable = run_all or feature_filter == "searchable"
 
         if run_capture:
             print("\n[capture]")
@@ -711,6 +814,12 @@ class LatencyBenchmark:
             print("\n[vault_status]")
             r = await self.run_vault_status()
             report.add(r)
+
+        if run_searchable:
+            print("\n[searchable]")
+            for sc in SCENARIOS_CAPTURE[:3]:  # T1, T2, T3 — short/long/Korean
+                r = await self.run_searchable_scenario(sc)
+                report.add(r)
 
         return report
 
@@ -785,7 +894,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--feature",
-        choices=["capture", "recall", "batch_capture", "vault_status"],
+        choices=["capture", "recall", "batch_capture", "vault_status", "searchable"],
         default=None,
         help="Run only this feature (default: all)",
     )
