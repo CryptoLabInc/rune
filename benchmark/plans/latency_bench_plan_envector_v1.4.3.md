@@ -52,18 +52,11 @@ Total end-to-end
 Total end-to-end
 ```
 
-### Feature 3: `batch_capture` (MCP tool)
-
-- batch size: 1, 5, 10, 20
-- insert 미수행 — embed + score(novelty)만 측정
-- 총 시간 + item당 평균 latency
-- **insert_mode와 무관** (이 feature는 insert를 하지 않음)
-
-### Feature 4: `vault_status` (MCP tool)
+### Feature 3: `vault_status` (MCP tool)
 
 - Vault gRPC 연결 latency (원격 서버 RTT 포함)
 
-### Feature 5: `multi_capture` (다중 phase 동시 embed+insert)
+### Feature 4: `multi_capture` (다중 phase 동시 embed+insert)
 
 ```
 [1] texts → embed(texts): N개 벡터 배치 임베딩 (embed_single × N 아님)
@@ -82,7 +75,7 @@ Total end-to-end
 > T13 = 2-phase (DB + 캐시 레이어 두 단계 결정)
 > T14 = 5-phase (마이크로서비스 전환 ADR 수준 복잡 결정)
 
-### Feature 6: `searchable` (insert → MERGED_SAVED 대기)
+### Feature 5: `searchable` (insert → MERGED_SAVED 대기)
 
 ```
 [1] 텍스트 → Embedding (로컬)
@@ -117,8 +110,7 @@ Total end-to-end (MERGED_SAVED 시점까지)
 | T5 | recall  | — | exact match query |
 | T6 | recall  | — | cross-lang KO→EN |
 | T7 | recall  | — | topk scaling (1, 3, 5, 10) |
-| T8 | batch_capture | — | embed+score, batch_size 1/5/10/20, no insert |
-| T9 | vault_status | — | gRPC health check |
+| T8 | vault_status | — | gRPC health check |
 | T10 | searchable | — | 짧은 영어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |
 | T11 | searchable | — | 긴 영어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |
 | T12 | searchable | — | 한국어 → insert(await_searchable=True), MERGED_SAVED 대기 포함 |

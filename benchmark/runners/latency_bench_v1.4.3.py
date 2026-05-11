@@ -12,9 +12,6 @@ Differences from v1.2.2 benchmark:
       single — one index.insert(data=[vec]) call per vector
       batch  — one index.insert(data=[v1,...,vN]) call per batch_size vectors
 
-Note: batch_capture MCP tool (embed+score only, no insert) is unrelated to
-      the insert_mode parameter.
-
 Scenarios (all target ivf_vct index, eval_mode=mm)
 ----------
   capture:
@@ -26,11 +23,15 @@ Scenarios (all target ivf_vct index, eval_mode=mm)
     T5  Exact match query
     T6  Cross-language semantic query (Korean -> English)
     T7  topk scaling        (topk = 1, 3, 5, 10)
-  batch_capture:
-    T8  Batch size scaling  (sizes = 1, 5, 10, 20)
-        — embed+score only, no insert (same as v1.2.2 T8)
   vault_status:
-    T9  Vault health check + diagnostics
+    T8  Vault health check + diagnostics
+  multi_capture:
+    T13 2-phase batch embed+insert
+    T14 5-phase batch embed+insert
+  searchable:
+    T10 Short English → MERGED_SAVED
+    T11 Long English  → MERGED_SAVED
+    T12 Korean        → MERGED_SAVED
 
 Usage
 -----
@@ -145,7 +146,6 @@ SCENARIOS_RECALL = [
 ]
 
 RECALL_TOPK_VARIANTS = [1, 3, 5, 10]
-BATCH_SIZES = [1, 5, 10, 20]
 
 _MULTI_2_PHASE = [
     (
@@ -595,70 +595,6 @@ class LatencyBenchmark:
                 ))
         return results
 
-    async def run_batch_capture_scaling(self) -> list[LatencyScenarioResult]:
-        """T8: batch_capture MCP feature latency — embed+score only, no insert.
-
-        This measures the Rune batch_capture pipeline overhead, which is
-        independent of insert_mode (no actual insert is performed here).
-        """
-        results = []
-
-        for bs in BATCH_SIZES:
-            sid = f"T8_batch_{bs}"
-            print(f"  [{sid}] ", end="", flush=True)
-            runs = max(self.warmup + 1, min(3 + self.warmup, self.runs))
-
-            total_samples: list[float] = []
-            per_item_samples: list[float] = []
-            error: Optional[str] = None
-
-            items_texts = [
-                f"Decision {i+1}: chose option A over B for batch benchmark (batch_size={bs})"
-                for i in range(bs)
-            ]
-
-            for i in range(runs):
-                label = self._warmup_label(i)
-                print(f"{label} ", end="", flush=True)
-                try:
-                    t_start = time.perf_counter()
-                    for text in items_texts:
-                        vec = self._embedding.embed_single(text[:120])
-                        self._ev_client.score(self._index_name, vec)
-                    t_total = (time.perf_counter() - t_start) * 1000.0
-                    total_samples.append(t_total)
-                    per_item_samples.append(t_total / bs)
-                except Exception as e:
-                    error = str(e)
-                    print(f"\n    ERROR: {e}")
-                    break
-
-            if error:
-                results.append(LatencyScenarioResult(
-                    scenario_id=sid, feature="batch_capture",
-                    metadata={"batch_size": bs}, error=error,
-                ))
-                continue
-
-            print("done")
-            valid_total = total_samples[self.warmup:]
-            valid_per = per_item_samples[self.warmup:]
-            phases = [
-                PhaseLatency(name="total_batch", samples_ms=valid_total),
-                PhaseLatency(name="per_item", samples_ms=valid_per),
-            ]
-            results.append(LatencyScenarioResult(
-                scenario_id=sid,
-                feature="batch_capture",
-                phases=phases,
-                metadata={
-                    "batch_size": bs,
-                    "label": f"batch size {bs} (embed+score per item, no insert)",
-                    "runs": runs - self.warmup,
-                },
-            ))
-        return results
-
     async def _searchable_capture_phases(
         self, text: str, title: str, domain: str
     ) -> dict[str, float]:
@@ -926,7 +862,6 @@ class LatencyBenchmark:
         run_all = feature_filter is None
         run_capture = run_all or feature_filter == "capture"
         run_recall = run_all or feature_filter == "recall"
-        run_batch = run_all or feature_filter == "batch_capture"
         run_vault = run_all or feature_filter == "vault_status"
         run_searchable = run_all or feature_filter == "searchable"
         run_multi = run_all or feature_filter == "multi_capture"
@@ -945,11 +880,6 @@ class LatencyBenchmark:
                 r = await self.run_recall_scenario(sc)
                 report.add(r)
             for r in await self.run_recall_topk_scaling():
-                report.add(r)
-
-        if run_batch:
-            print("\n[batch_capture]")
-            for r in await self.run_batch_capture_scaling():
                 report.add(r)
 
         if run_vault:
@@ -1042,7 +972,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--feature",
-        choices=["capture", "recall", "batch_capture", "vault_status", "searchable", "multi_capture"],
+        choices=["capture", "recall", "vault_status", "searchable", "multi_capture"],
         default=None,
         help="Run only this feature (default: all)",
     )
