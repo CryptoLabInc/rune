@@ -19,6 +19,11 @@ import numpy as np
 import os, sys, signal, threading
 import json
 
+# pyenvector's gRPC health probe defaults to 3s, which is too tight for the
+# first RegisterKey round-trip on a cold cluster. Bump to 20s unless the user
+# has explicitly overridden it.
+os.environ.setdefault("ES2_GRPC_HEALTH_TIMEOUT", "20")
+
 logger = logging.getLogger("rune.mcp")
 
 
