@@ -677,7 +677,7 @@ class MCPServerApp:
 
             if self.envector is not None:
                 import concurrent.futures as _cf
-                ENVECTOR_DIAGNOSIS_TIMEOUT = 5.0  # seconds
+                ENVECTOR_DIAGNOSIS_TIMEOUT = 20.0  # seconds
                 _pool = _cf.ThreadPoolExecutor(max_workers=1)
                 try:
                     t0 = time.monotonic()
@@ -1690,7 +1690,7 @@ class MCPServerApp:
                     address=self._envector_endpoint or "",
                     key_id=key_id,
                     key_path=key_path,
-                    eval_mode=os.getenv("ENVECTOR_EVAL_MODE", "mm"),
+                    eval_mode=os.getenv("ENVECTOR_EVAL_MODE", "mm32"),
                     query_encryption="plain",
                     access_token=self._envector_api_key or "",
                     secure=rune_config.envector.secure,
@@ -1888,8 +1888,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--envector-eval-mode",
-        default=os.getenv("ENVECTOR_EVAL_MODE", "mm"),
-        help="enVector evaluation mode (e.g., 'mm', 'rmp').",
+        default=os.getenv("ENVECTOR_EVAL_MODE", "mm32"),
+        help="enVector evaluation mode (e.g., 'mm32', 'rmp').",
     )
     parser.add_argument(
         "--encrypted-query",
