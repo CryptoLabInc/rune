@@ -103,25 +103,24 @@ func (m *Manager) SetReloadFunc(f func()) {
 	m.onReload.Store(f)
 }
 
-// Retrigger respawns the boot loop only if no loop is currently running.
-//
-// Concretely it fires only when state is Dormant — the boot loop returns
-// after a terminal Dormant (config missing / not_configured /
-// vault_unconfigured / user_deactivated), so its goroutine has exited and
-// a re-spawn is safe. While state is Starting / WaitingForVault / Active
-// a goroutine is still active (retrying or already succeeded), so firing
-// would race; Retrigger silently no-ops in those cases — the existing
-// loop's progress is what the caller will observe via state polling.
+// Retrigger respawns the boot loop only if no loop is currently running and
+// only one caller wins when called concurrently
+// Transitioning Active to Starting (or Dormant to Starting) atomically claims
+// right to spawn RunBootLoop
 func (m *Manager) Retrigger() {
-	if m.Current() != StateDormant {
-		return
-	}
 	v := m.onReload.Load()
 	if v == nil {
 		return
 	}
+
 	f, ok := v.(func())
 	if !ok || f == nil {
+		return
+	}
+
+	// Atomically claim the right to spawn. Losers fall through and return.
+	if !m.state.CompareAndSwap(int32(StateActive), int32(StateStarting)) &&
+		!m.state.CompareAndSwap(int32(StateDormant), int32(StateStarting)) {
 		return
 	}
 	f()

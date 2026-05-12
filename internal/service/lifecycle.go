@@ -275,54 +275,73 @@ func (s *LifecycleService) collectEmbedding(ctx context.Context, timeout time.Du
 	return info
 }
 
-// collectEnvector wraps GetIndexList under timeout + ClassifyEnvectorError
+// collectEnvector probes envector, and on any envector adapter error
+// re-triggers the boot loop and probes once more before reporting
+// This is because the user only configures Vault credentails; the enVector
+// endpoint and keys arrive via Vault (recovery is system's job)
 func (s *LifecycleService) collectEnvector(ctx context.Context, timeout time.Duration) EnvectorInfo {
 	if s.Envector == nil {
 		return EnvectorInfo{}
 	}
 
-	type result struct {
-		err error
+	info, err := s.probeEnvector(ctx, timeout)
+	if err == nil {
+		return info
+	}
+	if s.State == nil || !envector.IsAdapterError(err) {
+		return info
 	}
 
+	slog.Warn("diagnostics: envector probe failed - re-bootstrapping", "err", err)
+	s.State.Retrigger()
+	if !waitForActiveAfterRetrigger(ctx, s.State, retriggerSettleTimeout) {
+		slog.Warn("diagnostics: re-boot did not settle to active")
+		return info
+	}
+
+	info2, _ := s.probeEnvector(ctx, timeout)
+	return info2
+}
+
+// Decide whether to attemp recovery or not
+func (s *LifecycleService) probeEnvector(ctx context.Context, timeout time.Duration) (EnvectorInfo, error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	ch := make(chan result, 1)
+	ch := make(chan error, 1)
 	t0 := time.Now()
 
 	go func() {
 		_, err := s.Envector.GetIndexList(ctx2)
-		ch <- result{err: err}
+		ch <- err
 	}()
 
 	select {
-	case res := <-ch:
+	case probeErr := <-ch:
 		elapsed := time.Since(t0)
-		if res.err != nil {
-			errType, hint := ClassifyEnvectorError(res.err, elapsed)
+		if probeErr == nil {
 			return EnvectorInfo{
-				Error:     res.err.Error(),
-				ErrorType: string(errType),
-				Hint:      hint,
-				ElapsedMs: float64(elapsed.Milliseconds()),
-			}
+				Reachable: true,
+				LatencyMs: float64(elapsed.Milliseconds()),
+			}, nil
 		}
+		errType, hint := ClassifyEnvectorError(probeErr, elapsed)
 		return EnvectorInfo{
-			Reachable: true,
-			LatencyMs: float64(elapsed.Milliseconds()),
-		}
+			Error:     probeErr.Error(),
+			ErrorType: string(errType),
+			Hint:      hint,
+			ElapsedMs: float64(elapsed.Milliseconds()),
+		}, probeErr
 	case <-ctx2.Done():
 		elapsed := time.Since(t0)
 		return EnvectorInfo{
 			Error: fmt.Sprintf(
-				"Health check timed out after %.0fs (elapsed: %.1fms). "+
-					"Run /rune:activate to pre-warm the connection, then retry /rune:status.",
+				"Health check timed out after %.0fs (elapsed: %.1fms).",
 				timeout.Seconds(), float64(elapsed.Milliseconds()),
 			),
 			ErrorType: string(EnvErrTimeout),
 			ElapsedMs: float64(elapsed.Milliseconds()),
-		}
+		}, ctx2.Err()
 	}
 }
 
@@ -512,15 +531,10 @@ const WarmupTimeout = 60 * time.Second
 // at boot, then user ran /rune:configure) reaches Active via this path.
 // No process restart is required.
 func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipelinesResult, error) {
-	// Dormant terminal: the boot loop has exited. Ask Manager to spawn a
-	// fresh attempt (Manager.Retrigger silently no-ops on non-dormant
-	// states, so this is also safe to call unconditionally if we ever
-	// expand the trigger surface). Then poll for up to 5s so the response
-	// reflects the new state instead of the stale dormant snapshot.
-	if s.State.Current() == lifecycle.StateDormant {
-		s.State.Retrigger()
-		s.waitForBootProgress(ctx, 5*time.Second)
-	}
+	// Always re-trigger so config changes such as new vault endpoint and rotated token are picked
+	// without restarting MCP
+	s.State.Retrigger()
+	s.waitForBootProgress(ctx, 5*time.Second)
 
 	result := &ReloadPipelinesResult{
 		OK:    true,

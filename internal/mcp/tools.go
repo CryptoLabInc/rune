@@ -18,6 +18,9 @@ package mcp
 
 import (
 	"fmt"
+	"io"
+	"log/slog"
+	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -46,7 +49,10 @@ type Deps struct {
 	Lifecycle *service.LifecycleService
 }
 
+const staleClientCloseTime = 5 * time.Second
+
 func (d *Deps) InjectVault(client vault.Client) {
+	prev := d.Vault
 	d.Vault = client
 	if d.Capture != nil {
 		d.Capture.Vault = client
@@ -57,9 +63,11 @@ func (d *Deps) InjectVault(client vault.Client) {
 	if d.Lifecycle != nil {
 		d.Lifecycle.Vault = client
 	}
+	closeAfterInterval("vault", prev, client)
 }
 
 func (d *Deps) InjectEmbedder(client embedder.Client) {
+	prev := d.Embedder
 	d.Embedder = client
 	if d.Capture != nil {
 		d.Capture.Embedder = client
@@ -70,9 +78,11 @@ func (d *Deps) InjectEmbedder(client embedder.Client) {
 	if d.Lifecycle != nil {
 		d.Lifecycle.Embedder = client
 	}
+	closeAfterInterval("embedder", prev, client)
 }
 
 func (d *Deps) InjectEnvector(client envector.Client) {
+	prev := d.Envector
 	d.Envector = client
 	if d.Capture != nil {
 		d.Capture.Envector = client
@@ -83,6 +93,25 @@ func (d *Deps) InjectEnvector(client envector.Client) {
 	if d.Lifecycle != nil {
 		d.Lifecycle.Envector = client
 	}
+	closeAfterInterval("envector", prev, client)
+}
+
+// Reserve Close() on a replaced client after a period to drain concurrent
+// in-flight gRPCs against the old connection
+//
+// TODO: A proper fix would track every calls on the old client via refcount or
+// sync.WaitGroup and Close()
+func closeAfterInterval(name string, prev, next io.Closer) {
+	if prev == nil || prev == next {
+		return
+	}
+
+	go func() {
+		time.Sleep(staleClientCloseTime)
+		if err := prev.Close(); err != nil {
+			slog.Warn("close replaced adapter client", "name", name, "err", err)
+		}
+	}()
 }
 
 // ApplyVaultBundle propagates per-bundle metadata (AgentID / AgentDEK /

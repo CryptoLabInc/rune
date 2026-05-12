@@ -29,6 +29,16 @@ func (e *Error) Error() string {
 // Unwrap allows errors.Is / errors.As to inspect the cause.
 func (e *Error) Unwrap() error { return e.Cause }
 
+func IsAdapterError(err error) bool {
+	var e *Error
+	return errors.As(err, &e)
+}
+
+func IsRetryable(err error) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Retryable
+}
+
 // Sentinel errors — spec §에러 처리.
 var (
 	// Connection / transport.
