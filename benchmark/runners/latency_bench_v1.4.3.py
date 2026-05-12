@@ -6,13 +6,13 @@ pipeline phase.  Runs standalone — no MCP server needed; adapters are imported
 directly.
 
 Differences from v1.2.2 benchmark:
-  - eval_mode: mm  (v1.2.2 was rmp)
+  - eval_mode: mm32  (v1.2.2 was rmp)
   - index_type: ivf_vct  (v1.2.2 was flat)
   - insert_mode: single | batch
       single — one index.insert(data=[vec]) call per vector
       batch  — one index.insert(data=[v1,...,vN]) call per batch_size vectors
 
-Scenarios (all target ivf_vct index, eval_mode=mm)
+Scenarios (all target ivf_vct index, eval_mode=mm32)
 ----------
   capture:
     T1  Short English text  (~30 tokens)
@@ -77,7 +77,7 @@ from runners.common import (  # noqa: E402
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-EVAL_MODE = "mm"
+EVAL_MODE = "mm32"
 INDEX_TYPE = "ivf_vct"
 
 # ── sample inputs ─────────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ class _Timer:
 
 class LatencyBenchmark:
     """
-    Latency benchmark for envector-msa-1.4.3 (eval_mode=mm, index_type=ivf_vct).
+    Latency benchmark for envector-msa-1.4.3 (eval_mode=mm32, index_type=ivf_vct).
 
     insert_mode controls how vectors are submitted during capture scenarios:
       "single" — index.insert(data=[vec]) called once per vector

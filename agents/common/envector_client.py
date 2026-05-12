@@ -36,7 +36,7 @@ class EnVectorClient:
         auto_key_setup: bool = True,
         agent_id: Optional[str] = None,
         agent_dek: Optional[bytes] = None,
-        eval_mode: str = "mm",
+        eval_mode: str = "mm32",
         index_type: str = "ivf_vct",
     ):
         """
@@ -50,7 +50,7 @@ class EnVectorClient:
             auto_key_setup: Auto-generate keys if not found
             agent_id: Per-agent identifier for app-layer metadata encryption
             agent_dek: Per-agent AES-256 DEK (32 bytes) from Vault
-            eval_mode: FHE evaluation mode ("mm" or "rmp")
+            eval_mode: FHE evaluation mode ("mm32" or "rmp")
             index_type: Index structure type ("ivf_vct" or "flat")
         """
         self._address = address

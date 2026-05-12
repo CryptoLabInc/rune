@@ -1,6 +1,6 @@
 # Rune × envector-msa-1.4.3 Latency Benchmark Plan
 
-> **[측정 환경]** pyenvector 1.4.3 사용. eval_mode=mm, index_type=ivf_vct.
+> **[측정 환경]** pyenvector 1.4.3 사용. eval_mode=mm32, index_type=ivf_vct.
 > envector-cloud-be에 배포된 v1.4.3 클러스터 엔드포인트 사용.
 > Vault는 원격(`tcp://193.122.124.173:50051`)에서 TLS로 실행 중.
 
@@ -14,7 +14,7 @@ v1.2.2 plan과 달라진 환경:
 | 항목 | v1.2.2 | v1.4.3 |
 |------|--------|--------|
 | pyenvector | 1.2.2 | 1.4.3 |
-| eval_mode | rmp | mm |
+| eval_mode | rmp | mm32 |
 | index_type | flat | ivf_vct |
 | insert_mode | single | **single**, **batch** 각각 측정 |
 | envector 엔드포인트 | `0511-1401-0001-4r6cwxfc908b.clusters.envector.io` | v1.4.3 클러스터 (배포 후 결정) |
@@ -34,7 +34,7 @@ v1.2.2 plan과 달라진 환경:
 
 ```
 [1] 텍스트 → Embedding (로컬, Qwen/Qwen3-Embedding-0.6B)
-[2] Novelty Check → envector inner_product (FHE, eval_mode=mm, index_type=ivf_vct)
+[2] Novelty Check → envector inner_product (FHE, eval_mode=mm32, index_type=ivf_vct)
 [3] Vault TopK Decrypt (gRPC tcp://193.122.124.173:50051)
 [4] FHE Encrypt → index.insert (single: 1개 / batch: N개 한 번에)
 ────
@@ -45,7 +45,7 @@ Total end-to-end
 
 ```
 [1] 쿼리 → Embedding (로컬)
-[2] Encrypted Search → envector (eval_mode=mm, ivf_vct nprobe 기반)
+[2] Encrypted Search → envector (eval_mode=mm32, ivf_vct nprobe 기반)
 [3] Vault TopK Decrypt (gRPC 원격)
 [4] 메타데이터 조회 (로컬 JSON 파싱)
 ────
@@ -132,7 +132,7 @@ Total end-to-end (MERGED_SAVED 시점까지)
 
 1. envector-msa-1.4.3 → envector-cloud-be에 배포 완료
 2. **ivf_vct 인덱스** 사전 생성 (nlist, default_nprobe 설정 포함)
-3. Vault에 mm eval_mode 키 등록 완료
+3. Vault에 mm32 eval_mode 키 등록 완료
 4. `~/.rune/config.json`의 `envector.endpoint` → v1.4.3 클러스터 URL로 업데이트
 
 ---
@@ -143,7 +143,7 @@ Total end-to-end (MERGED_SAVED 시점까지)
 |------|------|
 | `benchmark/runners/latency_bench_v1.4.3.py` | 신규 runner. `--insert-mode single|batch` 필수 |
 | `benchmark/runners/common.py` | `PhaseLatency`, `LatencyScenarioResult`, `LatencyBenchReport` |
-| `agents/common/envector_client.py` | `eval_mode` 파라미터 추가 (기본값 "mm") |
+| `agents/common/envector_client.py` | `eval_mode` 파라미터 추가 (기본값 "mm32") |
 
 ---
 
