@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -12,24 +11,6 @@ import (
 )
 
 const retriggerSettleTimeout = 30 * time.Second
-
-func IsEnvectorRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	var e *envector.Error
-	if !errors.As(err, &e) {
-		return false
-	}
-
-	return e.Retryable
-}
-
-func isEnvectorAdapterErr(err error) bool {
-	var e *envector.Error
-	return errors.As(err, &e)
-}
 
 // Re-trigger boot loop if enVector connection failure occurred since it might be
 // caused by outdated configurations
@@ -43,7 +24,7 @@ func withEnvectorRetry[T any](
 	if err == nil {
 		return out, nil
 	}
-	if mgr == nil || !IsEnvectorRetryable(err) {
+	if mgr == nil || !envector.IsRetryable(err) {
 		return out, err
 	}
 

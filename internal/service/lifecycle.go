@@ -274,7 +274,7 @@ func (s *LifecycleService) collectEnvector(ctx context.Context, timeout time.Dur
 	if err == nil {
 		return info
 	}
-	if s.State == nil || !isEnvectorAdapterErr(err) {
+	if s.State == nil || !envector.IsAdapterError(err) {
 		return info
 	}
 
