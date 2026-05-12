@@ -261,6 +261,9 @@ class LatencyBenchmark:
         agent_dek_b64 = bundle.pop("agent_dek", None)
         ev_endpoint = bundle.pop("envector_endpoint", None) or cfg.envector.endpoint
         ev_api_key = bundle.pop("envector_api_key", None) or cfg.envector.api_key
+        ev_secure = bundle.pop("envector_secure", None)
+        if ev_secure is None:
+            ev_secure = cfg.envector.secure
 
         if not key_id:
             raise RuntimeError("Vault did not return key_id")
@@ -294,6 +297,7 @@ class LatencyBenchmark:
             key_path=str(key_path),
             key_id=key_id,
             access_token=ev_api_key,
+            secure=ev_secure,
             auto_key_setup=False,
             agent_id=agent_id,
             agent_dek=agent_dek,
