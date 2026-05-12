@@ -98,6 +98,9 @@ func (d *Deps) InjectEnvector(client envector.Client) {
 
 // Reserve Close() on a replaced client after a period to drain concurrent
 // in-flight gRPCs against the old connection
+//
+// TODO: A proper fix would track every calls on the old client via refcount or
+// sync.WaitGroup and Close()
 func closeAfterInterval(name string, prev, next io.Closer) {
 	if prev == nil || prev == next {
 		return
