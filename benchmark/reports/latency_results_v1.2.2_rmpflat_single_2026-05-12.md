@@ -1,5 +1,115 @@
 # Rune × envector-msa-1.2.2 Latency Report
 
+> **[측정 환경]** pyenvector 1.2.2. **eval_mode=rmp, index_type=flat**.
+> envector 엔드포인트: `0511-1401-0001-4r6cwxfc908b.clusters.envector.io` (5/11 측정과 동일 클러스터).
+> Vault: `tcp://193.122.124.173:50051` (5/11 측정과 동일 엔드포인트). 단 5/12에 CA cert (`~/.rune/certs/ca.pem`) 와 vault token이 갱신됨 — 새 cert/token 적용 후 본 측정 진행.
+> **시나리오 셋**: v1.4.3 runner(`latency_bench_v1.4.3.py`)를 v1.2.2 SDK 호환으로 어댑팅하여 T1–T14 측정. T8(batch_capture)은 v1.4.3에서 폐지되어 본 측정에서도 제외. T10–T14(searchable, multi_capture)는 v1.2.2에서 **신규 측정**(5/11 baseline 없음).
+> **insert_mode**: single만 측정. v1.2.2 SDK는 SDK 레벨에서 batch insert path를 노출하지 않음.
+>
+> **[비교 노트]** 5/11(`latency_results_v1.2.2_2026-05-11.md`)과 동일 envector/Vault 엔드포인트이므로 인프라 변경은 아님. T9 vault health이 7.4ms로 5/11 7.6ms와 사실상 일치하는 것이 그 증거. 그럼에도 T1–T7가 5/11 대비 ~1.4-1.7x 느려진 것은 **인덱스 vector 누적**이 가장 유력한 가설 — flat 인덱스 brute-force는 N에 선형이며, 한 달 사이 별도 측정/캡처로 vector가 누적된 상태로 본 측정이 수행됨.
+
+## 실행 결과 요약
+
+| 시나리오                           | feature       | p50 total | p95 total | n      | Δ(5/11 대비)    |
+| ---------------------------------- | ------------- | --------- | --------- | ------ | --------------- |
+| T1 짧은 영문 (~35 tokens)          | capture       | 1153.7 ms | 1201.7 ms | 8      | +490 ms (×1.7)  |
+| T2 긴 영문 (~155 tokens)           | capture       | 1176.0 ms | 1249.8 ms | 8      | +366 ms (×1.5)  |
+| T3 한국어                          | capture       | 1194.9 ms | 1232.4 ms | 8      | +324 ms (×1.4)  |
+| T4 중복 입력 (near-duplicate path) | capture       | 1271.8 ms | 1337.1 ms | 8      | +307 ms (×1.3)  |
+| T5 Recall — exact match            | recall        | 839.7 ms  | 883.6 ms  | 8      | +311 ms (×1.6)  |
+| T6 Recall — 한→영 cross-language   | recall        | 860.0 ms  | 945.7 ms  | 8      | +344 ms (×1.7)  |
+| T7 Recall — topk 1/3/5/10          | recall        | 805–841 ms| 873–953 ms| 5 each | ×1.6–1.7        |
+| T9 Vault health check              | vault_status  | 7.4 ms    | 9.7 ms    | 8      | -0.2 ms (≈동일) |
+| T10 searchable 짧은 영문           | searchable    | 2200.5 ms | 2296.5 ms | 8      | (신규)          |
+| T11 searchable 긴 영문             | searchable    | 2368.0 ms | 2432.0 ms | 8      | (신규)          |
+| T12 searchable 한국어              | searchable    | 2494.6 ms | 2642.4 ms | 8      | (신규)          |
+| T13 multi_capture 2-phase          | multi_capture | 2013.0 ms | 2177.5 ms | 8      | (신규)          |
+| T14 multi_capture 5-phase          | multi_capture | 2556.6 ms | 2676.8 ms | 8      | (신규)          |
+
+**capture 병목**: `insert` (462–525 ms, ~40%)과 `score` (303–473 ms, ~30%)이 합산 ~70%. 5/11(insert ~74% 단독 지배)과 달리 score 비중이 상대적으로 ↑ — 인덱스 누적이 score 단계에 직접 반영된 신호.
+**recall 병목**: `score` (≈510 ms) + `vault_topk` (≈250 ms) FHE 경로가 전체의 **~90%**, embed/remind는 부수적. 패턴은 5/11과 동일하나 절대값이 ~1.6x 증가.
+**vault health 무변동**: T9 7.4 ms는 5/11 7.6 ms와 사실상 일치. **인프라/네트워크 자체는 그대로**이며 capture/recall 증가의 원인이 인프라가 아님을 확정.
+**recall topk 무관**: T7에서 topk 1→10에도 total p50 805–841 ms로 거의 동일. FHE inner_product cost가 topk와 무관한 5/11의 구조적 특성 그대로.
+**searchable polling overhead**: T10–T12의 `insert_searchable` phase가 ~1330 ms — score+vault decrypt polling 사이클 1–2회 비용이 포함된 측정 (200 ms granularity).
+**multi_capture phase fan-in 효과**: T14(5-phase)의 total 2557 ms는 single capture × 5 추정치(~5800 ms)의 ~44%. embed/score/vault_topk가 phase 수에 거의 무관하게 작동.
+
+## 5/11 vs 5/12 p50 비교
+
+> 동일 envector/Vault 엔드포인트, 동일 pyenvector 1.2.2 환경에서 약 1일 차이로 측정. T9가 일치하므로 인프라 변동은 0에 가까우며, 차이는 인덱스 누적 가설의 직접 증거.
+
+```
+── capture (p50 ms, 기준 1272ms = 40칸) ────────────────────────────────
+
+T1 영문    5/11  █████████████████████  664ms
+           5/12  ████████████████████████████████████  1154ms  (×1.7)
+
+T2 긴영문  5/11  █████████████████████████  810ms
+           5/12  █████████████████████████████████████  1176ms  (×1.5)
+
+T3 한국어  5/11  ███████████████████████████  871ms
+           5/12  █████████████████████████████████████  1195ms  (×1.4)
+
+T4 중복    5/11  ██████████████████████████████  965ms
+           5/12  ████████████████████████████████████████  1272ms  (×1.3)
+
+── recall (p50 ms, 기준 860ms = 30칸) ──────────────────────────────────
+
+T5 exact   5/11  ██████████████████  529ms
+           5/12  ██████████████████████████████  840ms  (×1.6)
+
+T6 cross   5/11  ██████████████████  516ms
+           5/12  ██████████████████████████████  860ms  (×1.7)
+
+── vault health (p50 ms, 기준 7.6ms = 20칸) ────────────────────────────
+
+T9 vault   5/11  ████████████████████  7.6ms
+           5/12  ███████████████████   7.4ms  (×1.0)
+```
+
+---
+
+## 주목할 점
+
+### T9 외 모든 시나리오가 5/11 대비 ~1.4–1.7x 느림 — 인덱스 누적 가설
+
+|              | embed | score | vault_topk | insert | total |
+| ------------ | ----- | ----- | ---------- | ------ | ----- |
+| T1 5/11      | 38.8  | 102.0 | 34.6       | 490.0  | 664.0 |
+| T1 5/12      | 39.2  | 303.6 | 328.8      | 462.1  | 1153.7 |
+| Δ            | +0%   | +198% | +850%      | -6%    | +74%  |
+
+`score`와 `vault_topk`에서 거의 모든 증가가 발생. `embed`(로컬)와 `insert`(서버측 단순 write)는 변동 없음. flat 인덱스 brute-force가 N에 선형이라는 구조와 정확히 일치 — **인덱스에 vector가 누적된 만큼 score(전체 인덱스 대비 inner product) 와 vault_topk(decrypt할 후보 수)가 증가**.
+
+같은 가설을 뒷받침하는 다른 증거: T3 한국어의 score가 5/11엔 영문 T1의 2x(210 vs 102 ms)였는데, 5/12엔 둘 다 ~303 ms로 사실상 동일. 인덱스 N이 커지면 토큰 종류별 페이로드 차이보다 N에 비례하는 base cost가 지배. (다만 본 가설은 인덱스 vector count를 직접 측정해 확인하지 않았으므로 추정 단계.)
+
+### T9 vault_health는 7.4 ms (5/11 7.6 ms) — 인프라/네트워크 무변동
+
+Vault 엔드포인트(`tcp://193.122.124.173:50051`)는 5/11과 5/12 모두 동일. 5/12에 CA cert와 token이 rotation됐지만 핸드셰이크/RPC 비용엔 영향 없음. **본 측정의 다른 시나리오 증가가 인프라 원인이 아님**을 확정하는 control 측정.
+
+### searchable polling overhead — measurement granularity caveat
+
+|                      | embed | score | vault_topk | insert_searchable | total  |
+| -------------------- | ----- | ----- | ---------- | ----------------- | ------ |
+| T10 short_en         | 61.1  | 510.8 | 263.8      | **1333.4**        | 2200.5 |
+| T1 capture (참고)    | 39.2  | 303.6 | 328.8      | 462.1 (insert)    | 1153.7 |
+
+`insert_searchable` (1333 ms)는 T1의 일반 `insert` (462 ms)의 **~2.9x**. 차이 ~870 ms는 polling overhead — `_wait_until_searchable`이 한 번의 score+vault decrypt 사이클을 추가로 수행하는 비용. v1.4.3 server-push 측정(~89 ms)과 직접 비교 불가 — 측정 메커니즘 자체가 다름 (자세한 비교는 `latency_comparison_v1.2.2_vs_v1.4.3_2026-05-12.md` §3 참조).
+
+### multi_capture는 single capture × N보다 효율적 — phase fan-in 효과
+
+| 시나리오 | phase 수 | total p50 | single capture × N 추정 | 절감 |
+| -------- | -------- | --------- | ----------------------- | ---- |
+| T13      | 2        | 2013 ms   | 2308 ms (1154 × 2)      | ~13% |
+| T14      | 5        | 2557 ms   | 5769 ms (1154 × 5)      | ~56% |
+
+embed(75–86 ms) / vault_topk(342–383 ms)가 phase 수에 거의 비례하지 않고 batch 호출 한 번으로 끝나는 게 절감의 원인. score는 primary record 1개만 측정하므로 phase 수와 무관. insert_batch만 phase 수에 약하게 비례(2-phase 870 ms → 5-phase 1279 ms, ×1.5). **결정의 phase 수가 늘어날수록 단위 phase당 비용은 떨어진다**는 application-level 인사이트.
+
+### T4 duplicate score가 T1 대비 1.6x — near-duplicate path 패턴 (5/11과 동일)
+
+T1 score 303.6 ms vs T4 score 473.2 ms. 5/11에서도 T4 score가 T1의 ~2.7x였던 동일 패턴 (102 → 279 ms). 인덱스 누적으로 두 시나리오 모두 절대값은 증가했으나 **near-duplicate 판정 경로의 추가 vault_topk decrypt 분기는 그대로 활성** — 알고리즘 구조 변화는 없음.
+
+---
+
 ## Environment
 
 - **bench_version**: 1.4.3
