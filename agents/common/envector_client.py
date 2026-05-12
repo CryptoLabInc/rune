@@ -7,6 +7,7 @@ Avoids MCP protocol overhead by importing adapters directly.
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -33,6 +34,7 @@ class EnVectorClient:
         key_path: str = "~/.rune/keys",
         key_id: str = None,
         access_token: Optional[str] = None,
+        secure: Optional[bool] = None,
         auto_key_setup: bool = True,
         agent_id: Optional[str] = None,
         agent_dek: Optional[bytes] = None,
@@ -47,16 +49,18 @@ class EnVectorClient:
             key_path: Path to store/load encryption keys
             key_id: Key identifier
             access_token: Cloud access token (for enVector Cloud)
+            secure: TLS toggle for pyenvector 1.4 (None = SDK default)
             auto_key_setup: Auto-generate keys if not found
             agent_id: Per-agent identifier for app-layer metadata encryption
             agent_dek: Per-agent AES-256 DEK (32 bytes) from Vault
-            eval_mode: FHE evaluation mode ("mm32" or "rmp")
+            eval_mode: FHE evaluation mode ("mm32" or "rmp"); overridable via ENVECTOR_EVAL_MODE
             index_type: Index structure type ("ivf_vct" or "flat")
         """
         self._address = address
         self._key_path = Path(key_path).expanduser()
         self._key_id = key_id
         self._access_token = access_token
+        self._secure = secure
         self._auto_key_setup = auto_key_setup
         self._agent_id = agent_id
         self._agent_dek = agent_dek
@@ -80,9 +84,10 @@ class EnVectorClient:
                 address=self._address,
                 key_id=self._key_id,
                 key_path=str(self._key_path),
-                eval_mode=self._eval_mode,
-                query_encryption=False,  # Plain queries for simplicity
+                eval_mode=os.getenv("ENVECTOR_EVAL_MODE", self._eval_mode),
+                query_encryption="plain",  # Plain queries for simplicity
                 access_token=self._access_token,
+                secure=self._secure,
                 auto_key_setup=self._auto_key_setup,
                 agent_id=self._agent_id,
                 agent_dek=self._agent_dek,

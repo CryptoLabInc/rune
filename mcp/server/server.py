@@ -41,6 +41,34 @@ class _SensitiveFilter(logging.Filter):
 
 
 logger.addFilter(_SensitiveFilter())
+
+# Optional file log for diagnosing background-thread issues that Claude
+# Code's MCP console doesn't always capture cleanly. Off by default.
+#   RUNE_MCP_DEBUG_LOG=1       -> INFO level (lifecycle + errors)
+#   RUNE_MCP_DEBUG_LOG=debug   -> DEBUG level (verbose, includes httpx traces)
+if os.environ.get("RUNE_MCP_DEBUG_LOG"):
+    try:
+        from logging.handlers import RotatingFileHandler
+        _debug_log = os.path.expanduser("~/.rune/mcp-server.log")
+        os.makedirs(os.path.dirname(_debug_log), exist_ok=True)
+        _fh = RotatingFileHandler(_debug_log, maxBytes=5_000_000, backupCount=3)
+        _level = (
+            logging.DEBUG
+            if os.environ["RUNE_MCP_DEBUG_LOG"].lower() == "debug"
+            else logging.INFO
+        )
+        _fh.setLevel(_level)
+        _fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(threadName)s] %(levelname)s %(name)s: %(message)s"
+        ))
+        _fh.addFilter(_SensitiveFilter())
+        _root = logging.getLogger()
+        _root.addHandler(_fh)
+        if _root.level == 0 or _root.level > _level:
+            _root.setLevel(_level)
+    except Exception:
+        pass
+
 from pydantic import Field
 
 # Add parent directory (rune/mcp/) to sys.path so `from adapter import ...` works
@@ -212,7 +240,11 @@ async def _async_fetch_keys_from_vault(
         tls_disable: If True, use insecure plaintext channel.
 
     Returns:
-        tuple: (success, index_name, key_id, agent_id, agent_dek_bytes, envector_endpoint, envector_api_key)
+        tuple: (success, index_name, key_id, agent_id, agent_dek_bytes,
+                envector_endpoint, envector_api_key, envector_secure)
+            envector_secure is None when Vault did not provide the field
+            (older Vault servers); the client should leave it untouched and
+            fall back to the SDK default in that case.
     """
     client = VaultClient(
         vault_endpoint=vault_endpoint,
@@ -230,6 +262,7 @@ async def _async_fetch_keys_from_vault(
         vault_agent_dek_b64 = bundle.pop("agent_dek", None)
         vault_envector_endpoint = bundle.pop("envector_endpoint", None)
         vault_envector_api_key = bundle.pop("envector_api_key", None)
+        vault_envector_secure = bundle.pop("envector_secure", None)
 
         if vault_index_name:
             logger.info(f"Vault provided index_name: {vault_index_name}")
@@ -237,7 +270,7 @@ async def _async_fetch_keys_from_vault(
             logger.info(f"Vault provided key_id: {vault_key_id}")
         else:
             logger.warning("Vault did not provide key_id — key directory cannot be determined")
-            return False, vault_index_name, None, None, None, None, None
+            return False, vault_index_name, None, None, None, None, None, None
         if vault_agent_id:
             logger.info(f"Vault provided agent_id: {vault_agent_id}")
 
@@ -249,10 +282,10 @@ async def _async_fetch_keys_from_vault(
                 agent_dek_bytes = base64.b64decode(vault_agent_dek_b64)
             except (base64.binascii.Error, ValueError) as e:
                 logger.error(f"Failed to decode agent_dek from Vault (invalid base64): {e}")
-                return False, vault_index_name, vault_key_id, vault_agent_id, None, None, None
+                return False, vault_index_name, vault_key_id, vault_agent_id, None, None, None, None
             if len(agent_dek_bytes) != 32:
                 logger.error(f"agent_dek has invalid length {len(agent_dek_bytes)} bytes (expected 32 for AES-256)")
-                return False, vault_index_name, vault_key_id, vault_agent_id, None, None, None
+                return False, vault_index_name, vault_key_id, vault_agent_id, None, None, None, None
 
         # Save keys under key_base_path/<key_id>/ with restrictive permissions
         key_dir = os.path.join(key_base_path, vault_key_id)
@@ -265,11 +298,14 @@ async def _async_fetch_keys_from_vault(
                 f.write(key_content)
             logger.info(f"Saved {filename} to {filepath}")
 
-        return True, vault_index_name, vault_key_id, vault_agent_id, agent_dek_bytes, vault_envector_endpoint, vault_envector_api_key
+        return (
+            True, vault_index_name, vault_key_id, vault_agent_id, agent_dek_bytes,
+            vault_envector_endpoint, vault_envector_api_key, vault_envector_secure,
+        )
 
     except Exception as e:
         logger.error(f"Failed to fetch keys from Vault: {e}")
-        return False, None, None, None, None, None, None
+        return False, None, None, None, None, None, None, None
     finally:
         await client.close()
 
@@ -293,10 +329,11 @@ def fetch_keys_from_vault(
         tls_disable: If True, use insecure plaintext channel.
 
     Returns:
-        tuple: (success, index_name, key_id, agent_id, agent_dek_bytes, envector_endpoint, envector_api_key)
+        tuple: (success, index_name, key_id, agent_id, agent_dek_bytes,
+                envector_endpoint, envector_api_key, envector_secure)
     """
     import asyncio
-    _fail = (False, None, None, None, None, None, None)
+    _fail = (False, None, None, None, None, None, None, None)
 
     try:
         asyncio.get_running_loop()
@@ -308,11 +345,21 @@ def fetch_keys_from_vault(
                 asyncio.run,
                 _async_fetch_keys_from_vault(vault_endpoint, vault_token, key_base_path, ca_cert, tls_disable),
             )
+            # gRPC GetPublicKey has a 90s deadline; add buffer for thread/
+            # asyncio/TLS overhead so a slow-but-eventually-OK fetch returns
+            # its real result. The `with` block already waits on shutdown,
+            # so a longer timeout costs nothing on the success path.
             try:
-                return future.result(timeout=30)
+                return future.result(timeout=120)
             except concurrent.futures.TimeoutError:
-                logger.error("Vault key fetch timed out after 30 seconds")
-                return _fail
+                logger.warning(
+                    "Vault key fetch exceeded 120s — waiting briefly for in-flight call"
+                )
+                try:
+                    return future.result(timeout=30)
+                except Exception as e:
+                    logger.error(f"Vault key fetch ultimately failed: {e}")
+                    return _fail
             except Exception as e:
                 logger.error(f"Vault key fetch failed in thread: {e}")
                 return _fail
@@ -1558,7 +1605,10 @@ class MCPServerApp:
             # Always re-fetch from Vault on reload to pick up endpoint/index changes
             if rune_config.vault.endpoint and rune_config.vault.token:
                 logger.info("Fetching keys from Vault...")
-                success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek, vault_ev_endpoint, vault_ev_api_key = fetch_keys_from_vault(
+                (
+                    success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek,
+                    vault_ev_endpoint, vault_ev_api_key, vault_ev_secure,
+                ) = fetch_keys_from_vault(
                     rune_config.vault.endpoint,
                     rune_config.vault.token,
                     key_path,
@@ -1579,9 +1629,11 @@ class MCPServerApp:
                         self._envector_endpoint = vault_ev_endpoint
                     if vault_ev_api_key:
                         self._envector_api_key = vault_ev_api_key
+                    if vault_ev_secure is not None:
+                        rune_config.envector.secure = vault_ev_secure
 
                     # Cache enVector credentials to config.json
-                    if vault_ev_endpoint or vault_ev_api_key:
+                    if vault_ev_endpoint or vault_ev_api_key or vault_ev_secure is not None:
                         from agents.common.config import save_config as save_rune_config
                         if vault_ev_endpoint:
                             rune_config.envector.endpoint = vault_ev_endpoint
@@ -1589,6 +1641,10 @@ class MCPServerApp:
                             rune_config.envector.api_key = vault_ev_api_key
                         save_rune_config(rune_config)
                         logger.info("Cached enVector credentials to config.json")
+
+                    if not vault_ev_endpoint or not vault_ev_api_key:
+                        logger.error("Vault bundle missing enVector credentials. Contact your Vault administrator.")
+                        _set_dormant_with_reason("envector_not_provisioned")
                 else:
                     result["errors"].append("Failed to fetch keys from Vault")
                     logger.error("Failed to fetch keys from Vault — capture/search will fail")
@@ -1622,6 +1678,7 @@ class MCPServerApp:
                 key_path=key_path,
                 key_id=key_id,
                 access_token=self._envector_api_key or "",
+                secure=rune_config.envector.secure,
                 auto_key_setup=False,
                 agent_id=self._agent_id,
                 agent_dek=self._agent_dek,
@@ -1633,9 +1690,10 @@ class MCPServerApp:
                     address=self._envector_endpoint or "",
                     key_id=key_id,
                     key_path=key_path,
-                    eval_mode="rmp",
-                    query_encryption=False,
+                    eval_mode=os.getenv("ENVECTOR_EVAL_MODE", "mm"),
+                    query_encryption="plain",
                     access_token=self._envector_api_key or "",
+                    secure=rune_config.envector.secure,
                     auto_key_setup=False,
                     agent_id=self._agent_id,
                     agent_dek=self._agent_dek,
@@ -1830,8 +1888,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--envector-eval-mode",
-        default=os.getenv("ENVECTOR_EVAL_MODE", "rmp"),
-        help="enVector evaluation mode (e.g., 'rmp', 'mm').",
+        default=os.getenv("ENVECTOR_EVAL_MODE", "mm"),
+        help="enVector evaluation mode (e.g., 'mm', 'rmp').",
     )
     parser.add_argument(
         "--encrypted-query",
@@ -1854,8 +1912,23 @@ if __name__ == "__main__":
     ENVECTOR_EVAL_MODE = args.envector_eval_mode
     ENCRYPTED_QUERY = args.encrypted_query
 
+    def _parse_optional_bool(value):
+        if value is None or value == "":
+            return None
+        if isinstance(value, bool):
+            return value
+        lowered = str(value).strip().lower()
+        if lowered in ("true", "1", "yes", "y", "on"):
+            return True
+        if lowered in ("false", "0", "no", "n", "off"):
+            return False
+        raise ValueError(f"invalid boolean value: {value!r}")
+
+    ENVECTOR_SECURE = _parse_optional_bool(os.getenv("ENVECTOR_SECURE"))
+
     # ── Load ~/.rune/config.json if ENVECTOR_CONFIG is set ──
     _vault_cfg = {}  # populated from config file if available
+    _envector_cfg = {}
     _config_path = os.getenv("ENVECTOR_CONFIG")
     if _config_path:
         _config_path = os.path.expanduser(_config_path)
@@ -1864,6 +1937,13 @@ if __name__ == "__main__":
                 with open(_config_path) as _cf:
                     _rune_config = json.load(_cf)
                 _vault_cfg = _rune_config.get("vault", {})
+                _envector_cfg = _rune_config.get("envector", {})
+                if not ENVECTOR_ENDPOINT and _envector_cfg.get("endpoint"):
+                    ENVECTOR_ENDPOINT = _envector_cfg["endpoint"]
+                if not ENVECTOR_API_KEY and _envector_cfg.get("api_key"):
+                    ENVECTOR_API_KEY = _envector_cfg["api_key"]
+                if ENVECTOR_SECURE is None:
+                    ENVECTOR_SECURE = _parse_optional_bool(_envector_cfg.get("secure"))
                 if not os.getenv("RUNEVAULT_ENDPOINT") and (_vault_cfg.get("endpoint") or _vault_cfg.get("url")):
                     os.environ["RUNEVAULT_ENDPOINT"] = _vault_cfg.get("endpoint") or _vault_cfg["url"]
                 if not os.getenv("RUNEVAULT_TOKEN") and _vault_cfg.get("token"):
@@ -1886,44 +1966,22 @@ if __name__ == "__main__":
         VAULT_TLS_DISABLE = bool(_vault_cfg.get("tls_disable", False))
 
     VAULT_CONFIGURED = bool(RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN)
-    VAULT_KEYS_LOADED = False
     VAULT_INDEX_NAME = None
     AGENT_ID = None
     AGENT_DEK = None
 
     if RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN:
         # When Vault is configured (Rune plugin mode), use canonical key path.
-        # key_id is discovered from Vault — no hardcoded default.
+        # key_id is discovered from Vault by the background pipeline init thread —
+        # no synchronous fetch here, so MCP transport is ready in ~1s instead of
+        # blocking on a multi-MB EvalKey stream that can exceed Claude's startup
+        # timeout.
         ENVECTOR_KEY_PATH = MCPServerApp.DEFAULT_KEY_PATH
-
-        logger.info(f"Vault configured — fetching public keys from: {RUNEVAULT_ENDPOINT}")
-        success, vault_index, vault_key_id, vault_agent_id, vault_agent_dek, vault_ev_endpoint, vault_ev_api_key = fetch_keys_from_vault(
-            RUNEVAULT_ENDPOINT, RUNEVAULT_TOKEN,
-            ENVECTOR_KEY_PATH,
-            ca_cert=VAULT_CA_CERT,
-            tls_disable=VAULT_TLS_DISABLE,
+        AUTO_KEY_SETUP = False
+        ENVECTOR_KEY_ID = None  # populated by _init_pipelines from Vault bundle
+        logger.info(
+            f"Vault configured — keys will be fetched in background from: {RUNEVAULT_ENDPOINT}"
         )
-        if success and vault_key_id:
-            ENVECTOR_KEY_ID = vault_key_id
-            logger.info(f"Vault provided key_id: {ENVECTOR_KEY_ID}")
-            AUTO_KEY_SETUP = False
-            VAULT_KEYS_LOADED = True
-            VAULT_INDEX_NAME = vault_index
-            AGENT_ID = vault_agent_id
-            AGENT_DEK = vault_agent_dek
-            if vault_ev_endpoint:
-                ENVECTOR_ENDPOINT = vault_ev_endpoint
-                logger.info("Using enVector endpoint from Vault bundle")
-            if vault_ev_api_key:
-                ENVECTOR_API_KEY = vault_ev_api_key
-                logger.info("Using enVector API key from Vault bundle")
-            if not vault_ev_endpoint or not vault_ev_api_key:
-                logger.error("Vault bundle missing enVector credentials. Contact your Vault administrator.")
-                _set_dormant_with_reason("envector_not_provisioned")
-        else:
-            logger.error("Failed to fetch keys/key_id from Vault. Operations requiring encryption will fail.")
-            _set_dormant_with_reason("vault_unreachable")
-            AUTO_KEY_SETUP = False
     elif RUNEVAULT_ENDPOINT and not RUNEVAULT_TOKEN:
         logger.warning("Vault endpoint provided but no token specified. Skipping Vault integration.")
         VAULT_CONFIGURED = True
@@ -1931,19 +1989,25 @@ if __name__ == "__main__":
     elif not AUTO_KEY_SETUP:
         logger.info(f"Using externally provided keys from: {ENVECTOR_KEY_PATH}")
 
+    # When Vault is configured, defer adapter construction to _init_pipelines
+    # (which builds it after the background key fetch completes). Constructing
+    # it here would either block on key files or partially init with empty
+    # placeholders that get overwritten anyway.
     envector_adapter = None
-    try:
-        envector_adapter = EnVectorSDKAdapter(
-            address=ENVECTOR_ENDPOINT,
-            key_id=ENVECTOR_KEY_ID,
-            key_path=ENVECTOR_KEY_PATH,
-            eval_mode=ENVECTOR_EVAL_MODE,
-            query_encryption=ENCRYPTED_QUERY,
-            access_token=ENVECTOR_API_KEY,
-            auto_key_setup=AUTO_KEY_SETUP,
-        )
-    except Exception as e:
-        logger.warning(f"enVector adapter init failed (server will start in degraded mode): {e}")
+    if not (RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN):
+        try:
+            envector_adapter = EnVectorSDKAdapter(
+                address=ENVECTOR_ENDPOINT,
+                key_id=ENVECTOR_KEY_ID,
+                key_path=ENVECTOR_KEY_PATH,
+                eval_mode=ENVECTOR_EVAL_MODE,
+                query_encryption=ENCRYPTED_QUERY,
+                access_token=ENVECTOR_API_KEY,
+                secure=ENVECTOR_SECURE,
+                auto_key_setup=AUTO_KEY_SETUP,
+            )
+        except Exception as e:
+            logger.warning(f"enVector adapter init failed (server will start in degraded mode): {e}")
 
     vault_client = None
     if RUNEVAULT_ENDPOINT and RUNEVAULT_TOKEN:
@@ -1970,7 +2034,10 @@ if __name__ == "__main__":
         agent_dek=AGENT_DEK,
     )
 
-    # Set enVector credentials from Vault bundle on app instance
+    # Seed enVector credentials from cached ~/.rune/config.json so that
+    # vault_status / non-encrypted tools have something to report before the
+    # background Vault fetch completes. _init_pipelines will overwrite these
+    # with fresh values from the Vault bundle.
     if ENVECTOR_ENDPOINT:
         app._envector_endpoint = ENVECTOR_ENDPOINT
     if ENVECTOR_API_KEY:

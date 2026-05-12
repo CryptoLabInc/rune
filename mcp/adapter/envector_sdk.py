@@ -1,6 +1,6 @@
 # Summary of file: enVector SDK Adapter(enVector APIs Caller)
 
-from typing import Union, List, Dict, Any
+from typing import Union, List, Dict, Any, Optional
 import base64
 import json
 import logging
@@ -111,8 +111,9 @@ class EnVectorSDKAdapter:
             key_id: str,
             key_path: str,
             eval_mode: str,
-            query_encryption: bool,
+            query_encryption: Union[str, bool, None],
             access_token: str = None,
+            secure: Optional[bool] = None,
             auto_key_setup: bool = True,
             agent_id: str = None,
             agent_dek: bytes = None,
@@ -126,8 +127,9 @@ class EnVectorSDKAdapter:
             key_id (str): The key identifier for the enVector SDK.
             key_path (str): The path to the key files.
             eval_mode (str): The evaluation mode for the enVector SDK.
-            query_encryption (bool): Whether to encrypt the query vectors.
+            query_encryption (Union[str, bool, None]): pyenvector 1.4 accepts "plain"/"cipher"; legacy bool is normalized.
             access_token (str, optional): The access token for the enVector SDK.
+            secure (bool, optional): TLS toggle for pyenvector 1.4 (None = SDK default).
             auto_key_setup (bool): If True, generates keys automatically when not found.
                                    Set to False when keys are provided externally (e.g., from Vault).
             agent_id (str): Per-agent identifier for app-layer metadata encryption.
@@ -148,11 +150,22 @@ class EnVectorSDKAdapter:
             "eval_mode": eval_mode,
             "auto_key_setup": auto_key_setup,
             "access_token": access_token,
+            "secure": secure,
+            "query_encryption": self._normalize_query_encryption(query_encryption),
         }
         if index_type is not None:
             self._init_params["index_type"] = index_type
 
         ev.init(**self._init_params)
+
+    @staticmethod
+    def _normalize_query_encryption(value: Union[str, bool, None]) -> str:
+        """Normalize Rune's legacy bool flag to pyenvector 1.4 string values."""
+        if value is None:
+            return "plain"
+        if isinstance(value, bool):
+            return "cipher" if value else "plain"
+        return value
 
     #--------------- Get Index List --------------#
     def call_get_index_list(self) -> Dict[str, Any]:

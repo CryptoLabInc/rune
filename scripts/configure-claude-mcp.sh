@@ -2,9 +2,9 @@
 set -e
 
 # Configure Claude MCP Servers
-# Registers Rune's enVector MCP server with Claude Desktop.
+# Registers Rune's enVector MCP server with Claude Code and Claude Desktop.
 #
-# Claude Code:   Handled natively by plugin.json mcpServers (no action needed)
+# Claude Code:   Explicit `claude mcp add` registration.
 # Claude Desktop: JSON deep merge into claude_desktop_config.json
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,19 +24,21 @@ print_warn() {
 CONFIGURED=0
 
 # ============================================================================
-# 1. Claude Code — handled by plugin.json mcpServers (no manual registration needed)
+# 1. Claude Code — purge legacy user-scope MCP entries
+#
+# Claude Code auto-registers the enVector MCP server from the plugin manifest
+# (plugin:rune:envector). Older Rune installs added a duplicate user-scope
+# `envector` entry via `claude mcp add`, which competes with the plugin-scope
+# registration during stdio handshake and causes both to fail to connect.
+# This block only removes those legacy entries; registration is owned by the
+# plugin manifest.
 # ============================================================================
-# Claude Code natively reads mcpServers from .claude-plugin/plugin.json,
-# which launches bootstrap-mcp.sh via ${CLAUDE_PLUGIN_ROOT}. No `claude mcp add`
-# needed — that was causing path conflicts with the plugin system.
-
-# Remove stale `claude mcp add` entries from previous versions
 CLAUDE_CMD=$(CLAUDECODE= command -v claude 2>/dev/null || true)
 if [ -n "$CLAUDE_CMD" ]; then
     for name in envector rune-vault envector-mcp-server; do
         CLAUDECODE= "$CLAUDE_CMD" mcp remove --scope user "$name" 2>/dev/null || true
     done
-    print_info "Cleaned stale Claude Code MCP entries"
+    print_info "Cleaned legacy Claude Code user-scope MCP entries (plugin scope owns registration)"
 fi
 
 # ============================================================================
@@ -224,7 +226,7 @@ fi
 # Summary
 # ============================================================================
 if [ "$CONFIGURED" -eq 0 ]; then
-    print_warn "No Claude Desktop configuration found — Claude Code uses plugin.json automatically"
+    print_warn "No Claude Desktop configuration found (Claude Code uses plugin-scope MCP registration)"
 fi
 
 echo ""
