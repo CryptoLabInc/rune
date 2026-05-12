@@ -252,10 +252,9 @@ func (s *LifecycleService) collectEmbedding(ctx context.Context, timeout time.Du
 	}
 	info.SocketPath = s.Embedder.SocketPath()
 
-	ctx2, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	if snap, err := s.Embedder.Info(ctx2); err != nil {
+	infoCtx, cancelInfo := context.WithTimeout(ctx, timeout)
+	defer cancelInfo()
+	if snap, err := s.Embedder.Info(infoCtx); err != nil {
 		info.InfoError = err.Error()
 	} else {
 		info.Model = snap.ModelIdentity
@@ -263,7 +262,9 @@ func (s *LifecycleService) collectEmbedding(ctx context.Context, timeout time.Du
 		info.DaemonVersion = snap.DaemonVersion
 	}
 
-	if health, err := s.Embedder.Health(ctx2); err != nil {
+	healthCtx, cancelHealth := context.WithTimeout(ctx, timeout)
+	defer cancelHealth()
+	if health, err := s.Embedder.Health(healthCtx); err != nil {
 		info.HealthError = err.Error()
 	} else {
 		info.Status = health.Status
