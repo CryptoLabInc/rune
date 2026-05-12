@@ -29,9 +29,12 @@ Scenarios (all target ivf_vct index, eval_mode=mm32)
     T13 2-phase batch embed+insert
     T14 5-phase batch embed+insert
   searchable:
-    T10 Short English → MERGED_SAVED
-    T11 Long English  → MERGED_SAVED
-    T12 Korean        → MERGED_SAVED
+    (v1.4.3 server-push wait target — `MERGED_SAVED`: insert request's
+     vectors have all moved from temporary raw shards into canonical
+     non-raw shards, but have not yet been published via LoadIndex)
+    T10 Short English
+    T11 Long English
+    T12 Korean
 
 Usage
 -----
@@ -618,8 +621,11 @@ class LatencyBenchmark:
         Caveats:
         - Bench texts repeat across runs, so after the first iteration the
           same vector already exists in the index — subsequent polls match on
-          the prior copy. This is the same caveat the v1.4.3 MERGED_SAVED-based
-          measurement has (server-push fires on the new insert, not the prior).
+          the prior copy. This is the same caveat the v1.4.3 server-push
+          measurement has — i.e. waiting for the server-internal `MERGED_SAVED`
+          state (insert request's vectors have all moved from temporary raw
+          shards into canonical non-raw shards, but have not yet been published
+          via LoadIndex); the server-push fires on the new insert, not the prior.
         - Measurement granularity ≈ poll_interval_s + per-cycle RPC latency.
         - On vault RESOURCE_EXHAUSTED we back off by the server-hinted retry-after.
         """
@@ -664,10 +670,14 @@ class LatencyBenchmark:
         """
         Measure time from capture start until data is searchable.
 
-        v1.4.3 used insert(await_searchable=True) which blocks server-side until
-        MERGED_SAVED. v1.2.2 SDK does not expose that state, so we poll the index
-        (score → vault decrypt → remind) until our just-inserted record surfaces
-        in the search result. Same semantic measurement, different mechanism.
+        v1.4.3 used insert(await_searchable=True) which blocks until the server
+        reaches `MERGED_SAVED` — defined as: insert request's vectors have all
+        moved from temporary raw shards into canonical non-raw shards, but have
+        not yet been published via LoadIndex (see
+        envector-msa-1.4.3/proto/v2/common/index-operation-message.proto).
+        v1.2.2 SDK does not expose that state, so we poll the index (score →
+        vault decrypt) until our just-inserted vector becomes detectable in the
+        top-1 search result. Same semantic measurement, different mechanism.
 
         Phases:
           embed              — embed locally
@@ -717,7 +727,12 @@ class LatencyBenchmark:
         }
 
     async def run_searchable_scenario(self, scenario: dict) -> LatencyScenarioResult:
-        """T10-T12: measure capture → searchable latency (insert submit + MERGED_SAVED wait)."""
+        """T10-T12: measure capture → searchable latency.
+
+        v1.4.3: insert submit + server-push wait until `MERGED_SAVED`
+        (request's vectors moved into canonical non-raw shards, pre-publish).
+        v1.2.2: insert submit + client polling until top-1 cos similarity ≈ 1.0.
+        """
         _parts = scenario["id"].split("_", 1)
         sid = f"T{int(_parts[0][1:]) + 9}_{_parts[1]}_searchable"
         text = scenario["text"]

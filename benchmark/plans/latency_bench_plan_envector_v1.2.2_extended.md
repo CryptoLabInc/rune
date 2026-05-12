@@ -40,7 +40,7 @@ v1.4.3 환경과의 차이:
 | `EnVectorClient(eval_mode, index_type)` 인자 | 인프라 설정 | v1.2.2 `EnVectorClient`에는 해당 인자 없음 — runner에서 **인자 제거**. eval_mode는 v1.2.2 클라이언트 내부 디폴트(`rmp`)에 의존. |
 | `EnVectorClient(secure=...)` 인자 | TLS 모드 | v1.2.2에 없음 — runner에서 **제거**. v1.2.2는 access_token이 있으면 TLS 자동 활성. |
 | `--insert-mode batch` / `use_row_insert=False` | N개 벡터를 SDK 한 호출로 삽입 | v1.2.2 SDK 레벨에 없음 — **측정 대상에서 제외**. v1.4.3 only로 비교 리포트에 표기. |
-| `T10–T12 searchable` (`insert(await_searchable=True)`) | **capture 후 recall이 가능해지기까지의 시점** | v1.4.3는 `MERGED_SAVED` 상태로 측정. v1.2.2는 `MERGED_SAVED`가 노출되지 않으므로 **score → vault decrypt 폴링으로 top-1 cosine similarity가 임계(`0.999`)에 도달하는 순간**까지 대기. 측정 정밀도 ≈ poll_interval(200ms) + per-cycle RPC latency. |
+| `T10–T12 searchable` (`insert(await_searchable=True)`) | **capture 후 recall이 가능해지기까지의 시점** | v1.4.3는 server-push 방식으로 측정(서버 내부 상태 `MERGED_SAVED` = "insert request의 모든 vector가 임시(raw) shard에서 정식(non-raw) shard로 전부 이동 완료됐지만, 아직 정식 publish(`LoadIndex`)는 거치지 않은 상태"에 도달하면 RPC 반환). v1.2.2는 이 상태가 노출되지 않으므로 **score → vault decrypt 폴링으로 top-1 cosine similarity가 임계(`0.999`)에 도달하는 순간**까지 대기. 측정 정밀도 ≈ poll_interval(200ms) + per-cycle RPC latency. |
 | `T13–T14 multi_capture` (`use_row_insert=False`) | 다중 phase 결정의 누적/단계별 latency | application-level 시나리오이므로 호출 인자만 맞추면 phase 구조 그대로 재현. v1.2.2 SDK가 vectors=[v1,...,vN]을 어떻게 처리하든 의미는 보존. |
 | `envector_secure` bundle field | vault 응답의 secure 플래그 | v1.2.2 클라이언트에 전달 안 함 — bundle에서 pop만 (다운스트림 cert 쓰기는 영향 없음). |
 
@@ -106,7 +106,8 @@ Total end-to-end (queryable 시점까지)
 ```
 
 > **[v1.4.3와의 측정 메커니즘 차이]**
-> v1.4.3: `insert(await_searchable=True)` — 서버가 `MERGED_SAVED` 상태 push할 때 RPC 반환.
+> v1.4.3: `insert(await_searchable=True)` — 서버가 내부 상태 `MERGED_SAVED`(insert request의 모든 vector가 임시(raw) shard에서 정식(non-raw) shard로 전부 이동 완료됐지만, 아직 정식 publish(`LoadIndex`)는 거치지 않은 상태)에 도달하면 RPC 반환.
+>   ※ `envector-msa-1.4.3/proto/v2/common/index-operation-message.proto`에 `MERGED_SAVED=6`과 `SEARCHABLE=7`이 별도 enum으로 정의되어 있으며, pyenvector SDK의 `await_completion`이 둘 중 어느 단계에서 풀어지는지는 SDK 구현에 의존(본 plan은 위 "MERGED_SAVED" 정의 기준으로 표기).
 > v1.2.2: 클라이언트가 score 결과를 폴링하여 top-1 cos similarity가 ~1.0이 되는 시점 검출.
 > 같은 의미(=queryable 시점)를 다른 메커니즘으로 잰다.
 

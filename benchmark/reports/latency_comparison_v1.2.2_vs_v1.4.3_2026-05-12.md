@@ -90,7 +90,7 @@ v1.4.3는 v1.2.2 대비 **capture/recall에서 ~3배, vault_topk phase 단독으
 | 측정 메커니즘 | v1.2.2 | v1.4.3 |
 |---|---|---|
 | 정의 | capture 후 recall이 가능해지는 시점 | (동일) |
-| 검출 방법 | **클라이언트 폴링** — score → vault decrypt 반복하여 top-1 cosine ≥ 0.999가 될 때까지 대기 | **서버 push** — `insert(await_searchable=True)`가 `MERGED_SAVED` 상태에서 RPC 반환 |
+| 검출 방법 | **클라이언트 폴링** — score → vault decrypt 반복하여 top-1 cosine ≥ 0.999가 될 때까지 대기 | **서버 push** — `insert(await_searchable=True)`가 서버 내부 상태 `MERGED_SAVED`(insert request의 모든 vector가 임시(raw) shard에서 정식(non-raw) shard로 전부 이동 완료됐지만, 아직 정식 publish(`LoadIndex`)는 거치지 않은 상태)에 도달하면 RPC 반환. (proto enum에 `MERGED_SAVED=6`과 `SEARCHABLE=7`이 별도로 존재 — `envector-msa-1.4.3/proto/v2/common/index-operation-message.proto`) |
 | 최소 정밀도 | poll_interval(200ms) + per-cycle RPC latency | RPC RTT |
 | 측정값에 포함된 것 | insert RPC + 폴링 1+ 사이클의 score + vault decrypt | insert RPC + 서버 인덱싱 wait |
 
