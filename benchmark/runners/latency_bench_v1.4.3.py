@@ -844,6 +844,7 @@ class LatencyBenchmark:
         rtt = self._measure_network_rtt()
         cfg = self._config
         report.env = {
+            "bench_version": "1.4.3",
             "date": __import__("datetime").date.today().isoformat(),
             "envector_endpoint": cfg.envector.endpoint,
             "vault_endpoint": cfg.vault.endpoint,
