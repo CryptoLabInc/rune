@@ -40,7 +40,7 @@ v1.4.3는 v1.2.2 대비 **capture/recall에서 ~3배, vault_topk phase 단독으
 
 ## 1. Total Latency 비교 (single insert, p50 ms)
 
-| 시나리오 | Feature | v1.2.2 total | v1.4.3 total | v1.4.3 / v1.2.2 | 비고 |
+| 시나리오 | Feature | v1.2.2 single total | v1.4.3 single total | v1.4.3 / v1.2.2 | 비고 |
 |----------|---------|--------------|--------------|-----------------|------|
 | T1 short_en | capture | 1153.7 | 341.3 | **0.30** | apples-to-apples |
 | T2 long_en  | capture | 1176.0 | 359.2 | **0.31** | apples-to-apples |
@@ -59,7 +59,7 @@ v1.4.3는 v1.2.2 대비 **capture/recall에서 ~3배, vault_topk phase 단독으
 | T13 multi_2phase | multi_capture | 2013.0 | 88.4 | 0.04 | ⚠ **측정 메커니즘 차이** (insert phase 정의 다름) |
 | T14 multi_5phase | multi_capture | 2556.6 | 144.3 | 0.06 | ⚠ **측정 메커니즘 차이** |
 
-### Total p50 시각 비교 (apples-to-apples 시나리오만)
+### Total p50 시각 비교 (apples-to-apples 시나리오, single insert)
 
 > `(÷N)` = v1.4.3가 v1.2.2보다 N배 빠름. searchable/multi_capture는 측정 메커니즘이 달라 제외(§3 참조).
 
