@@ -17,9 +17,11 @@
 - v1.2.2 측정은 v1.4.3 runner를 **SDK 호출부만 5건 수정**한 버전으로 진행 (시나리오 정의/측정 통계/결과 포맷 그대로 유지)
 - **비교 주의**: pyenvector 버전, eval_mode, index_type, envector/vault 엔드포인트 4가지가 동시에 달라졌으므로 **단일 요인 해석 금지**
 
-## 실행 결과 요약
+## 실행 결과 요약 (single insert 기준, p50 ms)
 
-| 시나리오 | Feature | v1.2.2 total p50 | v1.4.3 total p50 | v1.4.3 / v1.2.2 | 비고 |
+> v1.2.2 SDK는 SDK 레벨에서 batch insert path가 없어 single만 측정 가능. v1.4.3는 single과 batch 둘 다 측정했지만 본 비교 표는 **v1.4.3 single insert 수치만** 사용(apples-to-apples). v1.4.3 batch 결과는 자세한 비교 리포트 §4 참조.
+
+| 시나리오 | Feature | v1.2.2 single total p50 | v1.4.3 single total p50 | v1.4.3 / v1.2.2 | 비고 |
 |---|---|---|---|---|---|
 | T1 short_en | capture | 1153.7 ms | 341.3 ms | **÷3.4** | apples-to-apples |
 | T2 long_en | capture | 1176.0 ms | 359.2 ms | **÷3.3** | apples-to-apples |
@@ -38,7 +40,7 @@
 
 ## 비교 그래프
 
-### 시나리오별 total p50 (apples-to-apples만)
+### 시나리오별 total p50 (apples-to-apples, single insert)
 
 ```
 ── capture (p50 ms, 기준 1272ms = 40칸) ────────────────────────────────
