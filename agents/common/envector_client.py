@@ -204,7 +204,12 @@ class EnVectorClient:
         index_name: str,
         texts: List[str],
         embedding_service,
-        metadata: Optional[List[Dict]] = None
+        metadata: Optional[List[Dict]] = None,
+        *,
+        await_completion: bool = False,
+        use_row_insert: bool = False,
+        load: bool = True,
+        request_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Embed texts and insert into index.
@@ -213,23 +218,36 @@ class EnVectorClient:
             index_name: Target index name
             texts: List of texts to embed
             embedding_service: EmbeddingService instance
-            metadata: Optional list of metadata dicts
+            metadata: Optional list of metadata dicts (not mutated; "text" is
+                merged into a per-row copy when missing)
+            await_completion: Forwarded to insert(); block until segmentation stage
+            use_row_insert: Forwarded to insert(); single-row API path
+            load: Forwarded to insert(); default True preserves capture-path
+                searchability. Pass False when the index is pre-loaded out-of-band.
+            request_ids: Forwarded to insert(); SDK appends server-generated split rids
 
         Returns:
             Result dict with ok/error status
         """
-        # Generate embeddings
         vectors = embedding_service.embed(texts)
 
-        # Add text to metadata if not provided
         if metadata is None:
-            metadata = [{"text": t} for t in texts]
+            meta_list = [{"text": t} for t in texts]
         else:
-            for i, meta in enumerate(metadata):
-                if "text" not in meta:
-                    meta["text"] = texts[i]
+            meta_list = [
+                m if "text" in m else {**m, "text": texts[i]}
+                for i, m in enumerate(metadata)
+            ]
 
-        return self.insert(index_name, vectors, metadata)
+        return self.insert(
+            index_name,
+            vectors,
+            meta_list,
+            await_completion=await_completion,
+            use_row_insert=use_row_insert,
+            load=load,
+            request_ids=request_ids,
+        )
 
     def score(
         self,
