@@ -17,6 +17,27 @@
 - **runs_per_scenario**: 8
 - **warmup_runs**: 2
 
+## 실행결과 요약 (single insert-mode)
+
+| Feature       | 시나리오                    | p50 ms    | p95 ms    | p99 ms    | n   | Status |
+| ------------- | --------------------------- | --------: | --------: | --------: | --: | ------ |
+| capture       | T1_short_en                 |     457.7 |     481.6 |     485.5 |   8 | OK     |
+| capture       | T2_long_en                  |     433.6 |     625.6 |     683.1 |   8 | OK     |
+| capture       | T3_korean                   |     306.5 |     337.9 |     345.8 |   8 | OK     |
+| capture       | T4_duplicate                |     282.7 |     300.2 |     301.0 |   8 | OK     |
+| recall        | T5_exact_match              |     257.9 |     288.4 |     292.0 |   8 | OK     |
+| recall        | T6_cross_lang               |     247.9 |     516.0 |     620.9 |   8 | OK     |
+| recall        | T7_topk_1                   |     234.2 |     244.6 |     245.3 |   5 | OK     |
+| recall        | T7_topk_3                   |     261.4 |     275.2 |     277.9 |   5 | OK     |
+| recall        | T7_topk_5                   |     244.5 |     266.6 |     270.4 |   5 | OK     |
+| recall        | T7_topk_10                  |     240.6 |     249.1 |     249.8 |   5 | OK     |
+| vault_status  | T9_vault_status             |       7.6 |      12.2 |      13.7 |   8 | OK     |
+| searchable    | T10_short_en_searchable     |         — |         — |         — |   0 | FAIL (timeout 60s) |
+| searchable    | T11_long_en_searchable      |         — |         — |         — |   0 | FAIL (timeout 60s) |
+| searchable    | T12_korean_searchable       |  15 997.3 |  16 194.8 |  16 204.2 |   8 | OK     |
+| multi_capture | T13_multi_2phase            |     367.0 |  47 826.5 |  62 200.3 |   8 | OK (p95 outlier) |
+| multi_capture | T14_multi_5phase            |     150.2 |     163.8 |     166.2 |   8 | OK     |
+
 ## 해석 및 주목할 점 (single insert-mode)
 
 ### 핵심 요약
