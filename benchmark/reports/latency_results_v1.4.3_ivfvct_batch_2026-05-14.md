@@ -17,6 +17,37 @@
 - **runs_per_scenario**: 8
 - **warmup_runs**: 2
 
+## 해석 및 주목할 점 (batch insert-mode)
+
+### 핵심 요약
+- **capture p50: 59–89 ms** (single 대비 5–7배 빠름), **recall p50: 34–40 ms** (single 대비 6–7배 빠름).
+- `insert` 단계가 8–10 ms로 급감 — batch API 경로가 row-insert 대비 RPC overhead를 거의 제거.
+- vault health 6.3 ms (single 7.6 ms와 유사) — gRPC 자체 RTT는 일관.
+
+### Phase별 패턴
+- **score**: capture 9–13 ms, recall 8–11 ms — single 모드 125–135 ms 대비 **10배 이상 빠름**. batch insert 경로에서는 score가 다른 코드 패스(예: cached 또는 light path)로 분기되었거나, novelty 결과가 비어 FHE 결과 디코드 비용이 줄었을 가능성 큼.
+- **vault_topk = 0.0 (대부분)**: `encrypted_blobs`가 비어 vault decrypt를 스킵한 것. score 결과가 hit가 없거나 batch 경로에서 blobs를 반환하지 않는 케이스 → **recall이 실제 결과를 반환하는지 별도 검증 필요** (T5–T7에서 `remind=0.0`도 같은 이유).
+- **insert (batch)**: 8–10 ms로 일정. 단, T1에서 p95=52 933 ms / mean=10 924 ms 거대 outlier 1회 (다른 runs는 정상). cold-start 또는 일시적 backend 응답 지연일 가능성. 
+
+### 주목할 만한 이슈
+1. **T1 short_en `insert` p95 52 933 ms (p99 70 237 ms)** — 8회 중 1회만 수십 초 걸린 spike. p50은 10.2 ms로 정상. **batch 모드에서도 첫 insert 시점에 cold-start spike가 살아있음**. warmup=2로 부족, 사실상 warmup=3 이상이 필요해 보임.
+2. **searchable T10/T11/T12 전부 실패** — `DependencyError: connection refused (10.96.83.35:50051)`. **백엔드 인덱스 노드와의 연결 자체가 끊긴 상태**. single 실행 때는 60s 타임아웃 형태였는데 batch 실행 시점에는 connection refused로 더 명확한 인프라 이슈로 표출. 측정 인터벌 사이 서버 상태 변화 추정.
+3. **recall에서 `vault_topk`/`remind` = 0.0** — single 모드에서는 15 ms / 60–80 ms로 정상 측정되었던 단계가 batch 실행 시점에 전부 0. **recall이 실제로 결과를 받아오는지, blobs가 왜 비는지 확인 필요**. 단순 score만 측정되고 있다면 batch 모드 recall p50(35 ms)은 과소평가됨.
+4. **multi_capture는 정상** — T13 87.9 ms / T14 147.5 ms. single 실행에서 보였던 T13 outlier(47 826 ms)가 batch에서는 사라짐 → multi_capture 경로는 본래 batch insert를 쓰므로 mode 차이가 거의 없어야 하는데, single 측정 시 발생한 "Application error from server" 폭주가 batch 실행 시점엔 진정된 것으로 보임.
+
+### single 대비 정량 비교 (p50 ms)
+
+| 시나리오            | single | batch | 배수      |
+| ------------------- | -----: | ----: | --------: |
+| T1 short_en         | 457.7  |  73.7 | 6.2× 빠름 |
+| T2 long_en          | 433.6  |  72.7 | 6.0× 빠름 |
+| T3 korean           | 306.5  |  88.8 | 3.5× 빠름 |
+| T4 duplicate        | 282.7  |  59.3 | 4.8× 빠름 |
+| T5 exact_match      | 257.9  |  35.9 | 7.2× 빠름 |
+| T6 cross_lang       | 247.9  |  38.8 | 6.4× 빠름 |
+| T7 topk_5           | 244.5  |  34.7 | 7.0× 빠름 |
+| T14 multi_5phase    | 150.2  | 147.5 |    동등   |
+
 
 ## Feature: `capture`
 

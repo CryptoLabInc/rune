@@ -17,6 +17,24 @@
 - **runs_per_scenario**: 8
 - **warmup_runs**: 2
 
+## 해석 및 주목할 점 (single insert-mode)
+
+### 핵심 요약
+- **capture p50: 282–458 ms**, **recall p50: 234–262 ms**, **vault health: 7.6 ms**.
+- capture latency의 약 55–60%가 `insert` 단계 (row-insert RPC 자체 비용)에 집중됨. embed/score/vault_topk는 비교적 안정.
+- recall은 모든 topk 값(1/3/5/10)에서 234–262 ms 범위로 거의 동일 — **topk가 latency에 미치는 영향 미미**. score(FHE) 비용이 지배적이고 remind 단계는 부차적.
+
+### Phase별 패턴
+- **embed**: 영어 단문 58–69 ms, 한국어 82 ms, recall query 35–46 ms — 한국어 토큰화/세그멘테이션이 약 20–25 ms 추가.
+- **score (FHE novelty)**: 모든 capture/recall에서 일관되게 125–135 ms p50. p95에서 가끔 300–480 ms 튐 (T2, T6) → 서버 큐잉 또는 batched flush 영향 추정.
+- **vault_topk**: 15–16 ms로 매우 안정 (gRPC RTT + FHE 부분 복호화).
+- **insert (row-insert)**: 영어 단문 256 ms, 영어 장문 228 ms, 한국어 74 ms, 중복 79 ms → **텍스트 길이보다 vault TopK가 hit한 후 novelty path로 분기되었는지가 영향이 큼**. 한국어/중복은 score에서 novelty 낮게 나와 빠른 경로로 빠진 것으로 추정.
+
+### 주목할 만한 이슈
+1. **searchable T10/T11 60 s 타임아웃 실패** — `wait_for_insert_stage`가 MERGED_SAVED를 못 잡음. T12(한국어)만 성공했는데 `segmentation_wait` 단독으로 **15 350 ms p50** — single insert 후 백엔드 segmentation 완료까지 15초 이상 걸리는 게 현재 구조. searchable SLA 관점에서 가장 큰 병목.
+2. **T13 (2-phase multi) p95 47 826 ms 거대 outlier** — `insert_batch` 단독 p95=47 484 ms. 출력 로그상 "Application error from server" 다수. multi_capture 경로에 서버 측 일시적 장애 또는 retry 폭주 가능성. T14(5-phase)는 영향 없이 정상(150 ms p50) → **2-phase 특정 페이로드 패턴이 트리거할 가능성**.
+3. **T2 long_en score p95 = 299.6 ms** (p50의 2.3배) — 페이로드 길이가 FHE 연산 시간을 늘리지는 않지만, score 시점의 서버 부하 분산이 p95 변동을 키움.
+
 ## Feature: `capture`
 
 ### T1_short_en
