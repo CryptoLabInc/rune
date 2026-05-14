@@ -409,6 +409,8 @@ class LatencyBenchmark:
                 index_name=self._index_name,
                 vectors=vectors,
                 metadata=metadata,
+                await_completion=False,
+                load=False,
                 use_row_insert=use_row,
             )
         insert_ms = t_insert.elapsed_ms
@@ -822,6 +824,8 @@ class LatencyBenchmark:
                 index_name=self._index_name,
                 vectors=vecs,
                 metadata=metadata,
+                await_completion=False,
+                load=False,
                 use_row_insert=False,
             )
         insert_ms = t_insert.elapsed_ms
