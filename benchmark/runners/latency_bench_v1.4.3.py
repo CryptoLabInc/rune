@@ -28,10 +28,15 @@ Scenarios (all target ivf_vct index, eval_mode=mm32)
   multi_capture:
     T13 2-phase batch embed+insert
     T14 5-phase batch embed+insert
-  searchable:
-    T10 Short English → MERGED_SAVED
-    T11 Long English  → MERGED_SAVED
-    T12 Korean        → MERGED_SAVED
+  searchable (logic 1: pre-load + async insert + wait_for_insert_stage):
+    Searchable ≜ (insert.stage ≥ segmentation) ∧ (index.state == loaded)
+    The index is pre-loaded in setup(); each measurement then submits an async
+    insert (load=False) and waits for the captured rids to reach segmentation
+    (MERGED_SAVED). Phases are split into insert_rpc / segmentation_wait so the
+    server-side wait can be isolated from RPC submission cost.
+    T10 Short English  → searchable
+    T11 Long English   → searchable
+    T12 Korean         → searchable
 
 Usage
 -----
@@ -312,6 +317,17 @@ class LatencyBenchmark:
         print(f"    eval_mode  : {EVAL_MODE}")
         print(f"    index_type : {INDEX_TYPE}")
         print(f"    insert_mode: {self.insert_mode}")
+
+        # Pre-load the index so searchable measurement (logic 1) can use async insert
+        # with load=False — the index is already in loaded state, so reaching the
+        # segmentation stage is the only thing gating searchability per row.
+        # Index.load() is a no-op when the index is already loaded.
+        print("  Pre-loading index …", end=" ", flush=True)
+        load_res = self._ev_client.load_index(index_name)
+        if load_res.get("ok"):
+            print("OK")
+        else:
+            print(f"WARN: {load_res.get('error')}")
 
     async def teardown(self) -> None:
         if self._vault is not None:
@@ -603,18 +619,24 @@ class LatencyBenchmark:
         self, text: str, title: str, domain: str
     ) -> dict[str, float]:
         """
-        Measure time from capture start until data is searchable (MERGED_SAVED).
+        Measure time from capture start until data is searchable.
+
+        Searchable ≜ (insert.stage ≥ segmentation) ∧ (index.state == loaded).
+        This runner uses logic 1: the index is pre-loaded once in setup(), then each
+        row uses an async insert (load=False) followed by a bundled wait_for_insert_stage
+        on the captured request_id(s). Because the index is already loaded, reaching
+        the segmentation stage is the only per-row gate to searchability — so the
+        segmentation wait IS the searchable wait, and we can split RPC time from
+        server-side wait time.
 
         Phases:
-          embed              — embed locally
-          score              — FHE novelty check
-          vault_topk         — Vault decrypt
-          insert_searchable  — insert(await_searchable=True): RPC + MERGED_SAVED wait
-          total              — wall clock including all phases
-
-        Note: EnVectorClient.insert() does not return a request_id, so RPC
-        submission time and server-side wait cannot be measured separately.
-        Use benchmark/runners/insert_row_only.py for fine-grained decomposition.
+          embed             — embed locally
+          score             — FHE novelty check
+          vault_topk        — Vault decrypt
+          insert_rpc        — async insert submit (await_completion=False, load=False)
+          segmentation_wait — server-side wait until MERGED_SAVED for the captured rids
+          searchable_total  — insert_rpc + segmentation_wait (the actual time-to-searchable)
+          total             — wall clock including embed/score/vault_topk
         """
         reusable_insight = text[:120]
         total_start = time.perf_counter()
@@ -634,24 +656,50 @@ class LatencyBenchmark:
                 await self._vault.decrypt_search_results(blobs[0], top_k=3)
             vault_ms = t_vault.elapsed_ms
 
+        # Insert payload shape mirrors capture: insert_mode=single uses row-insert path
+        # with a 1-vector payload; insert_mode=batch uses the batch path with a 1-vector
+        # payload (still one searchable unit per measurement).
+        use_row = self.insert_mode == "single"
+        vectors = [vec]
         metadata = [self._build_insert_metadata(text, title, domain)]
 
-        # Single insert — blocks until MERGED_SAVED (searchable)
+        # Phase A: async submit. await_completion=False + load=False so we measure
+        # only the RPC submit time here; the index is already in loaded state from
+        # setup() pre-load, so we will not collide with split/merge inside load().
+        request_ids: list[str] = []
         with _Timer() as t_insert:
             self._ev_client.insert(
                 index_name=self._index_name,
-                vectors=[vec],
+                vectors=vectors,
                 metadata=metadata,
-                await_searchable=True,
+                await_completion=False,
+                load=False,
+                request_ids=request_ids,
+                use_row_insert=use_row,
             )
-        insert_searchable_ms = t_insert.elapsed_ms
+        insert_rpc_ms = t_insert.elapsed_ms
 
+        # Phase B: wait for every captured rid to reach segmentation (MERGED_SAVED).
+        # Since the index is pre-loaded, this is the gating step for searchability.
+        with _Timer() as t_wait:
+            wait_res = self._ev_client.wait_for_insert_stage(
+                index_name=self._index_name,
+                request_ids=request_ids,
+                target_stage="segmentation",
+            )
+        segmentation_wait_ms = t_wait.elapsed_ms
+        if not wait_res.get("ok"):
+            raise RuntimeError(f"wait_for_insert_stage failed: {wait_res.get('error')}")
+
+        searchable_total_ms = insert_rpc_ms + segmentation_wait_ms
         total_ms = (time.perf_counter() - total_start) * 1000.0
         return {
             "embed": embed_ms,
             "score": score_ms,
             "vault_topk": vault_ms,
-            "insert_searchable": insert_searchable_ms,
+            "insert_rpc": insert_rpc_ms,
+            "segmentation_wait": segmentation_wait_ms,
+            "searchable_total": searchable_total_ms,
             "total": total_ms,
         }
 
@@ -684,7 +732,15 @@ class LatencyBenchmark:
 
         print("done")
         phases = self._build_phase_list(
-            ["embed", "score", "vault_topk", "insert_searchable", "total"],
+            [
+                "embed",
+                "score",
+                "vault_topk",
+                "insert_rpc",
+                "segmentation_wait",
+                "searchable_total",
+                "total",
+            ],
             all_timings,
         )
         return LatencyScenarioResult(

@@ -122,8 +122,10 @@ class EnVectorClient:
         index_name: str,
         vectors: List[List[float]],
         metadata: Optional[List[Dict]] = None,
-        await_searchable: bool = False,
+        await_completion: bool = False,
         use_row_insert: bool = False,
+        load: bool = True,
+        request_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Insert vectors into an index.
@@ -132,8 +134,16 @@ class EnVectorClient:
             index_name: Target index name
             vectors: List of embedding vectors
             metadata: Optional list of metadata dicts (one per vector)
-            await_searchable: If True, block until data is searchable (MERGED_SAVED)
+            await_completion: Forwarded to pyenvector 1.4.3 Index.insert(await_completion=...).
+                If True, block until the server-side stage selected by execute_until
+                (default "segmentation" → MERGED_SAVED) is reached.
             use_row_insert: If True, use single-row insert API path (len(vectors) must be 1)
+            load: Forwarded to SDK Index.insert(load=...). Default True preserves capture-path
+                behavior. Pass False for logic-1 searchable benchmarks where load() is invoked
+                separately and the index is pre-loaded.
+            request_ids: Out parameter forwarded to SDK Index.insert(request_ids=...). When
+                provided as an empty list, the SDK appends one server-generated split rid per
+                async split RPC; callers use these to drive wait_for_insert_stage.
 
         Returns:
             Result dict with ok/error status
@@ -155,9 +165,39 @@ class EnVectorClient:
             index_name=index_name,
             vectors=vectors,
             metadata=meta_list,
-            await_searchable=await_searchable,
+            await_completion=await_completion,
             use_row_insert=use_row_insert,
+            load=load,
+            request_ids=request_ids,
         )
+
+    def wait_for_insert_stage(
+        self,
+        index_name: str,
+        request_ids: List[str],
+        target_stage: str = "segmentation",
+        timeout_s: float = 60.0,
+        poll_interval_s: float = 0.5,
+    ) -> Dict[str, Any]:
+        """
+        Block until all given request_ids reach target_stage on the server.
+
+        target_stage="segmentation" maps to MERGED_SAVED; when the index is already
+        loaded, reaching that stage makes the inserted rows searchable.
+        """
+        self._ensure_initialized()
+        return self._adapter.call_wait_for_insert_stage(
+            index_name=index_name,
+            request_ids=request_ids,
+            target_stage=target_stage,
+            timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
+    def load_index(self, index_name: str) -> Dict[str, Any]:
+        """Trigger Index.load() out-of-band (no-op if already loaded)."""
+        self._ensure_initialized()
+        return self._adapter.call_load_index(index_name=index_name)
 
     def insert_with_text(
         self,
