@@ -12,7 +12,7 @@
 > **[runner 자체 차이 — 의도된 4축 비교 외의 추가 변수]** 두 측정은 같은 시나리오 ID(T1–T14)를 쓰지만 러너 코드가 서로 다른 버전이고, 그 결과 측정 컨텍스트도 동일하지 않다.
 >
 > - **capture (T1–T4)**: 입력 텍스트는 동일. 5/14는 매 시나리오 빈 인덱스로 시작하고 iteration 사이 `_wait_for_score_ready` 로 직전 insert의 merged 상태를 확인 후 다음 iter를 시작 (8 iter만 누적). 5/12는 production 인덱스에 그대로 누적. 측정 구조(embed/score/vault_topk/insert 단계)는 동일하므로 의도된 4축(SDK/eval_mode/index_type/insert_mode) 비교에 가까움.
-> - **recall (T5–T7)**: 5/14 는 매 recall 시나리오 시작 시 인덱스를 새로 만들고 랜덤 데이터 **20건을 priming** 한 상태에서 측정. 5/12 는 priming 없이 production `runecontext1` 인덱스(직전 capture 시나리오가 추가한 데이터 + 이전부터 누적된 데이터, 정확한 건수 미측정)에서 측정. flat 방식은 인덱스의 모든 데이터를 하나씩 비교하므로 건수가 많을수록 시간이 늘어나고, ivf_vct(nprobe=6)는 256개 그룹 중 6개만 보므로 건수 영향이 작음 → recall 에서 관찰된 "v1.4.3 가 3.3배 빠름" 은 (ivf_vct vs flat) **+** (20건 vs 누적 건수) **두 변수의 합산**이며, 의도된 4축(SDK/eval_mode/index_type/insert_mode) 만으로 귀속할 수 없음.
+> - **recall (T5–T7)**: 5/14 는 매 recall 시나리오 시작 시 인덱스를 새로 만들고 랜덤 데이터 **20건을 priming** 한 상태에서 측정. 5/12 는 priming 없이 production `runecontext1` 인덱스 (측정 시작 시 기존 캡처 1건, 직전 capture T1–T4 가 41건 추가하여 recall 시작 시점에 42건) 에서 측정. flat 방식은 인덱스의 모든 데이터를 하나씩 비교하므로 건수가 많을수록 시간이 늘어나고, ivf_vct(nprobe=6) 는 256개 그룹 중 6개만 보므로 건수 영향이 작음 → recall 에서 관찰된 "v1.4.3 가 3.3배 빠름" 은 (ivf_vct vs flat) **+** (20건 vs 42건) **두 변수의 합산**이며, 의도된 4축 (SDK/eval_mode/index_type/insert_mode) 만으로 귀속할 수 없음.
 > - **searchable / multi_capture**: 두 러너의 측정 메커니즘 자체가 다름 (5/12 client polling vs 5/14 server-push). §4·§5 참조.
 
 ---
@@ -29,7 +29,7 @@
 | vault endpoint               | `tcp://193.122.124.173:50051`                                                            | `tcp://161.118.149.143:50051`                                                               |
 | direct_envector              | (해당없음)                                                                               | True                                                                                        |
 | reset_policy                 | 시나리오 누적 (production 인덱스 `runecontext1` 위에서 측정)                             | per-scenario drop+create (bench 인덱스 `runecontext_bench` 사용)                            |
-| recall 측정 시 인덱스 모집단 | production 인덱스에 그대로 측정 (capture가 누적한 데이터 + 기존 데이터, 정확한 N 미측정) | 매 recall 시나리오마다 drop+create 후 `_prime_bench_index(n_records=20)` 로 랜덤 20건 삽입  |
+| recall 측정 시 인덱스 모집단 | production 인덱스에 그대로 측정 (recall 시작 시점 42건 = 기존 1 + capture T1–T4 가 추가한 41) | 매 recall 시나리오마다 drop+create 후 `_prime_bench_index(n_records=20)` 로 랜덤 20건 삽입 |
 | iteration 사이 wait          | 없음                                                                                     | `_wait_for_score_ready` (직전 insert가 merged 상태에 도달할 때까지 대기, 측정값 밖)         |
 | runs / warmup                | 10 / 2                                                                                   | 10 / 2                                                                                      |
 | 측정 일자                    | 2026-05-12                                                                               | 2026-05-14                                                                                  |
@@ -40,35 +40,35 @@
 
 > 두 러너 코드에서 직접 도출. "측정 중 추가" 는 그 시나리오 안에서 insert API 가 인덱스에 넣은 행 수 (warmup 포함, recall 의 경우 priming 포함). "측정 시작 시 인덱스 상태" 는 그 시나리오가 측정을 시작할 때 인덱스 안에 이미 있던 행 수.
 
-| 시나리오    | feature       | 5/12 측정 중 추가 | 5/12 시작 시 인덱스       | 5/14 측정 중 추가      | 5/14 시작 시 인덱스 |
-| ----------- | ------------- | ----------------- | ------------------------- | ---------------------- | ------------------- |
-| T1          | capture       | 10                | X (production 누적, 미측정) | 10                     | 0 (drop+create)     |
-| T2          | capture       | 10                | X + 10                    | 10                     | 0 (drop+create)     |
-| T3          | capture       | 10                | X + 20                    | 10                     | 0 (drop+create)     |
-| T4          | capture       | 11 (warmup 1 + iter 10) | X + 30              | 11 (warmup 1 + iter 10) | 0 (drop+create)    |
-| T5          | recall        | 0 (recall 은 insert 없음) | X + 41             | 0                      | 20 (priming)        |
-| T6          | recall        | 0                 | X + 41                    | 0                      | 20 (priming, drop+create 후 재 priming) |
-| T7_topk_1   | recall        | 0                 | X + 41                    | 0                      | 20 (priming, T7 4 시나리오 공유) |
-| T7_topk_3/5/10 | recall     | 0                 | X + 41                    | 0                      | 20 (위와 같은 priming) |
-| T9          | vault_status  | 0                 | X + 41                    | 0                      | 20 (이전 T7 시나리오 종료 상태) |
-| T10         | searchable    | 10                | X + 41                    | 10                     | 0 (drop+create)     |
-| T11         | searchable    | 10                | X + 51                    | 10                     | 0 (drop+create)     |
-| T12         | searchable    | 10                | X + 61                    | 10                     | 0 (drop+create)     |
-| T13 2-phase | multi_capture | 20 (iter 10 × 2 vec) | X + 71                 | 20                     | 0 (drop+create)     |
-| T14 5-phase | multi_capture | 50 (iter 10 × 5 vec) | X + 91                 | 50                     | 0 (drop+create)     |
+| 시나리오    | feature       | 5/12 측정 중 추가       | 5/12 시작 시 인덱스 | 5/14 측정 중 추가       | 5/14 시작 시 인덱스           |
+| ----------- | ------------- | ----------------------- | ------------------- | ----------------------- | ----------------------------- |
+| T1          | capture       | 10                      | 1 (기존 캡처 1건)   | 10                      | 0 (drop+create)               |
+| T2          | capture       | 10                      | 11                  | 10                      | 0 (drop+create)               |
+| T3          | capture       | 10                      | 21                  | 10                      | 0 (drop+create)               |
+| T4          | capture       | 11 (warmup 1 + iter 10) | 31                  | 11 (warmup 1 + iter 10) | 0 (drop+create)               |
+| T5          | recall        | 0 (recall 은 insert 없음) | 42                | 0                       | 20 (priming)                  |
+| T6          | recall        | 0                       | 42                  | 0                       | 20 (priming, drop+create 후)  |
+| T7_topk_1   | recall        | 0                       | 42                  | 0                       | 20 (priming, T7 4 시나리오 공유) |
+| T7_topk_3/5/10 | recall     | 0                       | 42                  | 0                       | 20 (위와 같은 priming)        |
+| T9          | vault_status  | 0                       | 42                  | 0                       | 20 (이전 T7 시나리오 종료 상태) |
+| T10         | searchable    | 10                      | 42                  | 10                      | 0 (drop+create)               |
+| T11         | searchable    | 10                      | 52                  | 10                      | 0 (drop+create)               |
+| T12         | searchable    | 10                      | 62                  | 10                      | 0 (drop+create)               |
+| T13 2-phase | multi_capture | 20 (iter 10 × 2 vec)    | 72                  | 20                      | 0 (drop+create)               |
+| T14 5-phase | multi_capture | 50 (iter 10 × 5 vec)    | 92                  | 50                      | 0 (drop+create)               |
 
-> `X` = 5/12 측정 시작 직전 production `runecontext1` 인덱스에 이미 누적되어 있던 데이터 행 수. 본 측정에서 직접 세지 않음. 원본 5/12 리포트 §"인덱스 누적 가설" 에서 5/11 → 5/12 사이 score 가 +198%, vault_topk 가 +850% 늘어난 패턴으로 미루어 `X` 가 충분히 크다고 추정 (=20 보다 크다).
+> 5/12 측정 시작 시 production `runecontext1` 인덱스에는 기존 캡처 1건 (rune:capture 로 기록된 organizational fact) 이 있었음. 이후 capture 시나리오 T1–T4 가 41건, T10–T12 가 30건, T13/T14 가 70건을 추가하여 측정 종료 시점 인덱스 행 수는 142건. 5/14 측정은 매 시나리오 drop+create 로 인덱스를 비우므로 시나리오 간 누적 없음.
 >
 > **이 차이가 결과에 미치는 영향**:
 >
-> - **capture / searchable / multi_capture**: 두 측정 모두 같은 행 수를 추가 (10 / 11 / 20 / 50). 단 5/12 는 인덱스의 누적 데이터 위에서 측정하므로 score 단계가 `X` 의 크기에 영향을 받음 (특히 flat 방식). 5/14 는 매번 0 에서 시작.
-> - **recall**: 두 측정의 측정 중 insert 는 모두 0. 차이는 측정 시작 시 인덱스 상태 — 5/14 는 priming 20건, 5/12 는 `X + 41` 건 (capture T1–T4 누적 41 + 기존). 이 차이가 recall "3.3배 빠름" 의 일부를 만든다 (§3·§6 참조).
+> - **capture / searchable / multi_capture**: 두 측정 모두 같은 행 수를 추가 (10 / 11 / 20 / 50). 단 5/12 는 인덱스의 누적 데이터 위에서 측정하므로 score 단계가 인덱스 행 수에 영향을 받음 (특히 flat 방식). 5/14 는 매번 0 에서 시작.
+> - **recall**: 두 측정의 측정 중 insert 는 모두 0. 차이는 측정 시작 시 인덱스 상태 — 5/14 는 priming 20건, 5/12 는 42건 (기존 1 + 직전 capture T1–T4 가 추가한 41). 이 차이 (42 vs 20, 2.1배) 가 recall "3.3배 빠름" 의 일부를 만든다 (§3·§6 참조).
 
 ---
 
 ## 핵심 한 줄 결론
 
-**recall 경로**: v1.4.3 가 v1.2.2 보다 **3.3배 빠름**. 단 두 측정이 들여다본 인덱스 안의 데이터 건수가 다름 — 5/14 측정은 매 recall 시나리오 직전에 인덱스를 새로 만들어 랜덤 데이터 20건만 넣은 상태에서 측정. 5/12 측정은 이전 측정·캡처가 계속 쌓아 둔 운영 인덱스 (데이터 건수는 따로 세지 않았으나 20건보다 많음) 위에서 측정. recall 은 "인덱스의 데이터 중 질의와 비슷한 것을 찾는 작업"이고, v1.2.2 가 쓴 flat 방식은 인덱스의 모든 데이터를 하나씩 비교하므로 건수가 많을수록 측정 시간이 길어짐. v1.4.3 의 ivf_vct 방식은 미리 256개 그룹으로 나눠 그중 6개만 보므로 건수 영향이 작음. 따라서 "3.3배 빠름" 중 일부는 SDK·index 알고리즘 차이 (의도한 비교) 가 아니라 두 측정의 데이터 건수 차이에서 옴 (§3·§6 참조).
+**recall 경로**: v1.4.3 가 v1.2.2 보다 **3.3배 빠름**. 단 두 측정이 들여다본 인덱스 안의 데이터 건수가 다름 — 5/14 측정은 매 recall 시나리오 직전에 인덱스를 새로 만들어 랜덤 데이터 20건만 넣은 상태에서 측정. 5/12 측정은 production 인덱스 (recall 시점 42건 = 기존 캡처 1건 + 직전 capture T1–T4 가 추가한 41건) 위에서 측정. recall 은 "인덱스의 데이터 중 질의와 비슷한 것을 찾는 작업"이고, v1.2.2 가 쓴 flat 방식은 인덱스의 모든 데이터를 하나씩 비교하므로 건수가 많을수록 측정 시간이 길어짐. v1.4.3 의 ivf_vct 방식은 미리 256개 그룹으로 나눠 그중 6개만 보므로 건수 영향이 작음. 따라서 "3.3배 빠름" 중 일부는 SDK·index 알고리즘 차이 (의도한 비교) 가 아니라 두 측정의 데이터 건수 차이 (42 vs 20, 2.1배) 에서 옴 (§3·§6 참조).
 
 **capture 경로**: 두 측정의 입력 텍스트는 동일. `insert` 단계가 5/14 에 +112% 늘어나면서 v1.4.3 의 우위가 "3.4배 빠름" → "2.2배 빠름" 으로 축소.
 
@@ -211,7 +211,7 @@ v1.4.3  ██████████████████  284.8ms         
 
 ## 3. Phase 분해 — T5 exact_match recall (p50 ms)
 
-> **[측정 모집단 비대칭]** 5/12 는 production 인덱스(이 측정 직전 capture 시나리오 T1–T4 가 추가한 데이터 + 기존 누적 데이터)에서 측정, 5/14 는 인덱스를 새로 만든 뒤 랜덤 데이터 **20건만 priming** 한 상태에서 측정. flat 방식은 인덱스의 모든 데이터를 하나씩 비교하므로 건수에 비례해 score 단계가 길어지고, ivf_vct(nprobe=6) 는 256개 그룹 중 6개만 보므로 건수 영향이 작음. 따라서 아래 "score 3.75배 빠름 / vault_topk 15.7배 빠름 / total 3.3배 빠름" 비율에는 **(ivf_vct vs flat) 의도된 차이** + **(20건 vs 누적 건수) 의도하지 않은 데이터 모집단 차이** 가 함께 들어 있음. SDK·index_type 단독 기여분 분리에는 동일 모집단에서의 재측정이 필요 (§8.5 참조).
+> **[측정 모집단 비대칭]** 5/12 는 production 인덱스 (이 측정 시작 시 기존 1건 + 직전 capture T1–T4 가 41건 추가하여 recall 시점 42건) 에서 측정, 5/14 는 인덱스를 새로 만든 뒤 랜덤 데이터 **20건만 priming** 한 상태에서 측정. flat 방식은 인덱스의 모든 데이터를 하나씩 비교하므로 건수에 비례해 score 단계가 길어지고, ivf_vct(nprobe=6) 는 256개 그룹 중 6개만 보므로 건수 영향이 작음. 따라서 아래 "score 3.75배 빠름 / vault_topk 15.7배 빠름 / total 3.3배 빠름" 비율에는 **(ivf_vct vs flat) 의도된 차이** + **(20건 vs 42건) 의도하지 않은 데이터 모집단 차이** 가 함께 들어 있음. SDK·index_type 단독 기여분 분리에는 동일 모집단에서의 재측정이 필요 (§8 #1 참조).
 
 | Phase      | v1.2.2 (5/12) | v1.4.3 (5/14) | 비율     | 해석                                                |
 | ---------- | ------------- | ------------- | -------- | --------------------------------------------------- |
@@ -244,7 +244,7 @@ v1.4.3  █████████  256.0ms              (3.3배 빠름)
 
 ---
 
-## 4. Searchable 역전 분해 — measurement semantics + cluster regression
+## 4. Searchable 역전 분해 — 측정 시점 정의 + v1.4.3 phase 구성
 
 | 측정값 (T10 short_en) | v1.2.2 (5/12)                                     | v1.4.3 (5/14)                                      |
 | --------------------- | ------------------------------------------------- | -------------------------------------------------- |
@@ -295,49 +295,11 @@ multi_capture 는 정의상 MERGED_SAVED 까지 대기하므로 searchable 의 `
 
 ## 6. 주목할 점 / 정리
 
-### `vault_topk` 단계 — v1.4.3 가 20배 빠름 (본 비교의 가장 큰 격차)
-
-T1 capture 와 T5 recall 양쪽에서 v1.4.3 vault_topk 가 v1.2.2 의 1/20 수준 (T1: 328.8 → 16.3 ms, T5: 249.2 → 15.9 ms). eval_mode rmp→mm32 + vault payload 형식 차이가 만든 격차. capture 와 recall 양쪽에서 같은 비율로 나타나므로 phase 자체의 격차.
-
-### recall 경로 — v1.4.3 가 3.3배 빠름
-
-T5–T7 모두 v1.4.3 가 v1.2.2 의 ~30%. recall pipeline 은 insert 단계를 호출하지 않으므로 raw shard 처리·merge 단계가 측정값에 들어가지 않음 (recall 의 phase 구성: embed / score / vault_topk / remind / total).
-
-### recall "3.3배 빠름" 차이의 데이터 모집단 변수 — SDK·index_type 단독 기여분 아님
-
-위 "3.3배 빠름" 은 "v1.4.3 의 SDK·eval_mode·index_type 차이로 v1.2.2 의 1/3 시간에 완료된다" 가 아니라 두 변수의 합산이다.
-
-- (의도된 차이) v1.4.3 ivf_vct(nprobe=6) + mm32 vs v1.2.2 flat(brute-force) + rmp
-- (의도되지 않은 차이) 5/14 인덱스 = priming 으로 삽입된 랜덤 데이터 20건만 존재 vs 5/12 인덱스 = production `runecontext1` 에 누적된 데이터 (직전 capture T1–T4 가 추가한 데이터 + 기존 데이터, 정확한 건수 미측정)
-
-flat 방식의 score 단계는 인덱스의 모든 데이터를 하나씩 비교 (inner product) 하므로 건수에 비례해 늘어나고, ivf_vct nprobe=6 은 256개 그룹 중 6개만 보므로 건수 증가에 거의 무관. 즉 5/12 의 인덱스 데이터가 많을수록 score 가 무거워지고 "3.3배 빠름" 차이가 커진다. 5/12 → 5/11 비교 (원본 리포트) 에서 같은 인덱스에 데이터가 누적되는 동안 score 가 +198%, vault_topk 가 +850% 늘어난 패턴이 그 증거.
-
-이 변수를 분리하려면 두 환경을 같은 모집단 (예: 양쪽 모두 priming 20건) 에서 재측정해야 함. 본 표의 "3.3배 빠름" 을 단독 인용할 때 "5/14 v1.4.3 은 20건 bench 인덱스 기준, 5/12 v1.2.2 는 누적 production 인덱스 기준" 단서 필요 (§8.5 후속 조사 참조).
-
-### capture — v1.4.3 가 2.2배 빠름, T3 한국어만 1.3배
-
-T1 capture 의 v1.4.3 insert (285 ms) 는 capture 단계들 중 가장 큰 비중 (총 535 ms 의 53%). T3 한국어 (1.3배 빠름) 가 capture 시나리오 중 격차가 가장 작음.
-
-### searchable / multi_capture — v1.4.3 가 5–7배 느림
-
-5/14 v1.4.3 측정의 searchable total 16 초 중 95.7% 는 `merge_wait` 단계 (raw → merged 변환). v1.2.2 의 searchable 측정은 client-side cosine 수렴만 측정하므로 이 phase 가 측정값에 들어가지 않음 — 두 측정이 가리키는 시점 정의가 다름 (v1.2.2: raw shard 가시화 / v1.4.3: MERGED_SAVED 도달). 본 표의 "7.5배 느림" 등의 수치는 측정 시점 정의가 다른 두 값의 비율이며, "v1.4.3 가 일반적으로 7.5배 느리다" 는 의미가 아님.
-
-### T9 vault_health는 두 환경·두 측정일 모두 ~7ms — vault TLS 자체는 항상 안정
-
-- v1.2.2 5/12: 7.4ms
-- v1.4.3 5/14: 6.5ms
-- (참고) v1.2.2 5/11: 7.6ms
-
-vault 엔드포인트가 달라도 TLS handshake + gRPC RTT 는 6.5–7.6 ms 범위 (±1 ms). vault_topk phase 의 "20배 차이" 가 handshake/RTT 가 아니라 decrypt payload·서버 처리 단계에서 발생한다는 control 측정.
-
-### v1.4.3 5/14 score p95 inflation — capture 경로 한정
-
-| Scenario   | score p50 | score p95 | p95/p50 |
-| ---------- | --------- | --------- | ------- |
-| T1 capture | 169.5     | 473.1     | 2.79×   |
-| T5 recall  | 135.8     | 184.2     | 1.35×   |
-
-5/14 v1.4.3 측정에서 capture 경로 score 의 p95/p50 비율이 2.79배까지 증가 (T1 기준 p50 169.5 ms, p95 473.1 ms). 같은 측정의 recall score p95/p50 은 1.35배로 안정 → score p95 증가는 capture iteration 직후 시점에 한정. 직전 insert 의 raw-shard 처리가 다음 iteration score 에 영향을 준다는 가설이 데이터와 일치 (원본 5/14 리포트 §"score 의 꼬리(p95/p99) 가 두꺼워짐" 참조). 본 비교 표는 p50 기준이므로 영향이 작지만, p95/p99 기준으로 재집계하면 capture 비율이 더 작아지거나 일부 시나리오에서 역전될 수 있음.
+| # | 관찰                                                                       | 데이터·메커니즘                                                                                                                                                                                                                                                                  |
+| - | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | **`vault_topk` 단계가 본 비교의 가장 큰 격차** (v1.4.3 가 20배 빠름)       | T1 capture 328.8→16.3 ms, T5 recall 249.2→15.9 ms. capture / recall 양쪽 동일 비율 → phase 자체의 격차 (eval_mode rmp→mm32 + vault payload 형식). 같은 측정의 T9 vault_health 는 양쪽 6.5–7.4 ms 로 ±1 ms 차이뿐 → 이 격차가 TLS/RTT 가 아닌 decrypt payload·서버 처리 단계에서 발생한다는 근거 |
+| 2 | **recall "3.3배 빠름" 은 두 변수의 합산** (SDK 단독 기여 아님)             | (의도) ivf_vct(nprobe=6) vs flat + (비의도) 5/14 인덱스 20건 vs 5/12 42건. flat 은 N-선형, ivf_vct 는 N-무관 → 모집단 N 차이가 score 를 추가로 무겁게 만듬. 단독 기여분 분리는 §8 #1 참조                                                                                          |
+| 3 | **searchable / multi_capture "5–7배 느림" 은 측정 시점 정의가 다른 비율** | 5/14 v1.4.3 의 `merge_wait` (raw → merged 변환) 가 total 의 95.7%. v1.2.2 는 client polling 으로 raw shard 가시화 시점만 측정 → 두 measurement 가 가리키는 시점이 달라 단순 "느림" 으로 해석 불가                                                                                |
 
 ---
 
@@ -352,28 +314,10 @@ vault 엔드포인트가 달라도 TLS handshake + gRPC RTT 는 6.5–7.6 ms 범
 
 ## 8. 후속 조사 제안
 
-### 8.1 v1.4.3 searchable `merge_wait` 가 16 초 부근인 측정값의 시점·원인 분리
-
-- envector 측 merge 워커 큐 깊이·throughput 지표 확인 — 본 측정 시점에 백로그가 얼마나 쌓여 있었는지
-- 다른 시점에 동일 v1.4.3 환경으로 재측정 → `merge_wait` 단계의 시점별 변동 폭 측정
-
-### 8.2 v1.2.2 폴링 측정의 "queryable 정의" 표준화
-
-- v1.4.3 측정에 client-side cosine 폴링 wrapper 를 별도 추가해 v1.2.2 와 같은 측정 시점("raw shard 가시화") 으로 재측정 → searchable 비교에서 (1) 측정 시점 정의 차이 와 (2) merge phase 처리량 차이 를 분리
-
-### 8.3 vault_topk decrypt payload 자체 측정
-
-- 두 환경에서 vault decrypt 호출 단독 latency 를 분리 측정 (gRPC interceptor 로 wire-level timer 추가) — eval_mode (rmp vs mm32) payload 크기 차이가 "20배 차이" 의 몇 %를 설명하는지 분리
-
-### 8.4 capture p95 꼬리 분석
-
-- v1.4.3 5/14 capture score p95 inflation이 iteration index 의존인지 (즉 raw-shard 잔재 가설) — 직전 insert latency와 다음 iteration score latency의 상관관계 측정
-
-### 8.5 동일 모집단 recall 재측정 — SDK·index_type 단독 기여분 분리
-
-- v1.4.3 측정의 `_prime_bench_index(n_records=20)` 와 동일한 priming step 을 v1.2.2 어댑팅 러너에도 적용해 재측정 → 양쪽 인덱스 모집단을 20 records 로 통제
-- 추가로 priming 200 / 2,000 등 여러 N 에서 측정해 flat 인덱스의 N-선형성과 ivf_vct nprobe-기반 N-무관성을 같은 축에서 분리
-- 본 비교의 recall "3.3배 빠름" 중 (ivf_vct vs flat) 이 차지하는 비율과 (모집단 데이터 건수 차이) 가 차지하는 비율을 정량 분리 가능
+1. **동일 모집단 recall 재측정** — v1.2.2 어댑팅 러너에 `_prime_bench_index` 추가, 양쪽 모집단을 20건으로 통제. 추가로 N = 200 / 2,000 등 여러 점에서 측정 → recall "3.3배 빠름" 중 (ivf_vct vs flat) 과 (모집단 건수) 의 기여분 정량 분리
+2. **vault_topk 가 왜 20배 빨라졌나 — eval_mode (ciphertext 형식) 차이 vs vault 인프라 차이 분리** — gRPC interceptor 로 wire-level timer 추가. (a) envector → vault 로 흐르는 암호화 점수 묶음의 바이트 크기, (b) vault 의 복호화 CPU 시간을 분리 측정해 "ciphertext 가 가벼워서" 와 "vault 서버/region 이 더 빨라서" 의 기여분을 분해
+3. **v1.4.3 searchable `merge_wait` 의 시점별 변동** — 다른 시점에 동일 v1.4.3 환경 재측정 + envector 측 merge 워커 큐/throughput 지표 확인
+4. **v1.2.2 폴링과 v1.4.3 server-push 측정 시점 정렬** — v1.4.3 측정에 client-side cosine 폴링 wrapper 추가, 두 측정을 같은 "raw shard 가시화" 시점으로 재측정 → searchable 비교에서 (시점 정의 차이) 와 (merge 처리량 차이) 분리
 
 ---
 
