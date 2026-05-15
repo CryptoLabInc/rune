@@ -11,13 +11,17 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"time"
+
+	sdk "github.com/CryptoLabInc/envector-go-sdk"
 
 	"github.com/envector/rune-go/internal/adapters/embedder"
 	"github.com/envector/rune-go/internal/adapters/envector"
@@ -140,17 +144,15 @@ func (s *CaptureService) Handle(ctx context.Context, req *domain.CaptureRequest)
 
 	// Phase 6
 	insertReq := envector.InsertRequest{
-		Vectors:  vectors,
-		Metadata: envelopes,
+		Vectors:   vectors,
+		Metadata:  envelopes,
+		RequestID: newInsertRequestID(),
 	}
-	insertResult, err := withEnvectorRetry(ctx, s.State, "insert",
-		func() (*envector.InsertResult, error) {
-			return s.Envector.Insert(ctx, insertReq)
-		})
+	insertResult, err := s.insertWithRecovery(ctx, insertReq)
 	if err != nil {
 		return nil, fmt.Errorf("envector insert: %w", err)
 	}
-	if insertResult != nil && len(insertResult.ItemIDs) != len(vectors) {
+	if insertResult != nil && len(insertResult.ItemIDs) != 0 && len(insertResult.ItemIDs) != len(vectors) {
 		slog.Error("envector insert inconsistency",
 			"expected", len(vectors), "got", len(insertResult.ItemIDs))
 	}
@@ -272,10 +274,7 @@ func (s *CaptureService) runNoveltyCheck(ctx context.Context, embeddingText stri
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil
 	}
 
-	blobs, err := withEnvectorRetry(ctx, s.State, "score (novelty)",
-		func() ([][]byte, error) {
-			return s.Envector.Score(ctx, vec)
-		})
+	blobs, err := s.Envector.Score(ctx, vec)
 	if err != nil || len(blobs) == 0 {
 		slog.Warn("novelty check: score failed (non-fatal)", "err", err)
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil
@@ -347,6 +346,54 @@ func pickEmbedText(r *domain.DecisionRecord) string {
 		return r.ReusableInsight
 	}
 	return r.Payload.Text // fallback
+}
+
+// We cannot easily rely on tranport interceptor since Insert is streaming gRPC
+func (s *CaptureService) insertWithRecovery(ctx context.Context, req envector.InsertRequest) (*envector.InsertResult, error) {
+  // Send Insert request - first trial
+	res, err := s.Envector.Insert(ctx, req)
+	if err == nil {
+		return res, nil
+	}
+	if errors.Is(err, sdk.ErrAlreadyExists) {
+		slog.Info("capture: insert request_id already committed (idempotent retry)",
+			"request_id", req.RequestID)
+		return &envector.InsertResult{}, nil
+	}
+	if s.State == nil || !isInsertRetryable(err) {
+		return nil, err
+	}
+	
+  // On a retryable failure, wait for retrigger and retry once
+	if !s.State.WaitForActive(ctx, lifecycle.RecoverTimeout) {
+		return nil, err
+	}
+
+	res, err = s.Envector.Insert(ctx, req)
+	if err == nil {
+		return res, nil
+	}
+	if errors.Is(err, sdk.ErrAlreadyExists) {
+		slog.Info("capture: insert request_id already committed on retry",
+			"request_id", req.RequestID)
+		return &envector.InsertResult{}, nil
+	}
+
+	return nil, err
+}
+
+func isInsertRetryable(err error) bool {
+	var e *envector.Error
+	return errors.As(err, &e) && e.Retryable
+}
+
+// Identical format with enVector RequestHeader.Id
+func newInsertRequestID() string {
+	var b [14]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
 }
 
 func buildRelatedTop3(entries []vault.ScoreEntry) []domain.RelatedRecord {

@@ -275,35 +275,14 @@ func (s *LifecycleService) collectEmbedding(ctx context.Context, timeout time.Du
 	return info
 }
 
-// collectEnvector probes envector, and on any envector adapter error
-// re-triggers the boot loop and probes once more before reporting
-// This is because the user only configures Vault credentails; the enVector
-// endpoint and keys arrive via Vault (recovery is system's job)
 func (s *LifecycleService) collectEnvector(ctx context.Context, timeout time.Duration) EnvectorInfo {
 	if s.Envector == nil {
 		return EnvectorInfo{}
 	}
-
-	info, err := s.probeEnvector(ctx, timeout)
-	if err == nil {
-		return info
-	}
-	if s.State == nil || !envector.IsAdapterError(err) {
-		return info
-	}
-
-	slog.Warn("diagnostics: envector probe failed - re-bootstrapping", "err", err)
-	s.State.Retrigger()
-	if !waitForActiveAfterRetrigger(ctx, s.State, retriggerSettleTimeout) {
-		slog.Warn("diagnostics: re-boot did not settle to active")
-		return info
-	}
-
-	info2, _ := s.probeEnvector(ctx, timeout)
-	return info2
+	info, _ := s.probeEnvector(ctx, timeout)
+	return info
 }
 
-// Decide whether to attemp recovery or not
 func (s *LifecycleService) probeEnvector(ctx context.Context, timeout time.Duration) (EnvectorInfo, error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
