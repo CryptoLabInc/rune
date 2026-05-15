@@ -21,6 +21,9 @@ import (
 //	ResourceExhausted    — daemon overloaded
 //
 // Non-retryable errors (e.g., InvalidArgument) return immediately.
+//
+// On any non-nil return, errors are wrapped via MapGRPCError so the service
+// layer can detect adapter retryable failures (typed embedder.Error with Retryable=true)
 func retry[R any](ctx context.Context, call func(context.Context) (R, error)) (R, error) {
 	var zero R
 	var lastErr error
@@ -29,7 +32,7 @@ func retry[R any](ctx context.Context, call func(context.Context) (R, error)) (R
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
-				return zero, ctx.Err()
+				return zero, MapGRPCError(ctx.Err())
 			}
 		}
 		r, err := call(ctx)
@@ -37,11 +40,11 @@ func retry[R any](ctx context.Context, call func(context.Context) (R, error)) (R
 			return r, nil
 		}
 		if !retryable(err) {
-			return zero, err
+			return zero, MapGRPCError(err)
 		}
 		lastErr = err
 	}
-	return zero, fmt.Errorf("embedder: all retries exhausted: %w", lastErr)
+	return zero, MapGRPCError(fmt.Errorf("embedder: all retries exhausted: %w", lastErr))
 }
 
 // retryable returns true for transient gRPC codes.

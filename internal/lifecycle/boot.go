@@ -154,6 +154,8 @@ var BootBackoffs = []time.Duration{
 // available end-to-end, the boot loop should source dim from there instead.
 const DefaultKeyDim = 1024
 
+const embedderBootHealthTimeout = 2 * time.Second
+
 // bootResult is the outcome of one bootOnce attempt.
 type bootResult int
 
@@ -343,6 +345,18 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 		m.lastError.Store(fmt.Sprintf("embedder dial: %v", err))
 		slog.Error("boot: failed to connect to embedder", "err", err)
 		_ = vaultClient.Close()
+		return bootRetry
+	}
+
+	// Verify daemon is reachable
+	healthCtx, healthCancel := context.WithTimeout(ctx, embedderBootHealthTimeout)
+	_, herr := embedderClient.Health(healthCtx)
+	healthCancel()
+	if herr != nil {
+		m.lastError.Store(fmt.Sprintf("embedder health: %v", herr))
+		slog.Warn("boot: embedder health probe failed", "err", herr)
+		_ = vaultClient.Close()
+		_ = embedderClient.Close()
 		return bootRetry
 	}
 
