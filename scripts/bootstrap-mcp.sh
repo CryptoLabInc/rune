@@ -61,7 +61,11 @@ else
             break
         fi
     done
-    if [ -n "$_VENV_PYVER" ] && [ -n "$_SITE_PYVER" ] && [ "$_VENV_PYVER" != "$_SITE_PYVER" ]; then
+    if [ -n "$_VENV_PYVER" ] && [ "$_VENV_PYVER" != "3.12" ]; then
+        echo "[rune] venv runs Python $_VENV_PYVER but Rune requires 3.12 (see CONTRIBUTING.md) - rebuilding..." >&2
+        rm -rf "$VENV_DIR"
+        NEED_VENV=1
+    elif [ -n "$_VENV_PYVER" ] && [ -n "$_SITE_PYVER" ] && [ "$_VENV_PYVER" != "$_SITE_PYVER" ]; then
         echo "[rune] Python version mismatch (venv runs $_VENV_PYVER, packages built for $_SITE_PYVER) - rebuilding..." >&2
         rm -rf "$VENV_DIR"
         NEED_VENV=1
@@ -97,7 +101,23 @@ else
     fi
 fi
 if [ "$NEED_VENV" -eq 1 ]; then
-    python3 -m venv "$VENV_DIR" >&2
+    # Rune requires Python 3.12 (see CONTRIBUTING.md). Select an explicit 3.12
+    # interpreter — bare `python3` may be an older system default and would
+    # silently build a non-conforming venv.
+    PYTHON_BIN=""
+    for _cand in python3.12 python3; do
+        if command -v "$_cand" >/dev/null 2>&1 && \
+           "$_cand" -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)' 2>/dev/null; then
+            PYTHON_BIN="$_cand"
+            break
+        fi
+    done
+    if [ -z "$PYTHON_BIN" ]; then
+        echo "[rune] Python 3.12 is required (see CONTRIBUTING.md) but was not found on PATH." >&2
+        echo "[rune] Install Python 3.12 and rerun." >&2
+        exit 1
+    fi
+    "$PYTHON_BIN" -m venv "$VENV_DIR" >&2
     if [ "$MODE" = "install-deps" ]; then
         "$VENV_DIR/bin/python3" -m pip install --quiet --upgrade pip >&2
     fi
