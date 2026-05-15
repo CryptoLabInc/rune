@@ -167,7 +167,7 @@ func (c *client) SocketPath() string { return c.sockPath }
 func (c *client) Health(ctx context.Context) (HealthSnapshot, error) {
 	resp, err := c.pb.Health(ctx, &runedv1.HealthRequest{})
 	if err != nil {
-		return HealthSnapshot{}, err
+		return HealthSnapshot{}, MapGRPCError(err)
 	}
 	return HealthSnapshot{
 		Status:        statusName(resp.GetStatus()),
