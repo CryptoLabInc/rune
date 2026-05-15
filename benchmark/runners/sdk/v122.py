@@ -41,7 +41,11 @@ class V122Adapter(SdkAdapter):
         access_token: Optional[str],
         agent_id: Optional[str],
         agent_dek: Optional[bytes],
+        secure: bool = True,
     ) -> None:
+        # `secure` is a 1.4.x-only TLS toggle. v1.2.2 has no such parameter
+        # (TLS is implied when access_token is set), so it is accepted for
+        # interface parity and ignored.
         from adapter.envector_sdk import EnVectorSDKAdapter
 
         # EnVectorSDKAdapter calls ev.init() in __init__; the first handshake

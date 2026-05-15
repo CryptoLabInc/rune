@@ -72,12 +72,18 @@ class SdkAdapter(ABC):
         access_token: Optional[str],
         agent_id: Optional[str],
         agent_dek: Optional[bytes],
+        secure: bool = True,
     ) -> None:
         """Build the underlying EnVectorSDKAdapter wired for this SDK version.
 
         This is the first of the two version-divergent call sites: the
         `eval_mode` / `secure` / `index_type` kwargs of `ev.init(...)` differ
         between 1.2.x and 1.4.x.
+
+        `secure` is the Vault bundle's `envector_secure` flag — a 1.4.x TLS
+        toggle. Defaults to True (secure by default): TLS stays on unless the
+        bundle explicitly disables it. v1.2.2 has no such parameter (TLS is
+        implied when an access_token is supplied) and ignores it.
         """
 
     @property
