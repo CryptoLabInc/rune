@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """Rune × envector-msa-1.2.2 latency benchmark.
 
+DEPRECATED — kept for historical reproducibility only.
+   This runner produced `reports/latency_results_v1.2.2_2026-05-11.md`
+   (T1–T9 baseline). For new pyenvector v1.2.2 measurements use
+   `benchmark/runners/latency_bench_v1.4.3.py` — despite its filename
+   it is currently in **v1.2.2-ported state** (commit e55fd0f) and
+   targets the v1.2.2 SDK only. It includes the expanded scenario set
+   T10–T14 (searchable, multi_capture) that this file does not have.
+   To re-run v1.4.3 SDK measurements, the port commit would need to be
+   reverted or a separate v1.4.3-targeted runner reintroduced.
+   This file is preserved per
+   `benchmark/plans/latency_bench_plan_envector_v1.2.2_extended.md`
+   (line 12: "기존 runner는 손대지 않고 v1.4.3 runner를 어댑팅").
+
 Measures wall-clock latency of each rune MCP feature broken down by pipeline
 phase.  Runs standalone — no MCP server needed; adapters are imported directly.
 

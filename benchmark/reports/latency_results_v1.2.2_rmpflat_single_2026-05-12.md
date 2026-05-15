@@ -6,6 +6,8 @@
 > **시나리오 셋**: v1.4.3 runner(`latency_bench_v1.4.3.py`)를 v1.2.2 SDK 호환으로 어댑팅하여 T1–T14 측정. T8(batch_capture)은 v1.4.3에서 폐지되어 본 측정에서도 제외. T10–T14(searchable, multi_capture)는 v1.2.2에서 **신규 측정**(5/11 baseline 없음).
 > **insert_mode**: single만 측정. v1.2.2 SDK는 SDK 레벨에서 batch insert path를 노출하지 않음.
 >
+> **[Runner 파일명 주의]** 본 측정의 실행 파일은 `benchmark/runners/latency_bench_v1.4.3.py`이지만, **측정 대상 SDK는 pyenvector 1.2.2**임. 이 runner는 v1.4.3 시나리오 셋(T1–T7, T9–T14) 정의를 그대로 유지한 채 SDK 호출 5군데를 v1.2.2용으로 in-place 교체하여 port됨(commit `e55fd0f`). **현재 이 파일은 v1.2.2 SDK 전용 상태**이며 SDK 버전을 런타임에 자동 감지하지 않음 — v1.4.3 SDK 측정을 다시 하려면 port 커밋을 revert하거나 별도 runner를 도입해야 함. 따라서 아래 Environment 섹션의 `bench_version: 1.4.3`은 **runner/시나리오 셋 정의 버전**을 의미하며 **SDK 버전이 아님** — 실제 SDK 버전은 `sdk_version: 1.2.2`로 별도 명시함. 기존 v1.2.2 전용 runner(`benchmark/runners/latency_bench.py`, T1–T9만 지원)는 5/11 baseline 재현용으로 보존되어 있으며 본 측정에서는 사용되지 않음.
+>
 > **[비교 노트]** 5/11(`latency_results_v1.2.2_2026-05-11.md`)과 동일 envector/Vault 엔드포인트이므로 인프라 변경은 아님. T9 vault health이 7.4ms로 5/11 7.6ms와 사실상 일치하는 것이 그 증거. 그럼에도 T1–T7가 5/11 대비 ~1.4-1.7x 느려진 것은 **인덱스 vector 누적**이 가장 유력한 가설 — flat 인덱스 brute-force는 N에 선형이며, 한 달 사이 별도 측정/캡처로 vector가 누적된 상태로 본 측정이 수행됨.
 
 ## 실행 결과 요약
@@ -112,7 +114,10 @@ T1 score 303.6 ms vs T4 score 473.2 ms. 5/11에서도 T4 score가 T1의 ~2.7x였
 
 ## Environment
 
-- **bench_version**: 1.4.3
+- **sdk_version**: 1.2.2  ← *측정 대상 SDK (pyenvector)*
+- **bench_version**: 1.4.3  ← *runner/시나리오 셋 정의 버전 (SDK 버전 아님). [Runner 파일명 주의] 참조.*
+- **runner_file**: `benchmark/runners/latency_bench_v1.4.3.py`
+- **runner_commit**: e55fd0f (v1.4.3 → v1.2.2 호환 port)
 - **date**: 2026-05-12
 - **envector_endpoint**: 0511-1401-0001-4r6cwxfc908b.clusters.envector.io
 - **vault_endpoint**: tcp://193.122.124.173:50051
@@ -126,6 +131,16 @@ T1 score 303.6 ms vs T4 score 473.2 ms. 5/11에서도 T4 score가 T1의 ~2.7x였
 - **network_rtt**: unknown
 - **runs_per_scenario**: 8
 - **warmup_runs**: 2
+
+### Reproduce
+
+```bash
+.venv/bin/python benchmark/runners/latency_bench_v1.4.3.py \
+    --insert-mode single --runs 10 --warmup 2 \
+    --report benchmark/reports/latency_results_v1.2.2_rmpflat_single_2026-05-12.md
+```
+
+> 주의: 위 커맨드는 **현재 환경의 pyenvector 버전이 1.2.2일 때**만 본 보고서와 동일한 측정을 재현함. runner는 SDK 버전을 자동 감지하지 않으며 commit `e55fd0f` 시점에 v1.2.2 호출로 port된 상태이므로, v1.4.3 SDK가 설치된 환경에서 실행하면 SDK API 시그니처 불일치로 실패할 가능성이 있음 — 실행 전 `pip show pyenvector`로 사전 확인 권장.
 
 
 ## Feature: `capture`
