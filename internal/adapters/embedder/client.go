@@ -62,17 +62,24 @@ type client struct {
 	info     *infoCache
 }
 
+type Opts struct {
+	UnaryInterceptors []grpc.UnaryClientInterceptor
+}
+
 // New dials the runed daemon over unix socket. The caller resolves sockPath
 // (env RUNE_EMBEDDER_SOCKET > config.embedder.socket_path > default
 // ~/.runed/embedding.sock per embedder.md §소켓 경로).
 //
 // grpc-go natively resolves "unix://" targets; no custom dialer is needed.
 // TLS is unnecessary for UDS (kernel-mediated, same machine — embedder.md §Dial).
-func New(sockPath string) (Client, error) {
-	conn, err := grpc.NewClient(
-		"unix://"+sockPath,
+func New(sockPath string, opts Opts) (Client, error) {
+	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	}
+	if len(opts.UnaryInterceptors) > 0 {
+		dialOpts = append(dialOpts, grpc.WithChainUnaryInterceptor(opts.UnaryInterceptors...))
+	}
+	conn, err := grpc.NewClient("unix://"+sockPath, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("embedder: grpc dial %s: %w", sockPath, err)
 	}

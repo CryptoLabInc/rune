@@ -23,11 +23,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/envector/rune-go/internal/adapters/config"
 	"github.com/envector/rune-go/internal/adapters/embedder"
 	"github.com/envector/rune-go/internal/adapters/envector"
 	"github.com/envector/rune-go/internal/adapters/keymanager"
 	"github.com/envector/rune-go/internal/adapters/vault"
+	"github.com/envector/rune-go/internal/recovery"
 )
 
 // BootAdapterInjector decouples lifecycle from mcp.Deps to break the
@@ -135,6 +138,34 @@ func (m *Manager) LastError() string {
 	}
 	s, _ := v.(string)
 	return s
+}
+
+const RecoverTimeout = 30 * time.Second
+
+func (m *Manager) WaitForActive(ctx context.Context, timeout time.Duration) bool {
+	if m == nil {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(500 * time.Millisecond):
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		switch m.Current() {
+		case StateActive:
+			return true
+		case StateDormant:
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return false
 }
 
 // BootBackoffs — Python server.py Vault retry schedule.
@@ -316,6 +347,9 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 	vaultClient, err := vault.NewClient(cfg.Vault.Endpoint, cfg.Vault.Token, vault.ClientOpts{
 		CACertPath: cfg.Vault.CACert,
 		TLSDisable: cfg.Vault.TLSDisable,
+		UnaryInterceptors: []grpc.UnaryClientInterceptor{
+			recovery.UnaryRecovery("vault", m),
+		},
 	})
 	if err != nil {
 		m.SetState(StateWaitingForVault)
@@ -340,7 +374,11 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 		return bootRetry
 	}
 
-	embedderClient, err := embedder.New(embedder.ResolveSocketPath(""))
+	embedderClient, err := embedder.New(embedder.ResolveSocketPath(""), embedder.Opts{
+		UnaryInterceptors: []grpc.UnaryClientInterceptor{
+			recovery.UnaryRecovery("embedder", m),
+		},
+	})
 	if err != nil {
 		m.lastError.Store(fmt.Sprintf("embedder dial: %v", err))
 		slog.Error("boot: failed to connect to embedder", "err", err)
@@ -376,6 +414,9 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 		KeyID:     bundle.KeyID,
 		KeyDim:    DefaultKeyDim,
 		IndexName: bundle.IndexName,
+		UnaryInterceptors: []grpc.UnaryClientInterceptor{
+			recovery.UnaryRecovery("envector", m),
+		},
 	})
 	if err != nil {
 		m.lastError.Store(fmt.Sprintf("envector new client: %v", err))

@@ -131,6 +131,7 @@ type Client interface {
 type ClientOpts struct {
 	CACertPath string // path to PEM; empty = system CA bundle
 	TLSDisable bool
+	UnaryInterceptors []grpc.UnaryClientInterceptor
 }
 
 // client is the gRPC implementation.
@@ -160,6 +161,9 @@ func NewClient(endpoint, token string, opts ClientOpts) (Client, error) {
 			grpc.MaxCallSendMsgSize(MaxMessageLength),
 		),
 		grpc.WithKeepaliveParams(defaultKeepalive),
+	}
+	if len(opts.UnaryInterceptors) > 0 {
+		dialOpts = append(dialOpts, grpc.WithChainUnaryInterceptor(opts.UnaryInterceptors...))
 	}
 
 	switch {
