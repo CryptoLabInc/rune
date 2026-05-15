@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	envector "github.com/CryptoLabInc/envector-go-sdk"
+	"google.golang.org/grpc"
 )
 
 // MetadataRef — {shard_idx, row_idx} ref for GetMetadata/Remind.
@@ -33,8 +34,9 @@ type MetadataEntry struct {
 
 // InsertRequest — batch capture (N vectors + N envelopes).
 type InsertRequest struct {
-	Vectors  [][]float32
-	Metadata []string // AES envelope strings; SDK stores verbatim
+	Vectors   [][]float32
+	Metadata  []string // AES envelope strings; SDK stores verbatim
+	RequestID string   // SDK idempotency key
 }
 
 // InsertResult — server-assigned IDs.
@@ -62,6 +64,7 @@ type ClientConfig struct {
 	EvalMode  envector.EvalMode // FHE eval strategy (zero = EvalModeRMP)
 	IndexName string            // server-side index name
 	Insecure  bool              // true for local dev (no TLS)
+	UnaryInterceptors []grpc.UnaryClientInterceptor
 }
 
 type client struct {
@@ -80,6 +83,9 @@ func NewClient(cfg ClientConfig) (Client, error) {
 	}
 	if cfg.Insecure {
 		clientOpts = append(clientOpts, envector.WithInsecure())
+	}
+	for _, i := range cfg.UnaryInterceptors {
+		clientOpts = append(clientOpts, envector.WithUnaryInterceptor(i))
 	}
 
 	sdk, err := envector.NewClient(clientOpts...)
@@ -125,8 +131,9 @@ func (c *client) Insert(ctx context.Context, req InsertRequest) (*InsertResult, 
 
 	// Adapter request to SDK request
 	sdkReq := envector.InsertRequest{
-		Vectors:  req.Vectors,
-		Metadata: req.Metadata,
+		Vectors:   req.Vectors,
+		Metadata:  req.Metadata,
+		RequestID: req.RequestID,
 	}
 	res, err := c.idx.Insert(ctx, sdkReq)
 	if err != nil {

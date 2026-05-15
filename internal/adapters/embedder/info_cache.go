@@ -31,7 +31,7 @@ func (ic *infoCache) Get(ctx context.Context) (InfoSnapshot, error) {
 	ic.once.Do(func() {
 		resp, err := ic.svc.Info(ctx, &runedv1.InfoRequest{})
 		if err != nil {
-			ic.err = err
+			ic.err = MapGRPCError(err)
 			return
 		}
 		ic.snap = InfoSnapshot{
