@@ -51,6 +51,12 @@ Usage
   python benchmark/runners/latency_bench.py \\
       --insert-mode single --direct-envector --runs 10 --warmup 2 \\
       --report benchmark/reports/latency_results_<sdk>_<date>.md
+
+  # Sweep mode — measure the selected scenarios across a grid of index
+  # sizes N (--primer-rows), emitting a long-format raw CSV for plotting:
+  python benchmark/runners/latency_bench.py \\
+      --direct-envector --primer-rows 0,4096,8192,16384 \\
+      --runs 5 --warmup 1 --raw-csv benchmark/reports/raw/sweep.csv
 """
 
 from __future__ import annotations
@@ -58,6 +64,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import csv
 import json
 import os
 import subprocess
@@ -95,6 +102,13 @@ from runners.sdk import SearchableCtx, get_sdk_adapter  # noqa: E402
 # type is supplied by the adapter (adapter.index_type), so there is no params
 # dict here.
 BENCH_DIM = 1024
+
+# Sweep scenario groups — the tokens accepted by --sweep-scenarios. Each maps
+# to one or more T-scenarios in LatencyBenchmark._run_sweep_group(). T9
+# (vault_status) and the T7 topk-scaling scan are deliberately excluded:
+# neither varies with the primed index size N, so sweeping them would only
+# burn measurement time.
+SWEEP_GROUPS = ("recall", "searchable", "capture", "multi", "duplicate")
 
 # ── sample inputs ─────────────────────────────────────────────────────────────
 
@@ -1278,6 +1292,183 @@ class LatencyBenchmark:
 
         return report
 
+    # ── sweep orchestration ────────────────────────────────────────────────────
+
+    async def _run_sweep_group(self, group: str) -> list[LatencyScenarioResult]:
+        """Run one sweep scenario group against the currently-primed index.
+
+        No index reset happens between scenarios here: every scenario in the
+        group (and every group at this N) measures against the index primed
+        once at the top of run_sweep's N loop. Re-priming before each scenario
+        would cost another N inserts per scenario and dominate the run. The
+        price is within-N drift on the *mutating* groups — see run_sweep.
+        """
+        if group == "recall":
+            return [await self.run_recall_scenario(sc) for sc in SCENARIOS_RECALL]
+        if group == "searchable":
+            return [
+                await self.run_searchable_scenario(sc)
+                for sc in SCENARIOS_CAPTURE[:3]
+            ]
+        if group == "capture":
+            return [
+                await self.run_capture_scenario(sc) for sc in SCENARIOS_CAPTURE
+            ]
+        if group == "multi":
+            return [
+                await self.run_multi_capture_scenario(sc)
+                for sc in SCENARIOS_MULTI_CAPTURE
+            ]
+        if group == "duplicate":
+            return [await self.run_capture_duplicate()]
+        raise ValueError(f"unknown sweep scenario group: {group!r}")
+
+    async def run_sweep(
+        self,
+        primer_rows: list[int],
+        sweep_scenarios: list[str],
+        raw_csv_path: Optional[str] = None,
+    ) -> LatencyBenchReport:
+        """Sweep the index-size axis: measure the selected scenarios at each N.
+
+        For every N in `primer_rows`:
+          1. create a fresh bench index named ``{bench_index}_N{N}`` — a unique
+             name per grid point, so the cluster's async drop never races the
+             next create (the failure mode `_reset_bench_index` warns about);
+          2. prime it with exactly N deterministic records (skipped for N=0);
+          3. measure each selected scenario group against it;
+          4. drop the index fire-and-forget — the next N does not wait on it.
+
+        Re-creating per N (rather than accumulating N -> N+dN) keeps each grid
+        point a function of N alone, not of measurement history — see the plan
+        file's "매 N마다 drop+create" rationale.
+
+        Within-N drift: the index is primed ONCE per N. Non-mutating scenarios
+        (recall) therefore see exactly N rows. Mutating scenarios (capture /
+        searchable / multi / duplicate) insert as they measure, so later runs —
+        and later groups — see slightly more than N. The default
+        --sweep-scenarios order front-loads `recall` to keep the clean
+        measurement clean; for drift-free numbers on a mutating group, sweep
+        that group on its own (one --sweep-scenarios token per invocation).
+
+        Raw samples stream to `raw_csv_path` as each scenario finishes (long
+        format: N, scenario, run_idx, phase, latency_ms), so a long run that
+        dies partway still leaves the grid points it reached on disk.
+        """
+        if not self.direct_envector:
+            raise RuntimeError(
+                "run_sweep requires --direct-envector (bench-index mode)"
+            )
+
+        report = LatencyBenchReport()
+        cfg = self._config
+        report.env = {
+            "sdk_version": self._adapter.sdk_version,
+            "date": __import__("datetime").date.today().isoformat(),
+            "envector_endpoint": cfg.envector.endpoint,
+            "vault_endpoint": cfg.vault.endpoint,
+            "embedding_model": cfg.embedding.model,
+            "embedding_mode": cfg.embedding.mode,
+            "key_id": self._key_id,
+            "eval_mode": self._adapter.eval_mode,
+            "index_type": self._adapter.index_type,
+            "insert_mode": self.insert_mode,
+            "network_rtt": self._measure_network_rtt(),
+            "runs_per_scenario": self.runs - self.warmup,
+            "warmup_runs": self.warmup,
+            "direct_envector": self.direct_envector,
+            "sweep_mode": True,
+            "sweep_grid_N": ",".join(str(n) for n in primer_rows),
+            "sweep_scenarios": ",".join(sweep_scenarios),
+            "bench_index_prefix": self.bench_index_name,
+            "reset_policy": "per-N drop+create (unique bench index per grid point)",
+        }
+
+        if {"capture", "searchable", "multi", "duplicate"}.intersection(sweep_scenarios):
+            print(
+                "  note: capture/searchable/multi/duplicate insert rows while "
+                "measuring — within one N they see a growing index. For "
+                "drift-free per-group numbers, sweep one group per invocation."
+            )
+
+        csv_file = None
+        csv_writer = None
+        n_csv_rows = 0
+        try:
+            if raw_csv_path:
+                csv_path = Path(raw_csv_path)
+                csv_path.parent.mkdir(parents=True, exist_ok=True)
+                csv_file = open(csv_path, "w", newline="", encoding="utf-8")
+                csv_writer = csv.writer(csv_file)
+                csv_writer.writerow(
+                    ["N", "scenario", "run_idx", "phase", "latency_ms"]
+                )
+
+            for grid_i, N in enumerate(primer_rows, start=1):
+                index_name = f"{self.bench_index_name}_N{N}"
+                self._index_name = index_name
+                print("\n" + "=" * 64)
+                print(
+                    f"  sweep {grid_i}/{len(primer_rows)} — N={N}  "
+                    f"index={index_name}"
+                )
+                print("=" * 64)
+                try:
+                    print(f"  reset[{index_name}]...", end=" ", flush=True)
+                    self._reset_bench_index()
+                    self._ensure_index_loaded()
+                    print("done")
+
+                    if N > 0:
+                        self._prime_bench_index(n_records=N)
+                    else:
+                        print("  N=0 — measuring an empty index, no priming")
+
+                    for group in sweep_scenarios:
+                        print(f"\n  [N={N}] [{group}]")
+                        for r in await self._run_sweep_group(group):
+                            r.metadata = {**r.metadata, "sweep_n": N}
+                            report.add(r)
+                            if csv_writer is not None and not r.error:
+                                for phase in r.phases:
+                                    for run_idx, sample in enumerate(
+                                        phase.samples_ms, start=1
+                                    ):
+                                        csv_writer.writerow(
+                                            [
+                                                N,
+                                                r.scenario_id,
+                                                run_idx,
+                                                phase.name,
+                                                round(sample, 4),
+                                            ]
+                                        )
+                                        n_csv_rows += 1
+                                csv_file.flush()
+                except Exception as e:  # noqa: BLE001
+                    # One bad grid point must not abort a multi-hour sweep.
+                    print(
+                        f"\n  [N={N}] ABORTED: {e} — continuing to next grid point"
+                    )
+                finally:
+                    # Fire-and-forget: queue the drop, do not poll the async
+                    # delete. The unique per-N name means a leftover index can
+                    # never collide with a future create.
+                    try:
+                        self._adapter.drop_index(index_name)
+                        print(f"  drop({index_name!r}) queued")
+                    except Exception as e:  # noqa: BLE001
+                        print(f"  drop({index_name!r}) failed (non-fatal): {e}")
+        finally:
+            if csv_file is not None:
+                csv_file.close()
+                print(f"\nRaw CSV → {raw_csv_path}  ({n_csv_rows} rows)")
+
+        # Every per-N index was dropped above; clear the handle so teardown()
+        # does not try to drop an already-gone index.
+        self._index_name = None
+        return report
+
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
@@ -1313,6 +1504,67 @@ def _print_summary(report: LatencyBenchReport) -> None:
     print("=" * 64 + "\n")
 
 
+def _print_sweep_summary(report: LatencyBenchReport, primer_rows: list[int]) -> None:
+    """Compact one-line-per-scenario view of a sweep: total p50 at each N."""
+    env = report.env
+    print("\n" + "=" * 64)
+    print(
+        f"  rune latency SWEEP — pyenvector {env.get('sdk_version', '?')} "
+        f"({env.get('eval_mode', '?')}/{env.get('index_type', '?')})"
+    )
+    print(f"  grid N = {env.get('sweep_grid_N', '?')}")
+    print("=" * 64)
+
+    by_sid: dict[str, dict] = {}
+    for s in report.scenarios:
+        by_sid.setdefault(s.scenario_id, {})[s.metadata.get("sweep_n")] = s
+
+    for sid, by_n in by_sid.items():
+        cells = []
+        for N in primer_rows:
+            s = by_n.get(N)
+            if s is None:
+                cells.append(f"{N}:--")
+            elif s.error:
+                cells.append(f"{N}:ERR")
+            else:
+                tp = next((p for p in s.phases if p.name == "total"), None)
+                cells.append(
+                    f"{N}:{tp.p50:.0f}" if tp and tp.samples_ms else f"{N}:?"
+                )
+        print(f"  {sid:<28} total p50  " + "  ".join(cells))
+    print("=" * 64 + "\n")
+
+
+def _parse_primer_rows(raw: str) -> list[int]:
+    """Parse --primer-rows ('0,256,4096,...') into an ordered, de-duplicated
+    list of non-negative ints. Raises ValueError on malformed input.
+
+    Order is preserved — the grid is measured in the order given. Duplicates
+    are dropped: two grid points with the same N would build the same bench
+    index name and re-introduce the drop/create race the per-N unique naming
+    exists to avoid.
+    """
+    out: list[int] = []
+    seen: set[int] = set()
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            n = int(tok)
+        except ValueError:
+            raise ValueError(f"--primer-rows: {tok!r} is not an integer")
+        if n < 0:
+            raise ValueError(f"--primer-rows: N must be >= 0 (got {n})")
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    if not out:
+        raise ValueError("--primer-rows: no values parsed")
+    return out
+
+
 async def _main(args: argparse.Namespace) -> None:
     bench = LatencyBenchmark(
         runs=args.runs,
@@ -1329,6 +1581,37 @@ async def _main(args: argparse.Namespace) -> None:
     )
     await bench.setup()
 
+    # ── sweep mode ────────────────────────────────────────────────────────────
+    # main() has already normalised args.primer_rows to list[int] and
+    # args.sweep_scenarios to list[str] when sweep mode is requested.
+    if args.primer_rows:
+        if args.feature:
+            print(
+                f"  note: --feature {args.feature!r} is ignored in sweep mode; "
+                f"scenario selection comes from --sweep-scenarios"
+            )
+        print(
+            f"\nSweep — grid N = {args.primer_rows}, "
+            f"scenarios = {args.sweep_scenarios}, "
+            f"runs = {args.runs - args.warmup} effective, warmup = {args.warmup}"
+        )
+        report = await bench.run_sweep(
+            args.primer_rows, args.sweep_scenarios, args.raw_csv
+        )
+        await bench.teardown()
+        _print_sweep_summary(report, args.primer_rows)
+        if args.report:
+            report_path = Path(args.report)
+            if args.format == "json":
+                saved = report.save_json(report_path)
+            else:
+                saved = report.save_markdown_sweep(report_path, args.primer_rows)
+            print(f"Report saved → {saved}")
+        else:
+            print(report.to_markdown_sweep(args.primer_rows))
+        return
+
+    # ── single-grid mode ──────────────────────────────────────────────────────
     print(f"\nRunning benchmark (runs={args.runs - args.warmup} effective, warmup={args.warmup}) …")
     report = await bench.run(feature_filter=args.feature)
 
@@ -1357,11 +1640,11 @@ def main() -> None:
     parser.add_argument(
         "--insert-mode",
         choices=["single", "batch"],
-        required=True,
+        default="single",
         help=(
-            "Insert mode. On pyenvector 1.4.3 this toggles the single-row vs "
-            "batch insert API. On 1.2.2 there is no single-row path, so "
-            "'single' is effectively batch."
+            "Insert mode (default: single). On pyenvector 1.4.3 this toggles "
+            "the single-row vs batch insert API. On 1.2.2 there is no "
+            "single-row path, so the value is accepted but has no effect."
         ),
     )
     parser.add_argument(
@@ -1442,8 +1725,25 @@ def main() -> None:
     if args.warmup >= args.runs:
         parser.error(f"--warmup ({args.warmup}) must be < --runs ({args.runs})")
 
-    if args.primer_rows and not args.direct_envector:
-        parser.error("--primer-rows (sweep mode) requires --direct-envector")
+    if args.primer_rows:
+        # Sweep mode. Validate + normalise the two sweep knobs in place:
+        # args.primer_rows -> list[int], args.sweep_scenarios -> list[str].
+        if not args.direct_envector:
+            parser.error("--primer-rows (sweep mode) requires --direct-envector")
+        try:
+            args.primer_rows = _parse_primer_rows(args.primer_rows)
+        except ValueError as e:
+            parser.error(str(e))
+        groups = [t.strip() for t in args.sweep_scenarios.split(",") if t.strip()]
+        if not groups:
+            parser.error("--sweep-scenarios: no scenario groups given")
+        unknown = [g for g in groups if g not in SWEEP_GROUPS]
+        if unknown:
+            parser.error(
+                f"--sweep-scenarios: unknown group(s) {unknown}; "
+                f"valid: {', '.join(SWEEP_GROUPS)}"
+            )
+        args.sweep_scenarios = groups
 
     asyncio.run(_main(args))
 

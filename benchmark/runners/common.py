@@ -287,3 +287,101 @@ class LatencyBenchReport:
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         path.write_text(self.to_markdown(), encoding="utf-8")
         return path
+
+    # ── sweep report ──────────────────────────────────────────────────────
+
+    def to_markdown_sweep(self, primer_rows: list) -> str:
+        """N-axis sweep report — one table per scenario.
+
+        Differs from `to_markdown()` by pivoting the axes. `to_markdown()`
+        prints one table per scenario with rows = phase; that shape answers
+        "where does this scenario spend its time?". A sweep instead asks
+        "how does latency move as the index grows?", so here the rows are the
+        primed index size N and the columns are per-phase p50 (ms), with
+        `total` p95 tacked on so tail behaviour stays visible.
+
+        Each sweep result carries its N in `metadata["sweep_n"]` (set by the
+        runner's run_sweep). `primer_rows` fixes the row order — the grid is
+        read in the order the operator measured it.
+        """
+        lines: list[str] = []
+        sdk = self.env.get("sdk_version", "?")
+        lines.append(f"# Rune Latency Sweep Report — pyenvector {sdk}\n")
+
+        lines.append("## Environment\n")
+        for k, v in self.env.items():
+            lines.append(f"- **{k}**: {v}")
+        lines.append("")
+
+        # Group results by scenario; each scenario is measured once per N.
+        # dict preserves first-seen order, so scenarios stay in run order.
+        by_sid: dict[str, dict] = {}
+        for s in self.scenarios:
+            by_sid.setdefault(s.scenario_id, {})[s.metadata.get("sweep_n")] = s
+
+        lines.append("\n## Sweep results\n")
+        lines.append(
+            "Rows = primed index size N. Columns = phase p50 (ms); the final "
+            "column is `total` p95. A blank cell means that N was not measured "
+            "for the scenario; `ERROR` means the scenario failed at that N.\n"
+        )
+
+        for sid, by_n in by_sid.items():
+            lines.append(f"### {sid}\n")
+
+            # Column order is taken from the first error-free result — every N
+            # measures the same scenario, so the phase set is stable.
+            phase_names: list[str] = []
+            feature = ""
+            for s in by_n.values():
+                if not s.error and s.phases:
+                    phase_names = [p.name for p in s.phases]
+                    feature = s.feature
+                    break
+
+            if not phase_names:
+                lines.append("> Every grid point errored — no phase data.\n")
+                for N in primer_rows:
+                    s = by_n.get(N)
+                    if s is not None and s.error:
+                        lines.append(f"- N={N}: `{s.error}`")
+                lines.append("")
+                continue
+
+            lines.append(f"_feature: `{feature}`_\n")
+            cols = len(phase_names) + 2  # N + one per phase + total p95
+            lines.append(
+                "| N | "
+                + " | ".join(f"{p} p50" for p in phase_names)
+                + " | total p95 |"
+            )
+            lines.append("|---" * cols + "|")
+
+            for N in primer_rows:
+                s = by_n.get(N)
+                if s is None:
+                    lines.append(f"| {N} |" + " |" * (cols - 1))
+                    continue
+                if s.error:
+                    lines.append(
+                        f"| {N} | " + " | ".join(["ERROR"] * (cols - 1)) + " |"
+                    )
+                    continue
+                pmap = {p.name: p for p in s.phases}
+                cells = []
+                for name in phase_names:
+                    p = pmap.get(name)
+                    cells.append(f"{p.p50:.1f}" if p and p.samples_ms else "—")
+                total = pmap.get("total")
+                cells.append(
+                    f"{total.p95:.1f}" if total and total.samples_ms else "—"
+                )
+                lines.append(f"| {N} | " + " | ".join(cells) + " |")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def save_markdown_sweep(self, path: Path, primer_rows: list) -> Path:
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.to_markdown_sweep(primer_rows), encoding="utf-8")
+        return path
