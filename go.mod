@@ -12,7 +12,7 @@ go 1.26.2
 // go 1.25.0 + toolchain pin required by the MCP SDK.
 
 require (
-	github.com/CryptoLabInc/envector-go-sdk v0.1.1
+	github.com/CryptoLabInc/envector-go-sdk v0.1.2
 	github.com/CryptoLabInc/rune-admin/vault v0.0.0-20260506055025-ad52b6bd549d
 	github.com/CryptoLabInc/runed v0.0.0
 	github.com/modelcontextprotocol/go-sdk v1.5.0
@@ -34,3 +34,6 @@ require (
 )
 
 replace github.com/CryptoLabInc/runed => ../runed
+
+// Local replace until envector-go-sdk v0.1.3 for gRPC interceptor
+replace github.com/CryptoLabInc/envector-go-sdk => ../envector-go-sdk
