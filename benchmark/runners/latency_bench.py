@@ -1410,10 +1410,40 @@ def main() -> None:
         default="runecontext_bench",
         help="Bench index name (--direct-envector only, default: runecontext_bench)",
     )
+    parser.add_argument(
+        "--primer-rows",
+        default=None,
+        help=(
+            "Enable sweep mode. Comma-separated index sizes, e.g. "
+            "'0,256,1024,4096,16384'. For each N the bench index is rebuilt, "
+            "primed with N records, and the selected scenarios are measured "
+            "against it. Requires --direct-envector."
+        ),
+    )
+    parser.add_argument(
+        "--sweep-scenarios",
+        default="recall,searchable,capture,multi,duplicate",
+        help=(
+            "Comma-separated scenario groups measured at each sweep N "
+            "(default: all N-sensitive groups). Only used with --primer-rows."
+        ),
+    )
+    parser.add_argument(
+        "--raw-csv",
+        default=None,
+        help=(
+            "Path to write long-format raw samples "
+            "(N,scenario,run_idx,phase,latency_ms) for plotting sweep curves. "
+            "Only used with --primer-rows."
+        ),
+    )
     args = parser.parse_args()
 
     if args.warmup >= args.runs:
         parser.error(f"--warmup ({args.warmup}) must be < --runs ({args.runs})")
+
+    if args.primer_rows and not args.direct_envector:
+        parser.error("--primer-rows (sweep mode) requires --direct-envector")
 
     asyncio.run(_main(args))
 
