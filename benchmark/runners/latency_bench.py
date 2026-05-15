@@ -1,73 +1,56 @@
 #!/usr/bin/env python3
-"""Rune × pyenvector 1.2.2 latency benchmark (v1.4.3 runner adaptation).
+"""Rune latency benchmark — unified runner for pyenvector 1.2.2 and 1.4.3.
 
-Same scenario IDs (T1–T14) and phase decomposition as the v1.4.3 runner
-in `sh/rune/benchmark/runners/latency_bench_v1.4.3.py`, but adapted for
-**pyenvector 1.2.2** (`eval_mode=rmp`, `index_type=flat`) — so that the two
-environments can be compared on the same scenario set.
+A single runner that targets either SDK version. `get_sdk_adapter()` detects
+the installed `pyenvector.__version__` and returns the matching adapter
+(V122Adapter / V143Adapter). Everything version-specific lives behind the
+`SdkAdapter` interface in `benchmark/runners/sdk/`; this runner stays
+SDK-agnostic.
 
-This adapter version omits v1.4.3-only SDK features:
-  - EnVectorClient(secure=..., eval_mode=..., index_type=...) — not supported
-  - Index.insert(await_completion, execute_until, load, use_row_insert,
-                 request_ids) — not supported
-  - Indexer.wait_for_index_operations_state(...) (server-push lifecycle wait)
-  - proto_gen.v2.common.index_operation_message_pb2 (MERGED_SAVED/SEARCHABLE)
+  - pyenvector 1.2.2 → eval_mode=rmp,  index_type=flat
+  - pyenvector 1.4.3 → eval_mode=mm32, index_type=ivf_vct
 
-Differences from the v1.4.3 reference:
-  - eval_mode: rmp  (reference: mm32)
-  - index_type: flat (reference: ivf_vct)
-  - insert_mode: SDK has no batch path — `insert(data=[v1..vN])` is serialised
-    internally; the `--insert-mode batch` flag is kept for parity but does not
-    actually toggle a separate code path.
-  - searchable: uses client-side score polling (top-1 cos ≥ 0.999) because
-    v1.2.2 SDK does not expose the cluster lifecycle states.
+Same scenario IDs (T1–T14) and phase decomposition on both, so the two SDK
+configurations can be compared on identical scenarios.
 
-`--direct-envector` mode (newly ported from the v1.4.3 reference):
-  - Provisions a dedicated `runecontext_bench` index (FLAT, dim=1024, plain
-    query encryption, no metadata encryption) instead of touching the live
-    `runecontext` index.
+insert_mode:
+  - 1.2.2 has ONLY a batch insert path (Index.insert always routes through
+    _insert_bulk; there is no single-row API). `--insert-mode single` is
+    accepted but pinned to batch, and the pinning is logged at setup.
+  - 1.4.3 has a single-row path (use_row_insert); `--insert-mode` toggles it.
+
+searchable measurement differs by SDK and is NOT directly comparable
+per-phase — only the total insert→searchable time is:
+  - 1.2.2 — client-side score polling (top-1 cosine ≥ 0.999); single phase.
+  - 1.4.3 — server lifecycle, 3 phases (insert_rpc / load / wait).
+
+`--direct-envector` mode:
+  - Provisions a dedicated `runecontext_bench` index instead of touching the
+    live `runecontext` index.
   - Drops + recreates the bench index between scenarios so each scenario's
     latency numbers start from a known empty state.
-  - For recall scenarios, primes the bench index with 20 deterministic random
-    records before measurement (mirrors the reference exactly — same RNG
-    seed 0xBEEF, same n_records).
-  - Inserts `_wait_for_score_ready` calls between capture/multi iterations
-    (outside the measured window) so the next iteration sees a stable index.
+  - For recall scenarios, primes the bench index with deterministic random
+    records (RNG seed 0xBEEF) before measurement.
   - On teardown, drops the bench index.
 
-Scenarios (target the flat index, eval_mode=rmp)
-----------
-  capture:
-    T1  Short English text  (~30 tokens)
-    T2  Long English text   (~150 tokens)
-    T3  Korean text
-    T4  Duplicate input     (novelty near-duplicate path)
-  recall:
-    T5  Exact match query
-    T6  Cross-language semantic query (Korean -> English)
-    T7  topk scaling        (topk = 1, 3, 5, 10)
-  vault_status:
-    T9  Vault health check
-  multi_capture:
-    T13 2-phase batch embed+insert
-    T14 5-phase batch embed+insert
-  searchable:
-    (v1.2.2 client polling — top-1 cosine ≥ 0.999.)
-    T10 Short English
-    T11 Long English
-    T12 Korean
+Scenarios
+---------
+  capture:       T1 short EN / T2 long EN / T3 Korean / T4 duplicate
+  recall:        T5 exact match / T6 cross-language / T7 topk scaling
+  vault_status:  T9 vault health check
+  multi_capture: T13 2-phase / T14 5-phase
+  searchable:    T10 short EN / T11 long EN / T12 Korean
 
 Usage
 -----
-  python benchmark/runners/latency_bench_v1.4.3.py --insert-mode single
-  python benchmark/runners/latency_bench_v1.4.3.py --insert-mode batch
-  python benchmark/runners/latency_bench_v1.4.3.py \\
+  python benchmark/runners/latency_bench.py --insert-mode single
+  python benchmark/runners/latency_bench.py \\
       --insert-mode single --feature capture --runs 5
 
-  # Bench-index mode with per-scenario reset (recommended for 4-axis comparison):
-  python benchmark/runners/latency_bench_v1.4.3.py \\
+  # Bench-index mode with per-scenario reset:
+  python benchmark/runners/latency_bench.py \\
       --insert-mode single --direct-envector --runs 10 --warmup 2 \\
-      --report benchmark/reports/latency_results_v1.2.2_rmpflat_single_aligned_2026-05-15.md
+      --report benchmark/reports/latency_results_<sdk>_<date>.md
 """
 
 from __future__ import annotations
@@ -100,17 +83,18 @@ from runners.common import (  # noqa: E402
     LatencyScenarioResult,
     PhaseLatency,
 )
+from runners.sdk import SearchableCtx, get_sdk_adapter  # noqa: E402
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
-EVAL_MODE = "rmp"
-INDEX_TYPE = "flat"
+# eval_mode / index_type are no longer module constants — they are properties
+# of the SDK adapter (V122Adapter: rmp/flat, V143Adapter: mm32/ivf_vct) and
+# are resolved at runtime by get_sdk_adapter().
 
-# Direct-envector bench-index params used only when --direct-envector is set.
-# v1.2.2 SDK's create_index accepts the same kwargs as v1.4.3 here, but the
-# index_type is "flat" — v1.2.2 has no IVF_VCT support.
+# Bench-index dimension, used only when --direct-envector is set. The index
+# type is supplied by the adapter (adapter.index_type), so there is no params
+# dict here.
 BENCH_DIM = 1024
-BENCH_INDEX_PARAMS = {"index_type": "flat"}
 
 # ── sample inputs ─────────────────────────────────────────────────────────────
 
@@ -272,7 +256,7 @@ class LatencyBenchmark:
         self._index_name: Optional[str] = None
         self._key_id: Optional[str] = None
         self._embedding: Any = None
-        self._ev_client: Any = None
+        self._adapter: Any = None       # SdkAdapter, built by setup()
         self._vault: Any = None
         # Populated by _setup_*; used by _prime_bench_index for metadata wire encrypt.
         self._agent_dek: Optional[bytes] = None
@@ -285,15 +269,47 @@ class LatencyBenchmark:
         cfg = load_config()
         self._config = cfg
 
+        # Detect the installed pyenvector version and pick the matching
+        # adapter (V122Adapter / V143Adapter). Raises on an unsupported version.
+        self._adapter = get_sdk_adapter()
+
         if self.direct_envector:
             await self._setup_direct_envector()
         else:
             await self._setup_vault()
 
+    def _connect_adapter(
+        self,
+        *,
+        address: str,
+        key_id: str,
+        key_path: str,
+        access_token: Optional[str],
+        agent_id: Optional[str],
+        agent_dek: Optional[bytes],
+        secure: Optional[bool],
+    ) -> None:
+        """Wire self._adapter to the cluster.
+
+        `secure` may be None — the Vault bundle did not include
+        `envector_secure`. In that case it is omitted from connect() so the
+        adapter's secure-by-default (True) applies.
+        """
+        kwargs: dict = dict(
+            address=address,
+            key_id=key_id,
+            key_path=key_path,
+            access_token=access_token,
+            agent_id=agent_id,
+            agent_dek=agent_dek,
+        )
+        if secure is not None:
+            kwargs["secure"] = secure
+        self._adapter.connect(**kwargs)
+
     async def _setup_vault(self) -> None:
         """Default path: use the live runecontext index via Vault-issued bundle."""
         from agents.common.embedding_service import EmbeddingService
-        from agents.common.envector_client import EnVectorClient
         from adapter.vault_client import VaultClient
 
         cfg = self._config
@@ -314,9 +330,10 @@ class LatencyBenchmark:
         agent_dek_b64 = bundle.pop("agent_dek", None)
         ev_endpoint = bundle.pop("envector_endpoint", None) or cfg.envector.endpoint
         ev_api_key = bundle.pop("envector_api_key", None) or cfg.envector.api_key
-        # v1.2.2: EnVectorClient does not accept `secure`; drop the bundle field
-        # to keep the bundle clean for downstream cert writes.
-        bundle.pop("envector_secure", None)
+        # `envector_secure` is the 1.4.x TLS toggle. Keep its value to forward
+        # to the adapter (v1.2.2 ignores it); pop it so it is not written as a
+        # cert file alongside the remaining bundle fields below.
+        ev_secure = bundle.pop("envector_secure", None)
 
         if not key_id:
             raise RuntimeError("Vault did not return key_id")
@@ -346,22 +363,23 @@ class LatencyBenchmark:
             model=cfg.embedding.model,
         )
 
-        self._ev_client = EnVectorClient(
+        self._connect_adapter(
             address=ev_endpoint,
-            key_path=str(key_path),
             key_id=key_id,
+            key_path=str(key_path),
             access_token=ev_api_key,
-            auto_key_setup=False,
             agent_id=agent_id,
             agent_dek=agent_dek,
+            secure=ev_secure,
         )
 
         print("OK")
+        print(f"    sdk        : pyenvector {self._adapter.sdk_version}")
         print(f"    index      : {index_name}")
         print(f"    key_id     : {key_id}")
         print(f"    endpoint   : {ev_endpoint}")
-        print(f"    eval_mode  : {EVAL_MODE}")
-        print(f"    index_type : {INDEX_TYPE}")
+        print(f"    eval_mode  : {self._adapter.eval_mode}")
+        print(f"    index_type : {self._adapter.index_type}")
         print(f"    insert_mode: {self.insert_mode}")
 
     async def _setup_direct_envector(self) -> None:
@@ -377,7 +395,6 @@ class LatencyBenchmark:
         Vault — same as production).
         """
         from agents.common.embedding_service import EmbeddingService
-        from agents.common.envector_client import EnVectorClient
         from adapter.vault_client import VaultClient
 
         cfg = self._config
@@ -397,8 +414,9 @@ class LatencyBenchmark:
         agent_dek_b64 = bundle.pop("agent_dek", None)
         ev_endpoint = bundle.pop("envector_endpoint", None) or cfg.envector.endpoint
         ev_api_key = bundle.pop("envector_api_key", None) or cfg.envector.api_key
-        # v1.2.2: EnVectorClient does not accept `secure`; drop the bundle field.
-        bundle.pop("envector_secure", None)
+        # `envector_secure` is the 1.4.x TLS toggle — keep its value for the
+        # adapter (v1.2.2 ignores it).
+        ev_secure = bundle.pop("envector_secure", None)
 
         if not key_id:
             raise RuntimeError("Vault did not return key_id")
@@ -426,41 +444,30 @@ class LatencyBenchmark:
             model=cfg.embedding.model,
         )
 
-        # auto_key_setup=False: ev.init() must not try to unload `vault-key`
-        # while it's still referenced by the live runecontext index.
-        self._ev_client = EnVectorClient(
+        # adapter.connect() builds the EnVectorSDKAdapter with auto_key_setup=
+        # False (ev.init() must not unload `vault-key` while the live
+        # runecontext index still references it) and retries the initial
+        # handshake internally — so the runner no longer needs a retry loop.
+        self._connect_adapter(
             address=ev_endpoint,
-            key_path=str(key_path),
             key_id=key_id,
+            key_path=str(key_path),
             access_token=ev_api_key,
-            auto_key_setup=False,
             agent_id=agent_id,
             agent_dek=agent_dek,
+            secure=ev_secure,
         )
-
-        # First connect after a fresh process can flake — retry the initial
-        # init() handshake before doing anything that depends on it.
-        last_err: Optional[Exception] = None
-        for _attempt in range(5):
-            try:
-                self._ev_client._ensure_initialized()
-                last_err = None
-                break
-            except Exception as e:
-                last_err = e
-                time.sleep(2.0)
-        if last_err is not None:
-            raise last_err
 
         # Clean start: drop any leftover bench index from prior runs.
         self._reset_bench_index()
 
         print("OK")
+        print(f"    sdk        : pyenvector {self._adapter.sdk_version}")
         print(f"    index      : {self._index_name}  (bench-only, separate from runecontext)")
         print(f"    key_id     : {self._key_id}  (shared with production - read-only here)")
         print(f"    endpoint   : {ev_endpoint}")
-        print(f"    eval_mode  : {EVAL_MODE}")
-        print(f"    index_type : {INDEX_TYPE}")
+        print(f"    eval_mode  : {self._adapter.eval_mode}")
+        print(f"    index_type : {self._adapter.index_type}")
         print(f"    insert_mode: {self.insert_mode}")
         print(f"    reset      : per-scenario drop+create")
 
@@ -484,81 +491,50 @@ class LatencyBenchmark:
                 f"name 'runecontext' - set --bench-index to something else."
             )
 
-        import pyenvector as ev
+        # Each adapter call (list / drop / create) wraps its own
+        # _with_reconnect, so no outer reconnect wrapper is needed here.
+        # create_index uses the adapter's index_type (flat for 1.2.2,
+        # ivf_vct for 1.4.3).
+        if self._index_name in self._adapter.list_index_names():
+            self._adapter.drop_index(self._index_name)
 
-        adapter = self._ev_client._adapter
-
-        def _list_index_names() -> list[str]:
-            existing = ev.get_index_list()
-            if hasattr(existing, "indexes"):
-                return [idx.index_name for idx in existing.indexes]
-            if isinstance(existing, (list, tuple)):
-                return [str(idx) for idx in existing]
-            return []
-
-        def _do_reset():
-            if self._index_name in _list_index_names():
-                ev.drop_index(self._index_name)
-
-            deadline = time.monotonic() + 180.0
-            saw_being_deleted = False
-            last_err: Optional[Exception] = None
-            while time.monotonic() < deadline:
-                try:
-                    ev.create_index(
-                        index_name=self._index_name,
-                        dim=BENCH_DIM,
-                        index_params=BENCH_INDEX_PARAMS,
-                        query_encryption="plain",
-                        metadata_encryption=False,
-                        metadata_key=b"",
-                    )
-                    return
-                except Exception as e:
-                    last_err = e
-                    msg = str(e).lower()
-                    if "being deleted" in msg or "notready" in msg:
-                        saw_being_deleted = True
-                        time.sleep(2.0)
-                        continue
-                    raise
-
-            if saw_being_deleted:
-                raise RuntimeError(
-                    f"_reset_bench_index: bench index {self._index_name!r} "
-                    f"is stuck in 'being deleted' state - drop_index returns "
-                    f"ok but the cluster never completes the delete. "
-                    f"Workaround: rerun with --bench-index <fresh-name>. "
-                    f"Last error: {last_err}"
-                )
-            raise last_err if last_err is not None else RuntimeError(
-                f"_reset_bench_index: timed out without ever calling "
-                f"create_index for {self._index_name!r}"
-            )
-
-        adapter._with_reconnect(_do_reset)
-
-    def _ensure_index_loaded(self) -> None:
-        """Pre-load the bench index. Safe to call repeatedly (idempotent)."""
-        import pyenvector as ev
+        deadline = time.monotonic() + 180.0
+        saw_being_deleted = False
         last_err: Optional[Exception] = None
-        for _attempt in range(5):
+        while time.monotonic() < deadline:
             try:
-                self._ev_client._ensure_initialized()
-                last_err = None
-                break
+                self._adapter.create_index(self._index_name, BENCH_DIM)
+                return
             except Exception as e:
                 last_err = e
-                time.sleep(2.0)
-        if last_err is not None:
-            raise last_err
-        adapter = self._ev_client._adapter
+                msg = str(e).lower()
+                if "being deleted" in msg or "notready" in msg:
+                    saw_being_deleted = True
+                    time.sleep(2.0)
+                    continue
+                raise
 
-        def _do_load():
-            idx = ev.Index(self._index_name)
-            idx.load()
+        if saw_being_deleted:
+            raise RuntimeError(
+                f"_reset_bench_index: bench index {self._index_name!r} "
+                f"is stuck in 'being deleted' state - drop_index returns "
+                f"ok but the cluster never completes the delete. "
+                f"Workaround: rerun with --bench-index <fresh-name>. "
+                f"Last error: {last_err}"
+            )
+        raise last_err if last_err is not None else RuntimeError(
+            f"_reset_bench_index: timed out without ever calling "
+            f"create_index for {self._index_name!r}"
+        )
 
-        adapter._with_reconnect(_do_load)
+    def _ensure_index_loaded(self) -> None:
+        """Pre-load the bench index. Safe to call repeatedly (idempotent).
+
+        The connection handshake + retry already happened in adapter.connect();
+        adapter.load_index() wraps its own _with_reconnect, so this is now a
+        one-liner.
+        """
+        self._adapter.load_index(self._index_name)
 
     def _wait_for_score_ready(
         self, probe_vec: list, timeout_s: float = 300.0, poll_interval_s: float = 1.0
@@ -575,7 +551,7 @@ class LatencyBenchmark:
         deadline = start + timeout_s
         last_err: Optional[str] = None
         while time.monotonic() < deadline:
-            res = self._ev_client.score(self._index_name, probe_vec)
+            res = self._adapter.score(self._index_name, probe_vec)
             if res.get("ok"):
                 return time.monotonic() - start
             last_err = res.get("error")
@@ -624,21 +600,16 @@ class LatencyBenchmark:
     def _prime_bench_index(self, n_records: int = 20) -> None:
         """Insert deterministic random records so recall has data to score.
 
-        v1.2.2 SDK: only `data` + `metadata` are accepted by Index.insert.
-        Reference's `await_completion`, `execute_until`, `load`, `use_row_insert`
-        kwargs are dropped here. We call `_wait_for_score_ready` once at the
-        end so the recall scenario starts on a queryable state.
-
-        RNG seed 0xBEEF matches the v1.4.3 reference exactly so the priming
-        vectors are deterministic across the two runners.
+        RNG seed 0xBEEF matches the v1.4.3 reference exactly, so the priming
+        vectors are deterministic across SDK versions. The adapter's insert()
+        handles metadata JSON-encoding and app-layer encryption; we call
+        `_wait_for_score_ready` once at the end so the recall scenario starts
+        on a queryable state.
         """
         if not self.direct_envector:
             return
 
-        import pyenvector as ev
-
         rng = np.random.default_rng(0xBEEF)
-        adapter = self._ev_client._adapter
 
         print(
             f"  priming {self._index_name} with {n_records} records...",
@@ -649,22 +620,10 @@ class LatencyBenchmark:
         for i in range(n_records):
             vec = rng.standard_normal(BENCH_DIM).astype(np.float32).tolist()
             last_vec = vec
-            meta_dict = self._build_insert_metadata(
-                f"priming record {i}",
-                f"prime-{i}",
-                "priming",
+            meta = self._build_insert_metadata(
+                f"priming record {i}", f"prime-{i}", "priming"
             )
-            meta_str = json.dumps(meta_dict)
-            if adapter._agent_dek and adapter._agent_id:
-                meta_wire = adapter._app_encrypt_metadata(meta_str)
-            else:
-                meta_wire = meta_str
-
-            def _do_prime():
-                idx = ev.Index(self._index_name)
-                idx.insert(data=[vec], metadata=[meta_wire])
-
-            adapter._with_reconnect(_do_prime)
+            self._adapter.insert(self._index_name, [vec], [meta])
 
         # Make sure the recall scenario's first score() doesn't trip on a
         # half-stable index.
@@ -677,15 +636,10 @@ class LatencyBenchmark:
     async def teardown(self) -> None:
         # Drop the bench index — only when --direct-envector was used so the
         # production runecontext is never touched.
-        if self.direct_envector and self._index_name and self._ev_client is not None:
+        if self.direct_envector and self._index_name and self._adapter is not None:
             try:
-                import pyenvector as ev
-                adapter = self._ev_client._adapter
-                target = self._index_name
-                def _do_drop():
-                    ev.drop_index(target)
-                adapter._with_reconnect(_do_drop)
-                print(f"  teardown: drop_index({target!r}) queued")
+                self._adapter.drop_index(self._index_name)
+                print(f"  teardown: drop_index({self._index_name!r}) queued")
             except Exception as e:
                 print(f"  teardown: drop_index failed (non-fatal): {e}")
 
@@ -728,8 +682,9 @@ class LatencyBenchmark:
         """
         Run one capture iteration and return per-phase latencies (ms).
 
-        insert_mode=single: use_row_insert=True,  data=[vec]            — row insert API
-        insert_mode=batch:  use_row_insert=False, data=[vec]*batch_size — batch insert API
+        The adapter's insert() honours row_insert on 1.4.x (single-row API)
+        and ignores it on 1.2.2 (batch-only path). insert_mode=="single" maps
+        to row_insert=True.
 
         Phases: embed / score / vault_topk / insert / total
         """
@@ -743,7 +698,7 @@ class LatencyBenchmark:
 
         # [2] Novelty score (encrypted similarity search)
         with _Timer() as t_score:
-            score_res = self._ev_client.score(self._index_name, vec)
+            score_res = self._adapter.score(self._index_name, vec)
         score_ms = t_score.elapsed_ms
 
         # [3] Vault TopK decrypt
@@ -763,10 +718,11 @@ class LatencyBenchmark:
             metadata = [self._build_insert_metadata(text, title, domain)]
 
         with _Timer() as t_insert:
-            self._ev_client.insert(
-                index_name=self._index_name,
-                vectors=vectors,
-                metadata=metadata,
+            self._adapter.insert(
+                self._index_name,
+                vectors,
+                metadata,
+                row_insert=(self.insert_mode == "single"),
             )
         insert_ms = t_insert.elapsed_ms
 
@@ -799,7 +755,7 @@ class LatencyBenchmark:
         embed_ms = t_embed.elapsed_ms
 
         with _Timer() as t_score:
-            score_res = self._ev_client.score(self._index_name, vec)
+            score_res = self._adapter.score(self._index_name, vec)
         score_ms = t_score.elapsed_ms
 
         vault_ms = 0.0
@@ -812,7 +768,7 @@ class LatencyBenchmark:
 
             if vault_res.ok and vault_res.results:
                 with _Timer() as t_remind:
-                    self._ev_client.remind(
+                    self._adapter.remind(
                         self._index_name,
                         vault_res.results,
                         output_fields=["metadata"],
@@ -979,94 +935,18 @@ class LatencyBenchmark:
                 ))
         return results
 
-    async def _wait_until_searchable(
-        self,
-        vec: list[float],
-        timeout_s: float = 30.0,
-        poll_interval_s: float = 0.2,
-        score_threshold: float = 0.999,
-    ) -> None:
-        """
-        v1.2.2 compatible searchable detector (score-threshold based).
-
-        Polls score → vault_decrypt in a loop until the top result for our query
-        vector has score ≥ score_threshold (cosine similarity ~1.0). For a vector
-        we just inserted, this top match is the inserted record itself.
-
-        Why score threshold instead of metadata id matching:
-        - v1.2.2 SDK stores user metadata under an encrypted blob (`data.c`),
-          so plaintext id matching via remind is not feasible without an extra
-          decrypt step that would compound vault rate-limit pressure.
-        - v1.2.2 SDK appears to make inserts synchronously available, so the
-          top-1 result becomes our vector on the first successful poll.
-
-        Caveats:
-        - Bench texts repeat across runs, so after the first iteration the
-          same vector already exists in the index — subsequent polls match on
-          the prior copy. This is the same caveat the v1.4.3 server-push
-          measurement has — i.e. waiting for the server-internal `MERGED_SAVED`
-          state (insert request's vectors have all moved from temporary raw
-          shards into canonical non-raw shards, but have not yet been published
-          via LoadIndex); the server-push fires on the new insert, not the prior.
-        - Measurement granularity ≈ poll_interval_s + per-cycle RPC latency.
-        - On vault RESOURCE_EXHAUSTED we back off by the server-hinted retry-after.
-        """
-        import re
-
-        start = time.perf_counter()
-        while True:
-            try:
-                score_res = self._ev_client.score(self._index_name, vec)
-                blobs = score_res.get("encrypted_blobs", []) if score_res.get("ok") else []
-                if blobs:
-                    vault_res = await self._vault.decrypt_search_results(blobs[0], top_k=3)
-                    if vault_res.ok and vault_res.results:
-                        top = vault_res.results[0]
-                        top_score = top.get("score", 0.0) if isinstance(top, dict) else 0.0
-                        if top_score >= score_threshold:
-                            return
-            except Exception as e:
-                msg = str(e)
-                if "RESOURCE_EXHAUSTED" in msg:
-                    m = re.search(r"Retry after (\d+)", msg)
-                    backoff = int(m.group(1)) if m else 5
-                    elapsed = time.perf_counter() - start
-                    if elapsed + backoff >= timeout_s:
-                        raise TimeoutError(
-                            f"rate-limit backoff ({backoff}s) would exceed "
-                            f"timeout ({timeout_s}s); elapsed={elapsed:.1f}s"
-                        )
-                    await asyncio.sleep(backoff)
-                    continue
-                raise
-            if time.perf_counter() - start >= timeout_s:
-                raise TimeoutError(
-                    f"vector not searchable within {timeout_s}s "
-                    f"(top score never reached {score_threshold})"
-                )
-            await asyncio.sleep(poll_interval_s)
-
     async def _searchable_capture_phases(
         self, text: str, title: str, domain: str
     ) -> dict[str, float]:
-        """
-        Measure time from capture start until data is searchable.
+        """Measure time from capture start until data is searchable.
 
-        v1.4.3 used insert(await_searchable=True) which blocks until the server
-        reaches `MERGED_SAVED` — defined as: insert request's vectors have all
-        moved from temporary raw shards into canonical non-raw shards, but have
-        not yet been published via LoadIndex (see
-        envector-msa-1.4.3/proto/v2/common/index-operation-message.proto).
-        v1.2.2 SDK does not expose that state, so we poll the index (score →
-        vault decrypt) until our just-inserted vector becomes detectable in the
-        top-1 search result. Same semantic measurement, different mechanism.
+        embed / score / vault_topk are measured here (SDK-agnostic). The
+        insert->searchable segment is delegated to the adapter, whose phase
+        breakdown differs by SDK version:
+          - 1.2.2 -> 1 phase  (client score polling)
+          - 1.4.3 -> 3 phases (insert_rpc / load_index / wait_searchable)
 
-        Phases:
-          embed              — embed locally
-          score              — FHE novelty check
-          vault_topk         — Vault decrypt
-          insert_searchable  — insert RPC + polling until queryable (v1.2.2)
-          total              — wall clock including all phases
+        Phases: embed / score / vault_topk / <adapter searchable phases> / total
         """
         reusable_insight = text[:120]
         total_start = time.perf_counter()
@@ -1076,7 +956,7 @@ class LatencyBenchmark:
         embed_ms = t_embed.elapsed_ms
 
         with _Timer() as t_score:
-            score_res = self._ev_client.score(self._index_name, vec)
+            score_res = self._adapter.score(self._index_name, vec)
         score_ms = t_score.elapsed_ms
 
         vault_ms = 0.0
@@ -1086,25 +966,23 @@ class LatencyBenchmark:
                 await self._vault_decrypt_with_retry(blobs[0], top_k=3)
             vault_ms = t_vault.elapsed_ms
 
-        metadata = [self._build_insert_metadata(text, title, domain)]
-
-        # v1.2.2: insert is non-blocking → poll until queryable.
-        # We detect "queryable" via top-1 score ≥ threshold (see _wait_until_searchable).
-        with _Timer() as t_insert:
-            self._ev_client.insert(
-                index_name=self._index_name,
-                vectors=[vec],
-                metadata=metadata,
-            )
-            await self._wait_until_searchable(vec)
-        insert_searchable_ms = t_insert.elapsed_ms
+        # Delegate the insert->searchable measurement to the adapter; it
+        # returns {phase_name: ms} with SDK-specific phase names.
+        ctx = SearchableCtx(
+            index_name=self._index_name,
+            vec=vec,
+            metadata=[self._build_insert_metadata(text, title, domain)],
+            vault=self._vault,
+            insert_mode=self.insert_mode,
+        )
+        searchable_phases = await self._adapter.measure_insert_to_searchable(ctx)
 
         total_ms = (time.perf_counter() - total_start) * 1000.0
         return {
             "embed": embed_ms,
             "score": score_ms,
             "vault_topk": vault_ms,
-            "insert_searchable": insert_searchable_ms,
+            **searchable_phases,
             "total": total_ms,
         }
 
@@ -1141,10 +1019,15 @@ class LatencyBenchmark:
                 )
 
         print("done")
-        phases = self._build_phase_list(
-            ["embed", "score", "vault_topk", "insert_searchable", "total"],
-            all_timings,
+        # Phase names are SDK-specific: embed/score/vault_topk are fixed, the
+        # insert->searchable phases come from the adapter (1 for v1.2.2,
+        # 3 for v1.4.3).
+        phase_names = (
+            ["embed", "score", "vault_topk"]
+            + self._adapter.searchable_phase_names()
+            + ["total"]
         )
+        phases = self._build_phase_list(phase_names, all_timings)
         return LatencyScenarioResult(
             scenario_id=sid,
             feature="searchable",
@@ -1203,7 +1086,7 @@ class LatencyBenchmark:
 
         # [2] Novelty score on primary record (first phase)
         with _Timer() as t_score:
-            score_res = self._ev_client.score(self._index_name, vecs[0])
+            score_res = self._adapter.score(self._index_name, vecs[0])
         score_ms = t_score.elapsed_ms
 
         # [3] Vault TopK decrypt
@@ -1214,16 +1097,18 @@ class LatencyBenchmark:
                 await self._vault_decrypt_with_retry(blobs[0], top_k=3)
             vault_ms = t_vault.elapsed_ms
 
-        # [4] Insert all N vectors as batch (use_row_insert=False)
+        # [4] Insert all N vectors in one call — multi-phase capture is always
+        # a batch insert (row_insert=False).
         metadata = [
             self._build_insert_metadata(t, f"phase-{i + 1}", domain)
             for i, t in enumerate(texts)
         ]
         with _Timer() as t_insert:
-            self._ev_client.insert(
-                index_name=self._index_name,
-                vectors=vecs,
-                metadata=metadata,
+            self._adapter.insert(
+                self._index_name,
+                vecs,
+                metadata,
+                row_insert=False,
             )
         insert_ms = t_insert.elapsed_ms
 
@@ -1312,7 +1197,7 @@ class LatencyBenchmark:
         rtt = self._measure_network_rtt()
         cfg = self._config
         report.env = {
-            "bench_version": "1.4.3",
+            "sdk_version": self._adapter.sdk_version,
             "date": __import__("datetime").date.today().isoformat(),
             "envector_endpoint": cfg.envector.endpoint,
             "vault_endpoint": cfg.vault.endpoint,
@@ -1320,8 +1205,8 @@ class LatencyBenchmark:
             "embedding_mode": cfg.embedding.mode,
             "index_name": self._index_name,
             "key_id": self._key_id,
-            "eval_mode": EVAL_MODE,
-            "index_type": INDEX_TYPE,
+            "eval_mode": self._adapter.eval_mode,
+            "index_type": self._adapter.index_type,
             "insert_mode": self.insert_mode,
             "network_rtt": rtt,
             "runs_per_scenario": self.runs - self.warmup,
@@ -1397,8 +1282,12 @@ class LatencyBenchmark:
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def _print_summary(report: LatencyBenchReport) -> None:
+    env = report.env
     print("\n" + "=" * 64)
-    print(f"  rune latency benchmark — envector-msa-1.4.3 ({EVAL_MODE}/{INDEX_TYPE})")
+    print(
+        f"  rune latency benchmark — pyenvector {env.get('sdk_version', '?')} "
+        f"({env.get('eval_mode', '?')}/{env.get('index_type', '?')})"
+    )
     print("=" * 64)
 
     for s in report.scenarios:
@@ -1435,8 +1324,8 @@ async def _main(args: argparse.Namespace) -> None:
 
     mode_label = "bench-index" if args.direct_envector else "vault-mediated"
     print(
-        f"\nSetting up … (mode={mode_label}, eval_mode={EVAL_MODE}, "
-        f"index_type={INDEX_TYPE}, insert_mode={args.insert_mode})"
+        f"\nSetting up … (mode={mode_label}, insert_mode={args.insert_mode}) "
+        f"— SDK version auto-detected; eval_mode/index_type printed below"
     )
     await bench.setup()
 
@@ -1460,13 +1349,20 @@ async def _main(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=f"Rune × envector-msa-1.4.3 latency benchmark ({EVAL_MODE}/{INDEX_TYPE})"
+        description=(
+            "Rune latency benchmark — unified runner. The SDK version "
+            "(pyenvector 1.2.2 / 1.4.3) is auto-detected at runtime."
+        )
     )
     parser.add_argument(
         "--insert-mode",
         choices=["single", "batch"],
         required=True,
-        help="Insert mode: single (one vector per call) or batch (N vectors per call)",
+        help=(
+            "Insert mode. On pyenvector 1.4.3 this toggles the single-row vs "
+            "batch insert API. On 1.2.2 there is no single-row path, so "
+            "'single' is effectively batch."
+        ),
     )
     parser.add_argument(
         "--feature",
