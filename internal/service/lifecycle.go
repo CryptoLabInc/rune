@@ -119,11 +119,21 @@ type EnvInfo struct {
 }
 
 // VaultInfo — subset exposed in diagnostics.
+//
+// Configured = a Vault gRPC client is wired (boot loop reached Active).
+// Healthy    = the most recent HealthCheck succeeded.
+// Error      = HealthCheck error (operational, set only when Healthy=false).
+// LastBootError = structured boot failure from lifecycle.Manager. Surfaces
+//
+//	the actual reason for waiting_for_vault state — agents
+//	branch on .kind to fast-fail without manual probing. Nil
+//	when boot has succeeded or no attempt has been made yet.
 type VaultInfo struct {
-	Configured bool   `json:"configured"`
-	Healthy    bool   `json:"healthy"`
-	Endpoint   string `json:"endpoint,omitempty"`
-	Error      string `json:"error,omitempty"`
+	Configured    bool               `json:"configured"`
+	Healthy       bool               `json:"healthy"`
+	Endpoint      string             `json:"endpoint,omitempty"`
+	Error         string             `json:"error,omitempty"`
+	LastBootError *domain.BootError  `json:"last_boot_error,omitempty"`
 }
 
 // KeysInfo — memory-resident key state.
@@ -226,6 +236,17 @@ func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 
 func (s *LifecycleService) collectVault(ctx context.Context, timeout time.Duration) VaultInfo {
 	info := VaultInfo{Configured: s.Vault != nil}
+
+	// Surface the most recent boot failure regardless of client state.
+	// When the boot loop is stuck on waiting_for_vault, s.Vault is nil but
+	// LastBootError holds the actual reason — agents need this to skip
+	// expensive trial-and-error diagnosis.
+	if s.State != nil {
+		if be := s.State.LastBootError(); be != nil {
+			info.LastBootError = be
+		}
+	}
+
 	if s.Vault == nil {
 		return info
 	}
@@ -501,12 +522,18 @@ func (s *LifecycleService) DeleteCapture(ctx context.Context, args DeleteCapture
 
 // ReloadPipelinesResult.
 type ReloadPipelinesResult struct {
-	OK                   bool        `json:"ok"`
-	State                string      `json:"state"`
-	ScribeInitialized    bool        `json:"scribe_initialized"`
-	RetrieverInitialized bool        `json:"retriever_initialized"`
-	Errors               []string    `json:"errors,omitempty"`
-	EnvectorWarmup       *WarmupInfo `json:"envector_warmup,omitempty"`
+	OK                   bool              `json:"ok"`
+	State                string            `json:"state"`
+	ScribeInitialized    bool              `json:"scribe_initialized"`
+	RetrieverInitialized bool              `json:"retriever_initialized"`
+	// LastBootError mirrors VaultInfo.LastBootError so callers (agent, UI)
+	// can fast-fail on this single response — no follow-up diagnostics call
+	// needed for the common case of "reload finished, boot failed, here's
+	// why". Populated only when state != "active" AND a classified error
+	// is available; nil otherwise.
+	LastBootError  *domain.BootError `json:"last_boot_error,omitempty"`
+	Errors         []string          `json:"errors,omitempty"`
+	EnvectorWarmup *WarmupInfo       `json:"envector_warmup,omitempty"`
 }
 
 // WarmupInfo — GetIndexList probe (60s timeout).
@@ -544,6 +571,16 @@ func (s *LifecycleService) ReloadPipelines(ctx context.Context) (*ReloadPipeline
 	if s.State.Current() == lifecycle.StateActive {
 		result.ScribeInitialized = true
 		result.RetrieverInitialized = true
+	} else {
+		// Boot did not reach active within the 5s wait window. Surface the
+		// most recent classified boot error so the caller can fast-fail
+		// without needing a separate diagnostics call. May still be nil
+		// (e.g., boot loop is genuinely in-flight and hasn't recorded an
+		// error yet) — in that case the agent should follow up with
+		// diagnostics per the Fast-Fail Rule in SKILL.md.
+		if be := s.State.LastBootError(); be != nil {
+			result.LastBootError = be
+		}
 	}
 
 	if s.Envector != nil {
