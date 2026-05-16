@@ -1,7 +1,7 @@
 # Rune Plugin Dependencies
 
 # FHE Encryption SDK
-pyenvector==1.2.2
+pyenvector>=1.2.0
 
 # MCP Server Framework
 fastmcp>=2.2.0
