@@ -53,25 +53,53 @@ want to reconfigure: skip to Step 4 (reload only). Otherwise continue.
 
 ### 2. Collect credentials — **one AskUserQuestion call, three questions** (one turn)
 
+**Mental model**: the user already has `evt_...` token, endpoint, and
+`ca.pem` from their Vault admin. The agent's job is to collect three
+values and validate format — not to suggest localhost defaults or
+synthesize options. Each question gives the user exactly two paths:
+"I have it (will paste)" or "I don't have it yet (stop)".
+
 Issue a SINGLE `AskUserQuestion` with three bundled questions, not three
-separate calls. The tool accepts 1–4 questions per call; using one call
-saves 2 turns (each separate call costs ~5s wall + an extra round-trip of
-~50k cache_read tokens).
+separate calls. Use the EXACT option text below — do NOT invent
+alternatives like `tcp://localhost:50051` or "default port" entries.
+The user got their values from an admin; localhost defaults are wrong
+and misleading.
 
-Questions to bundle:
+**Question 1 — Vault Endpoint**
+- `question`: `"What is your Vault endpoint? Your admin will have given you a value like tcp://<host>:50051."`
+- `header`: `"Vault Endpoint"`
+- `options`:
+  - `label: "Paste endpoint below"`, `description: "Use the Other field below to paste the tcp://host:port value your admin gave you. Scheme tcp:// is auto-prepended if you omit it."`
+  - `label: "I don't have one yet"`, `description: "Stop here — request the endpoint from your Vault admin first."`
 
-1. **Vault Endpoint** (required, format: `tcp://<host>:50051`).
-   Auto-prepend `tcp://` when the user value omits the scheme.
-2. **Vault Token** (required, format: `evt_xxx...`).
-3. **TLS Mode**:
-   - `self-signed` — team uses a self-signed CA (Recommended).
-   - `public_ca` — Let's Encrypt etc., system CA pool handles verification.
-   - `no_tls` — local dev only; Vault must also be running with
-     `server.grpc.tls.disable: true`. Warn if selected.
+**Question 2 — Vault Token**
+- `question`: `"What is your Vault token? Format evt_... — issued by your admin via runevault token issue."`
+- `header`: `"Vault Token"`
+- `options`:
+  - `label: "Paste token below"`, `description: "Use the Other field below to paste the evt_... token your admin gave you."`
+  - `label: "I don't have one yet"`, `description: "Stop here — request a token from your Vault admin first."`
 
-**If `self-signed` was chosen**: issue a single follow-up `AskUserQuestion`
-asking only "Path to CA certificate PEM file:" (one question, one turn).
-Otherwise skip the follow-up entirely.
+**Question 3 — TLS Mode**
+- `question`: `"How does your Vault server handle TLS?"`
+- `header`: `"TLS Mode"`
+- `options`:
+  - `label: "Self-signed certificate (Recommended)"`, `description: "Team uses a self-signed CA. You will provide the path to ca.pem next."`
+  - `label: "Public CA (Let's Encrypt etc.)"`, `description: "System CA pool handles verification. No local CA file needed."`
+  - `label: "No TLS (local dev only)"`, `description: "Plaintext gRPC. Vault must also be running with server.grpc.tls.disable: true."`
+
+**If `Self-signed` was chosen**: issue a single follow-up `AskUserQuestion`
+(one question, one turn). Otherwise skip the follow-up entirely.
+
+**Question 4 (conditional) — CA cert path**
+- `question`: `"Path to the CA cert PEM file your admin gave you? (e.g., ~/ca.pem or /path/to/ca.pem)"`
+- `header`: `"CA Cert Path"`
+- `options`:
+  - `label: "Paste path below"`, `description: "Use the Other field below to paste the path to ca.pem your admin gave you. The ~ home expansion is supported."`
+  - `label: "I don't have it yet"`, `description: "Stop here — request ca.pem from your Vault admin first."`
+
+**On any "I don't have it yet" answer**: stop the flow. Tell the user what
+to request from the admin (endpoint / `evt_...` token / `ca.pem`) and exit
+without writing any files.
 
 Resulting config mapping:
 
