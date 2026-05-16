@@ -34,100 +34,126 @@ Skip all steps below.
 
 ## Full Setup Steps
 
-### 1. Collect Credentials (conversational, via AskUserQuestion)
+**Turn budget**: 4 main turns total. Aggressively batch into **single
+AskUserQuestion calls** and **parallel tool_use blocks** to keep wall-clock
++ token cost low. Concrete plan below.
 
-If `~/.rune/config.json` already exists, show current values (mask token), ask
-if the user wants to reconfigure. If they decline, skip to Step 4 (reload only).
+### 1. Probe existing state (one turn)
 
-Ask each credential one at a time:
+In a single turn, run `Read` on `~/.rune/config.json` (if it exists).
+This serves two purposes at once:
 
-- **Vault Endpoint** (required, format: `tcp://<host>:50051`).
-  Auto-prepend `tcp://` when the user enters a value without a scheme prefix.
-  Example: `vault.example.com:50051` → `tcp://vault.example.com:50051`
-- **Vault Token** (required, format: `evt_xxx...`).
+- Detect whether the user is re-configuring (existing values) or fresh-setup.
+- Satisfy the `Write` tool's "must Read before Write" requirement so Step 3
+  does NOT need a separate defensive Read turn later. If the file does
+  not exist, the Read fails harmlessly — skip and proceed.
 
-### 2. TLS Choice
+If the existing config has all credentials and the user does not say they
+want to reconfigure: skip to Step 4 (reload only). Otherwise continue.
 
-Ask: "How does your Vault server handle TLS?"
+### 2. Collect credentials — **one AskUserQuestion call, three questions** (one turn)
 
-1. **Self-signed certificate** (Recommended) — team uses a self-signed CA.
-   - Follow-up: "Path to CA certificate PEM file:" (support `~` expansion).
-   - Copy via:
-     ```bash
-     mkdir -p ~/.rune/certs && chmod 700 ~/.rune
-     cp <user_path> ~/.rune/certs/ca.pem
-     chmod 600 ~/.rune/certs/ca.pem
-     ```
-   - If the cp fails (file not found, permission denied), surface the error
-     and ask for a path the current user can read. Common fix:
-     `sudo cp /opt/runevault/certs/ca.pem ~/.rune/ca.pem && sudo chown $USER ~/.rune/ca.pem`.
-   - → config: `ca_cert: "<HOME>/.rune/certs/ca.pem"`, `tls_disable: false`
-2. **Public CA** (Let's Encrypt etc.) — system CA pool handles verification.
-   - → config: `ca_cert: ""`, `tls_disable: false`
-3. **No TLS** — local dev only. Vault must also be running with
-   `server.grpc.tls.disable: true` — `install-dev.sh`'s default does NOT do
-   this, so this option only works when the user has explicitly disabled TLS
-   on the Vault side.
-   - Warn: "Plaintext gRPC. Make sure your Vault server has tls.disable: true."
-   - → config: `ca_cert: ""`, `tls_disable: true`
+Issue a SINGLE `AskUserQuestion` with three bundled questions, not three
+separate calls. The tool accepts 1–4 questions per call; using one call
+saves 2 turns (each separate call costs ~5s wall + an extra round-trip of
+~50k cache_read tokens).
 
-### 3. Write ~/.rune/config.json
+Questions to bundle:
 
-```bash
-mkdir -p ~/.rune && chmod 700 ~/.rune
-```
+1. **Vault Endpoint** (required, format: `tcp://<host>:50051`).
+   Auto-prepend `tcp://` when the user value omits the scheme.
+2. **Vault Token** (required, format: `evt_xxx...`).
+3. **TLS Mode**:
+   - `self-signed` — team uses a self-signed CA (Recommended).
+   - `public_ca` — Let's Encrypt etc., system CA pool handles verification.
+   - `no_tls` — local dev only; Vault must also be running with
+     `server.grpc.tls.disable: true`. Warn if selected.
 
-Write:
-```json
-{
-  "vault": {
-    "endpoint": "<vault_endpoint>",
-    "token": "<vault_token>",
-    "ca_cert": "<ca_cert_path or empty>",
-    "tls_disable": <true|false>
-  },
-  "state": "active",
-  "metadata": {
-    "configVersion": "2.0",
-    "lastUpdated": "<ISO timestamp>"
+**If `self-signed` was chosen**: issue a single follow-up `AskUserQuestion`
+asking only "Path to CA certificate PEM file:" (one question, one turn).
+Otherwise skip the follow-up entirely.
+
+Resulting config mapping:
+
+| TLS mode    | ca_cert                    | tls_disable |
+|-------------|----------------------------|-------------|
+| self-signed | `<HOME>/.rune/certs/ca.pem`| false       |
+| public_ca   | ""                         | false       |
+| no_tls      | ""                         | true        |
+
+### 3. Provision and write — **parallel tool_use in one turn**
+
+Emit BOTH tool calls in the same turn (parallel `tool_use` blocks). Anthropic
+runs them in parallel and returns both `tool_result`s in the next user
+message:
+
+- **`Bash`** — only when `tls_mode == self-signed`. Sets up the cert dir
+  and copies the user-supplied CA in one command (so a partial failure
+  leaves nothing half-written):
+  ```bash
+  mkdir -p ~/.rune/certs && chmod 700 ~/.rune && \
+    cp <user_ca_path> ~/.rune/certs/ca.pem && \
+    chmod 600 ~/.rune/certs/ca.pem
+  ```
+  If `cp` fails (file not found / permission denied): surface the error
+  and ask the user for a readable path (one more `AskUserQuestion`).
+- **`Write`** — `~/.rune/config.json` with the JSON below.
+  ```json
+  {
+    "vault": {
+      "endpoint": "<vault_endpoint>",
+      "token": "<vault_token>",
+      "ca_cert": "<ca_cert_path or empty>",
+      "tls_disable": <true|false>
+    },
+    "state": "active",
+    "metadata": {
+      "configVersion": "2.0",
+      "lastUpdated": "<ISO timestamp>"
+    }
   }
-}
-```
-
-Then `chmod 600 ~/.rune/config.json`.
+  ```
 
 Note: enVector credentials (endpoint, API key, EvalKey, SecKey) are not
 stored locally — Vault delivers them via the agent manifest on first
 connection.
 
-### 4. Trigger Boot Loop
+### 4. Lock down + trigger boot — **parallel tool_use in one turn**
 
-Call `mcp__envector__reload_pipelines`. This re-runs the boot loop:
+Again emit both tool calls in the same turn:
 
-1. Dial Vault (TLS or plaintext per config) and call `GetAgentManifest`.
-2. Persist the returned `EncKey` to `~/.rune/keys/<keyID>/EncKey.json`.
-3. Dial runed at `~/.runed/embedding.sock` (or `RUNE_EMBEDDER_SOCKET`).
-4. Connect to enVector cluster using the bundle endpoint + API key.
-5. Open the team index.
+- **`Bash`** — `chmod 600 ~/.rune/config.json` (config file may contain the
+  vault token; ensure owner-only readable).
+- **`mcp__envector__reload_pipelines`** — kicks the boot loop. Returns
+  after up to 5s while the loop attempts to reach Active, so the response
+  may already contain `last_boot_error` on failure (see Step 5).
 
-`reload_pipelines` is **non-blocking** — it kicks the boot loop and returns
-immediately with the current state (typically `waiting_for_vault` while
-the dial is in flight). Do NOT interpret the immediate response as the
-final result. Go to Step 5 to read the actual outcome.
+The two are independent: the chmod doesn't affect the boot loop's read,
+and the boot loop will have already loaded the config before chmod
+finishes most of the time. Running them in parallel is safe and saves
+one round-trip.
 
-### 5. Verify Health (call diagnostics — **fast-fail on `last_boot_error`**)
+### 5. Read the response — **fast-fail on `last_boot_error`**
 
-Call `mcp__envector__diagnostics` ONCE after `reload_pipelines`.
-This returns a per-subsystem health snapshot — the ground-truth probe.
+Inspect the `reload_pipelines` response from Step 4 first:
 
-**Fast-fail rule (do this FIRST, before rendering anything else):**
+- **`state == "active"` AND no `last_boot_error`** → success path. Optionally
+  call `mcp__envector__diagnostics` ONCE for the rich per-subsystem snapshot
+  used in Step 6's completion summary. (You can skip diagnostics if you only
+  need to confirm activation — `reload_pipelines.state` is authoritative.)
 
-If `diagnostics.state != "active"` AND
-`diagnostics.vault.last_boot_error` is present →
-**immediately surface the error to the user and stop**. Do NOT retry
-`reload_pipelines`, do NOT poll `diagnostics`, do NOT probe with shell
-commands. The `last_boot_error` field is the boot loop's structured
-verdict — it has already classified the root cause.
+- **`last_boot_error` is populated** → fast-fail. Use it directly; do NOT
+  call diagnostics, do NOT retry. The boot loop has already classified the
+  root cause.
+
+- **`state != "active"` AND `last_boot_error` is absent** → boot loop is
+  still in flight (rare; only when the 5s wait window expired without an
+  error). Call `mcp__envector__diagnostics` ONCE — its
+  `vault.last_boot_error` will likely be populated by now (the boot loop
+  keeps running in the background).
+
+**Do NOT** retry `reload_pipelines`, poll `diagnostics`, or probe with shell
+commands. The `last_boot_error` field is the boot loop's structured verdict.
 
 Render based on `last_boot_error.kind`:
 
