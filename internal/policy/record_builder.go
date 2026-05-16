@@ -133,7 +133,7 @@ func buildSingleRecord(
 		Timestamp:     now.UTC(),
 		Title:         title,
 		Decision: domain.DecisionDetail{
-			What:  truncStr(cleanText, 500),
+			What:  truncRunes(cleanText, 500),
 			Who:   userWho(rawEvent),
 			Where: whereStr(rawEvent),
 		},
@@ -211,10 +211,7 @@ func buildMultiRecord(
 		}
 		recordID := domain.GenerateRecordID(now, d, phaseTitle) + suffix
 
-		decision := phase.PhaseDecision
-		if len(decision) > 500 {
-			decision = decision[:500]
-		}
+		decision := truncRunes(phase.PhaseDecision, 500)
 
 		evidence := extractEvidence(rawEvent, cleanText)
 		certainty, missingInfo := determineCertainty(evidence, phase.PhaseRationale)
@@ -295,15 +292,14 @@ func buildMultiRecord(
 
 //--- Helper ---//
 
-// Extract first sentence up to domain.MaxTitleLen chars
+// extractTitle returns the first sentence (up to first ".") capped at
+// MaxTitleLen runes. text[:idx] is safe because "." is ASCII single-byte.
 func extractTitle(text string) string {
 	firstSentence := text
 	if idx := strings.Index(text, "."); idx > 0 {
 		firstSentence = text[:idx]
 	}
-	if len(firstSentence) > domain.MaxTitleLen {
-		firstSentence = firstSentence[:domain.MaxTitleLen]
-	}
+	firstSentence = truncRunes(firstSentence, domain.MaxTitleLen)
 	firstSentence = strings.TrimSpace(firstSentence)
 	if len(firstSentence) > 10 {
 		return firstSentence
@@ -319,13 +315,9 @@ func extractEvidence(rawEvent *domain.RawEvent, text string) []domain.Evidence {
 		matches := rx.FindAllStringSubmatch(text, -1)
 		for _, m := range matches {
 			if len(m) > 1 && len(m[1]) >= 10 {
-				quote := m[1]
-				if len(quote) > 200 {
-					quote = quote[:200]
-				}
 				evidence = append(evidence, domain.Evidence{
 					Claim:  "Quoted statement from discussion",
-					Quote:  quote,
+					Quote:  truncRunes(m[1], 200),
 					Source: sourceRef,
 				})
 			}
@@ -335,8 +327,8 @@ func extractEvidence(rawEvent *domain.RawEvent, text string) []domain.Evidence {
 	// Fallback paraphrase
 	if len(evidence) == 0 && len(text) >= 20 {
 		quote := text
-		if len(quote) > 150 {
-			quote = quote[:150] + "..."
+		if truncated := truncRunes(quote, 150); truncated != quote {
+			quote = truncated + "..."
 		}
 		evidence = append(evidence, domain.Evidence{
 			Claim:  "Decision statement (paraphrased)",
@@ -453,9 +445,3 @@ func whereStr(rawEvent *domain.RawEvent) string {
 	return rawEvent.Source
 }
 
-func truncStr(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen]
-	}
-	return s
-}

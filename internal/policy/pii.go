@@ -43,9 +43,7 @@ func RedactSensitive(text string) (string, string) {
 		}
 	}
 
-	if len(redacted) > MaxInputChars {
-		redacted = redacted[:MaxInputChars]
-	}
+	redacted = truncRunes(redacted, MaxInputChars)
 
 	noteStr := ""
 	if len(notes) > 0 {
