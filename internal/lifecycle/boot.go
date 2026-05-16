@@ -30,6 +30,7 @@ import (
 	"github.com/envector/rune-go/internal/adapters/envector"
 	"github.com/envector/rune-go/internal/adapters/keymanager"
 	"github.com/envector/rune-go/internal/adapters/vault"
+	"github.com/envector/rune-go/internal/domain"
 	"github.com/envector/rune-go/internal/recovery"
 )
 
@@ -70,16 +71,21 @@ func (s State) String() string {
 
 // Manager — atomic state + Vault boot loop control.
 type Manager struct {
-	state     atomic.Int32
-	lastError atomic.Value // string
-	attempts  atomic.Int32
-	onReload  atomic.Value // func()
+	state       atomic.Int32
+	lastError   atomic.Value // string — free-form, kept for slog parity
+	lastBootErr atomic.Value // *domain.BootError — structured, surfaced via diagnostics
+	attempts    atomic.Int32
+	onReload    atomic.Value // func()
 }
 
 // NewManager — initial state = Starting.
 func NewManager() *Manager {
 	m := &Manager{}
 	m.state.Store(int32(StateStarting))
+	// Seed lastBootErr with a typed nil so atomic.Value.Load returns a
+	// consistent type after the first SetBootError call (atomic.Value
+	// requires all stored values to be the same concrete type).
+	m.lastBootErr.Store((*domain.BootError)(nil))
 	return m
 }
 
@@ -168,6 +174,43 @@ func (m *Manager) WaitForActive(ctx context.Context, timeout time.Duration) bool
 	return false
 }
 
+// LastBootError reports the structured boot error from the most recent boot
+// attempt (nil when boot is currently active / has not yet been attempted /
+// has explicitly been cleared on success). Surfaced via
+// service.LifecycleService.Diagnostics so agents can fast-fail on a stable
+// Kind + Hint instead of pattern-matching LastError() strings.
+func (m *Manager) LastBootError() *domain.BootError {
+	v := m.lastBootErr.Load()
+	if v == nil {
+		return nil
+	}
+	be, _ := v.(*domain.BootError)
+	return be
+}
+
+// SetBootError stores a classified boot error in atomic state AND appends
+// it to the on-disk boot log (~/.rune/logs/boot.log). nil is treated as
+// "clear" — atomic is reset, log is left intact (past attempts remain
+// inspectable).
+func (m *Manager) SetBootError(be *domain.BootError) {
+	// atomic.Value requires consistent concrete type — store typed nil
+	// rather than an untyped nil interface{} for the clear case.
+	if be == nil {
+		m.lastBootErr.Store((*domain.BootError)(nil))
+		return
+	}
+	m.lastBootErr.Store(be)
+	// Best-effort persist. PersistBootError swallows file errors so this
+	// can never break the boot loop.
+	PersistBootError(be)
+}
+
+// Attempts reports the cumulative retry count from the most recent boot run
+// (reset to 0 each time RunBootLoop starts). Exposed for diagnostics.
+func (m *Manager) Attempts() int {
+	return int(m.attempts.Load())
+}
+
 // BootBackoffs — Python server.py Vault retry schedule.
 // Total to cap: 1s → 2s → 5s → 15s → 30s → 60s (then loop at 60s).
 var BootBackoffs = []time.Duration{
@@ -226,23 +269,29 @@ const (
 // gRPC connections do not leak across retries.
 func RunBootLoop(ctx context.Context, m *Manager, deps BootAdapterInjector) {
 	m.SetState(StateStarting)
+	m.attempts.Store(0)
+	// Don't clear lastBootErr here — keep the previous run's error visible
+	// until this run produces a new outcome. That way a manual /rune:status
+	// during the first ~second of a Retrigger still shows context.
 
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
 			return
 		}
+		m.attempts.Store(int32(attempt))
 
-		switch bootOnce(ctx, m, deps) {
+		switch bootOnce(ctx, m, deps, attempt) {
 		case bootActive:
 			m.SetState(StateActive)
 			m.lastError.Store("")
+			m.SetBootError(nil)
 			m.attempts.Store(int32(attempt))
 			slog.Info("boot: pipelines initialized and active")
 			return
 
 		case bootDormant:
-			// State + lastError already set inside bootOnce.
+			// State + lastError + lastBootErr already set inside bootOnce.
 			m.attempts.Store(int32(attempt))
 			slog.Info("boot: dormant — awaiting /rune:configure or /rune:reload_pipelines",
 				"reason", m.LastError())
@@ -265,10 +314,10 @@ func RunBootLoop(ctx context.Context, m *Manager, deps BootAdapterInjector) {
 //   - bootDormant on terminal config-side failures (caller should not retry)
 //   - bootRetry   on transient failures (caller backs off and retries)
 //
-// On any failure path, state + lastError are updated.
+// On any failure path, state + lastError + lastBootErr are updated.
 //
-// Adapter injection is per-component, not all-or-nothing
-func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootResult {
+// Adapter injection is per-component, not all-or-nothing.
+func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector, attempt int) bootResult {
 	cfg, err := config.Load()
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -278,6 +327,7 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 			// (Python parity: server.py _set_dormant_with_reason).
 			m.SetState(StateDormant)
 			m.lastError.Store("config.json not found — run /rune:configure to set up")
+			m.SetBootError(ClassifyDormantReason("not_configured"))
 			if dErr := config.MarkDormant("not_configured"); dErr != nil {
 				slog.Warn("boot: failed to persist dormant state to config.json", "err", dErr)
 			}
@@ -288,6 +338,10 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 		// Other config errors (JSON parse, permission denied, etc.) — could be
 		// transient (user editing the file). Retry.
 		m.lastError.Store(fmt.Sprintf("config load: %v", err))
+		m.SetBootError(ClassifyBootError(err, BootErrCtx{
+			Phase:    domain.BootPhaseConfigLoad,
+			Attempts: attempt,
+		}))
 		slog.Error("boot: failed to load config", "err", err)
 		return bootRetry
 	}
@@ -319,6 +373,7 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 		}
 
 		m.lastError.Store("dormant: " + reason)
+		m.SetBootError(ClassifyDormantReason(reason))
 		if dErr := config.MarkDormant(reason); dErr != nil {
 			slog.Warn("boot: failed to persist dormant state to config.json", "err", dErr)
 		}
@@ -334,12 +389,25 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 		// so the next boot picks up the same dormant_reason.
 		m.SetState(StateDormant)
 		m.lastError.Store("vault endpoint or token missing in config — run /rune:configure")
+		m.SetBootError(ClassifyDormantReason("vault_unconfigured"))
 		if dErr := config.MarkDormant("vault_unconfigured"); dErr != nil {
 			slog.Warn("boot: failed to persist dormant state to config.json", "err", dErr)
 		}
 		slog.Warn("boot: vault endpoint/token missing — entering dormant",
 			"hint", "run /rune:configure")
 		return bootDormant
+	}
+
+	// classify — helper closure that classifies an error with the current
+	// phase + interpolates the user's endpoint/CA path into the hint. Pulled
+	// out so each error site stays a single readable line.
+	classify := func(err error, phase domain.BootPhase) *domain.BootError {
+		return ClassifyBootError(err, BootErrCtx{
+			Phase:         phase,
+			VaultEndpoint: cfg.Vault.Endpoint,
+			VaultCAPath:   cfg.Vault.CACert,
+			Attempts:      attempt,
+		})
 	}
 
 	vaultClient, err := vault.NewClient(cfg.Vault.Endpoint, cfg.Vault.Token, vault.ClientOpts{
@@ -352,6 +420,7 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 	if err != nil {
 		m.SetState(StateWaitingForVault)
 		m.lastError.Store(fmt.Sprintf("vault dial: %v", err))
+		m.SetBootError(classify(err, domain.BootPhaseVaultDial))
 		slog.Error("boot: failed to connect to vault", "err", err)
 		return bootRetry
 	}
@@ -360,6 +429,7 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 	if err != nil {
 		m.SetState(StateWaitingForVault)
 		m.lastError.Store(fmt.Sprintf("vault get manifest: %v", err))
+		m.SetBootError(classify(err, domain.BootPhaseVaultManifest))
 		slog.Warn("boot: waiting for vault...", "err", err)
 		_ = vaultClient.Close()
 		return bootRetry
@@ -367,6 +437,7 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 
 	if err := keymanager.SaveEncKey(bundle.KeyID, bundle.EncKey); err != nil {
 		m.lastError.Store(fmt.Sprintf("save EncKey: %v", err))
+		m.SetBootError(classify(err, domain.BootPhaseKeySave))
 		slog.Error("boot: failed to save keys to disk", "err", err)
 		_ = vaultClient.Close()
 		return bootRetry
@@ -375,6 +446,7 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 	keyDir, err := keymanager.KeyDir(bundle.KeyID)
 	if err != nil {
 		m.lastError.Store(fmt.Sprintf("resolve key dir: %v", err))
+		m.SetBootError(classify(err, domain.BootPhaseKeySave))
 		slog.Error("boot: failed to resolve key dir", "err", err)
 		return bootRetry
 	}
@@ -389,6 +461,7 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 	})
 	if err != nil {
 		m.lastError.Store(fmt.Sprintf("embedder dial: %v", err))
+		m.SetBootError(classify(err, domain.BootPhaseEmbedderDial))
 		slog.Error("boot: failed to connect to embedder", "err", err)
 		return bootRetry
 	}
@@ -407,12 +480,14 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 	})
 	if err != nil {
 		m.lastError.Store(fmt.Sprintf("envector new client: %v", err))
+		m.SetBootError(classify(err, domain.BootPhaseEnvectorInit))
 		slog.Error("boot: failed to connect to envector", "err", err)
 		return bootRetry
 	}
 
 	if err := envectorClient.OpenIndex(ctx); err != nil {
 		m.lastError.Store(fmt.Sprintf("envector open index: %v", err))
+		m.SetBootError(classify(err, domain.BootPhaseEnvectorIndex))
 		slog.Error("boot: envector index activation failed", "err", err)
 		_ = envectorClient.Close()
 		return bootRetry
