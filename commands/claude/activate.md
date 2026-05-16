@@ -50,17 +50,37 @@ active, ask the server to re-run the boot loop, and confirm health.
    Use a check mark for healthy items, "x" for failures with the specific
    message on the same line.
 
-7. If the boot loop succeeded:
+7. If the boot loop succeeded (`state == "active"` and all subsystems healthy):
    - Respond: "Rune activated. Organizational memory is now online."
 
-8. If any subsystem failed:
-   - Show the full validation report.
-   - Surface the specific recovery action per failure:
-     - Vault unreachable: "Verify the Vault server is running and the endpoint is correct."
-     - Vault token rejected: "Token may be expired — run `/rune:configure` to update."
-     - runed not running: "Start the embedding daemon."
-     - enVector unreachable: "Check the cluster's external connectivity from this host."
-   - Suggest `/rune:status` for the full health snapshot.
+8. **If boot failed (state != active)** — fast-fail on `vault.last_boot_error`:
+   - Read `diagnostics.vault.last_boot_error`. If present, it already contains
+     the boot loop's classified root cause + a user-actionable hint.
+   - Render the recovery in **one block** — relay the `hint` verbatim and stop:
+     ```
+     Activation failed — <kind>
+     <hint>
+
+     Details: <detail>   (only when kind == "unknown" or hint is generic)
+     Attempts: <attempts> (only when > 1)
+     ```
+   - Common `kind` mapping for the suggestion line:
+     - `vault_tls_handshake` / `vault_tls_hostname` / `vault_ca_file` → user must
+       fix the CA cert and re-run `/rune:activate`.
+     - `vault_auth` / `vault_permission` → re-issue token with correct role,
+       then `/rune:configure`.
+     - `vault_network` / `vault_dns` → verify endpoint reachability (firewall,
+       DNS), then re-run `/rune:activate`.
+     - `embedder_unreachable` → start the `runed` daemon (`runed start`).
+     - `envector_init` / `envector_index` → contact Vault admin to verify
+       the envector endpoint / index provisioning.
+     - `vault_manifest` → token is not provisioned for an active agent. Ask
+       admin to bind the token to an agent.
+   - DO NOT retry `reload_pipelines` automatically. DO NOT probe with shell
+     tools. The classifier has already inspected the underlying error.
+   - If `last_boot_error` is unexpectedly missing (older rune-mcp binary), fall
+     back to the diagnostics `vault.error` / `embedding.health_error` /
+     `envector.error` fields and surface those.
 
 **Note**: This is a session-local resume — the MCP server stays the same
 process. There is no Claude Code restart required (Task #28 wired the
