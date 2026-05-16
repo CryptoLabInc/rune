@@ -114,10 +114,11 @@ If in Active state but operations fail:
 5. Call the `reload_pipelines` MCP tool. The MCP server's boot loop
    dials Vault, fetches the agent manifest (EncKey + envector
    creds), connects to enVector, and transitions to Active.
-6. Confirm health by calling `diagnostics` and showing the per-
-   subsystem snapshot. If the boot loop landed in Dormant, surface
-   the `dormant_reason` (e.g. `vault_unreachable`,
-   `vault_token_invalid`) with the recovery action.
+6. Confirm health by calling `diagnostics` and applying the
+   **Boot Failure — Fast-Fail Rule** (see section below). If
+   `state == "active"`, render the per-subsystem snapshot. If
+   not, surface `vault.last_boot_error.hint` verbatim and stop —
+   do not retry, do not probe with shell tools.
 
 ### `/rune:status`
 (or `$rune status` for Codex CLI)
@@ -209,11 +210,12 @@ Recommendations:
    `dormant_reason` / `dormant_since` fields.
 4. Call the `reload_pipelines` MCP tool. From a terminal Dormant the
    boot loop is re-spawned; from Active it is a no-op.
-5. Call `diagnostics` and render the per-subsystem snapshot.
-6. If any subsystem failed: keep state as `"active"` (the boot loop
-   will retry transient failures), surface the dormant_reason if the
-   loop fell back to Dormant, and suggest `/rune:status` for the full
-   snapshot.
+5. Call `diagnostics` and apply the **Boot Failure — Fast-Fail Rule**
+   (section below).
+6. If `state == "active"`: render the per-subsystem snapshot. If not:
+   surface `vault.last_boot_error.hint` verbatim, suggest the matching
+   recovery action, and stop. Do NOT loop on `reload_pipelines` or probe
+   with shell tools — the classifier has already done that work.
 
 ### `/rune:reset`
 (or `$rune reset` for Codex CLI)
@@ -225,6 +227,35 @@ Recommendations:
 2. Delete `~/.rune/config.json` (the MCP server stays alive; it transitions
    to Dormant on the next reload because no config means no Vault dial)
 3. Show reconfiguration instructions
+
+## Boot Failure — Fast-Fail Rule
+
+When `diagnostics.state != "active"` AND `diagnostics.vault.last_boot_error`
+is present, that field is the boot loop's authoritative root-cause verdict
+(produced from the underlying gRPC/TLS/DNS error). Treat it as ground truth.
+
+**Do this and stop:**
+1. Show `vault.last_boot_error.hint` to the user **verbatim** — it already
+   names the specific cause and the fix.
+2. Suggest one next action keyed off `kind`:
+   - `config_*`, `vault_*` (TLS, auth, endpoint, manifest, etc.) → re-run
+     `/rune:configure` after applying the hint's fix.
+   - `user_deactivated` → `/rune:activate`.
+   - `embedder_unreachable` → start `runed` (`runed start`), then `/rune:status`.
+   - `envector_*` → share `detail` with the Vault admin.
+   - `unknown` → show `kind` + `detail`, suggest sharing with admin.
+
+**Do NOT:** retry `reload_pipelines`, poll `diagnostics` in a loop, or run
+shell probes (`openssl`, `nc`, `curl`, `dig`, etc.). The classifier already
+inspected the underlying error server-side — manual probing only burns
+tokens without changing the conclusion. The per-`kind` reference table
+lives in `commands/claude/configure.md` for the rare case the hint string
+needs supplementation.
+
+**Fallback** (older rune-mcp binary without `last_boot_error`): use
+`vault.error`, `embedding.health_error`, `envector.error`, and the
+`dormant_reason` translation in `/rune:status`. Still: do not investigate
+further, surface what you have and stop.
 
 ## Automatic Behavior (When Active)
 

@@ -110,29 +110,59 @@ Call `mcp__envector__reload_pipelines`. This re-runs the boot loop:
 4. Connect to enVector cluster using the bundle endpoint + API key.
 5. Open the team index.
 
-If `reload_pipelines` returns an error or state stays dormant:
-- Surface the message — it is the boot loop's `LastError`.
-- Common causes:
-  - Vault unreachable — verify `endpoint` reachable from this host.
-  - Token invalid / role lacks permission — re-issue with
-    `runevault token issue --user <name> --role member`.
-  - runed not running — start the embedding daemon.
-  - enVector cluster unreachable — check the cluster's external
-    connectivity from this host.
-- Suggest `/rune:status` for the full health snapshot.
+`reload_pipelines` is **non-blocking** — it kicks the boot loop and returns
+immediately with the current state (typically `waiting_for_vault` while
+the dial is in flight). Do NOT interpret the immediate response as the
+final result. Go to Step 5 to read the actual outcome.
 
-### 5. Verify Health (call diagnostics)
+### 5. Verify Health (call diagnostics — **fast-fail on `last_boot_error`**)
 
-After `reload_pipelines` returns, call `mcp__envector__diagnostics` to
-get a real-time per-subsystem health snapshot. This is what the
-completion summary renders — `reload_pipelines` is the trigger,
-`diagnostics` is the ground-truth probe.
+Call `mcp__envector__diagnostics` ONCE after `reload_pipelines`.
+This returns a per-subsystem health snapshot — the ground-truth probe.
+
+**Fast-fail rule (do this FIRST, before rendering anything else):**
+
+If `diagnostics.state != "active"` AND
+`diagnostics.vault.last_boot_error` is present →
+**immediately surface the error to the user and stop**. Do NOT retry
+`reload_pipelines`, do NOT poll `diagnostics`, do NOT probe with shell
+commands. The `last_boot_error` field is the boot loop's structured
+verdict — it has already classified the root cause.
+
+Render based on `last_boot_error.kind`:
+
+| kind | what to tell the user |
+|---|---|
+| `vault_tls_handshake` | CA cert mismatch. Show `hint` verbatim. Ask user to re-fetch the current CA from the Vault admin and replace `~/.rune/certs/ca.pem`, then re-run `/rune:configure`. |
+| `vault_tls_hostname`  | Server cert doesn't cover the endpoint hostname. Show `hint`. |
+| `vault_ca_file`       | CA file path unreadable. Show `hint` — likely a typo or permissions. |
+| `vault_auth`          | Token rejected. Show `hint`. Suggest `runevault token issue --user <name> --role member`. |
+| `vault_permission`    | Token lacks role. Show `hint`. Re-issue with correct role. |
+| `vault_network`       | Endpoint unreachable. Show `hint`. User should verify TCP connectivity (e.g., `nc -vz host port`). |
+| `vault_dns`           | Hostname doesn't resolve. Show `hint`. Likely a typo in endpoint. |
+| `vault_timeout`       | Vault didn't respond in time. Could be network or server overload — show `hint`. |
+| `vault_manifest`      | Vault connected but no manifest for this token. Token probably not provisioned for an agent. |
+| `vault_rate_limit`    | Token throttled. Show `hint`. Wait and retry. |
+| `vault_bad_endpoint`  | Endpoint syntax invalid. Show `hint`. Re-run `/rune:configure` with corrected format. |
+| `embedder_unreachable`| `runed` daemon not running. Show `hint`. User should run `runed start`. |
+| `envector_init` / `envector_index` | Envector side. Show `hint` + `detail`. |
+| `key_save` / `local_io` | Local FS issue. Show `hint` + suggest checking `~/.rune/` permissions. |
+| anything else (incl. `unknown`) | Show `kind`, `hint`, and `detail`. Suggest user share the detail with their Vault admin. |
+
+The agent-facing output for a fast-fail case should be **one block**: the
+matched explanation above + the hint string verbatim + a single next-action
+suggestion. Do NOT loop on `reload_pipelines`. Do NOT call shell tools to
+verify (`openssl`, `nc`, etc.) unless the user explicitly asks — the
+classifier has already done that work server-side.
+
+**If `state == "active"` (success path):** proceed to Step 6.
 
 The diagnostics result has these sections (only render the ones with
-meaningful content):
+meaningful content) — used for the success summary in Step 6:
 
 - `state` + `dormant_reason` + `dormant_since`
 - `vault.healthy` + `vault.endpoint` (+ `vault.error` if unhealthy)
+- `vault.last_boot_error` (only when state != active — see fast-fail above)
 - `keys.enc_key_loaded` + `keys.key_id` + `keys.agent_dek_loaded`
 - `pipelines.scribe_initialized` + `pipelines.retriever_initialized`
 - `embedding.model` + `embedding.mode` + `embedding.vector_dim` (+ `embedding.daemon_version` if present)
