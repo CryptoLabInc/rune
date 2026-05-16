@@ -64,3 +64,36 @@ Use checkmarks for healthy items, X marks for issues.
 - `user_deactivated`: "Manually deactivated by user via `/rune:deactivate`."
 - Other/unknown: show raw reason string with "Run `/rune:activate` to retry."
 
+**Boot Error Display** (`vault.last_boot_error`): When `state != "active"` AND
+`diagnostics.vault.last_boot_error` is set, render its `hint` field
+prominently in the **Recommendations** section. The boot loop has already
+classified the root cause — relay it verbatim instead of guessing.
+
+Render shape (one-block, no extra investigation):
+
+```
+Recommendations:
+  Boot failure (<kind>):
+    <hint>
+
+  Details: <detail>  (only when the hint is generic / kind is "unknown")
+  Attempts: <attempts>  (only when > 1, to show retry was tried)
+```
+
+Examples:
+- `kind=vault_tls_handshake` → "CA cert at … does not verify the server cert.
+  The CA was likely regenerated on the server side. Re-fetch from your
+  Vault admin and replace `~/.rune/certs/ca.pem`."
+- `kind=vault_auth` → "Vault rejected the token. Re-issue with
+  `runevault token issue --user <name> --role member`."
+- `kind=vault_network` → "Vault endpoint `<endpoint>` is not reachable.
+  Verify the host/port and your network/firewall."
+- `kind=embedder_unreachable` → "Embedder daemon (`runed`) is not running on
+  its UDS socket. Start it with `runed start`."
+- `kind=unknown` → show both `hint` and `detail` and suggest sharing with admin.
+
+DO NOT call shell tools (`openssl`, `nc`, `curl`, etc.) to "verify" the
+classifier's verdict. The classifier already inspected the underlying gRPC /
+TLS / DNS error; manual probing only adds turns + cost without changing the
+recommendation. The user can decide to manually verify later if they want.
+
