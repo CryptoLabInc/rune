@@ -1,7 +1,8 @@
 # Rune Plugin Dependencies
 
 # FHE Encryption SDK
-pyenvector>=1.2.0
+# Pinned for the envector-latency-v1.4.3 benchmark — do not bump.
+pyenvector==1.4.3
 
 # MCP Server Framework
 fastmcp>=2.2.0
