@@ -129,8 +129,8 @@ type Client interface {
 }
 
 type ClientOpts struct {
-	CACertPath string // path to PEM; empty = system CA bundle
-	TLSDisable bool
+	CACertPath        string // path to PEM; empty = system CA bundle
+	TLSDisable        bool
 	UnaryInterceptors []grpc.UnaryClientInterceptor
 }
 

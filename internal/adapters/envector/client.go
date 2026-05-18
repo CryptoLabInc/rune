@@ -55,15 +55,15 @@ type Client interface {
 }
 
 type ClientConfig struct {
-	Endpoint  string            // enVector server address
-	APIKey    string            // enVector access token (from Vault)
-	KeyPath   string            // local EncKey directory (e.g. ~/.rune/keys/<key_id>/)
-	KeyID     string            // key bundle identifier
-	KeyDim    int               // FHE slot dimension (e.g. 1024)
-	Preset    envector.Preset   // FHE param preset (zero = PresetIP0)
-	EvalMode  envector.EvalMode // FHE eval strategy (zero = EvalModeRMP)
-	IndexName string            // server-side index name
-	Insecure  bool              // true for local dev (no TLS)
+	Endpoint          string            // enVector server address
+	APIKey            string            // enVector access token (from Vault)
+	KeyPath           string            // local EncKey directory (e.g. ~/.rune/keys/<key_id>/)
+	KeyID             string            // key bundle identifier
+	KeyDim            int               // FHE slot dimension (e.g. 1024)
+	Preset            envector.Preset   // FHE param preset (zero = PresetIP0)
+	EvalMode          envector.EvalMode // FHE eval strategy (zero = EvalModeRMP)
+	IndexName         string            // server-side index name
+	Insecure          bool              // true for local dev (no TLS)
 	UnaryInterceptors []grpc.UnaryClientInterceptor
 }
 
