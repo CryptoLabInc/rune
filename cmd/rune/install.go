@@ -1,0 +1,80 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+
+	"github.com/envector/rune-go/internal/bootstrap"
+)
+
+func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	force := fs.Bool("force", false, "re-download even if binaries are already present")
+	jsonOut := fs.Bool("json", false, "emit JSON event per line to stdout instead of text progress to stderr")
+	manifest := fs.String("manifest-url", manifestURL, "override the build-baked manifest URL")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	if *manifest == "" {
+		fmt.Fprintln(stderr, "rune install: no manifest URL configured (set --manifest-url or RUNE_MANIFEST)")
+		return 2
+	}
+
+	opts := bootstrap.InstallOptions{
+		ManifestURL: *manifest,
+		Force:       *force,
+	}
+
+	enc := json.NewEncoder(stdout)
+	if *jsonOut {
+		opts.Log = func(format string, a ...any) {
+			_ = enc.Encode(jsonEvent{Event: "log", Message: fmt.Sprintf(format, a...)})
+		}
+		opts.Progress = func(downloaded, total int64) {
+			_ = enc.Encode(jsonEvent{Event: "progress", Downloaded: downloaded, Total: total})
+		}
+	} else {
+		opts.Log = func(format string, a ...any) {
+			fmt.Fprintf(stderr, format+"\n", a...)
+		}
+	}
+
+	result, err := bootstrap.Install(ctx, opts)
+	if *jsonOut {
+		ev := jsonEvent{Event: "summary"}
+		ev.Result = result
+		if err != nil {
+			ev.Error = err.Error()
+		}
+
+		_ = enc.Encode(ev)
+	} else {
+		if err != nil {
+			fmt.Fprintf(stderr, "install failed: %v\n", err)
+		} else {
+			fmt.Fprintln(stderr, "ready.")
+			fmt.Fprintln(stderr, "next:")
+			fmt.Fprintln(stderr, "  1. in Claude, run /rune:configure to set up Vault credentials")
+			fmt.Fprintln(stderr, "  2. then /rune:activate")
+		}
+	}
+
+	if err != nil {
+		return 1
+	}
+	return 0
+}
+
+type jsonEvent struct {
+	Event      string            `json:"event"`
+	Message    string            `json:"message,omitempty"`
+	Downloaded int64             `json:"downloaded,omitempty"`
+	Total      int64             `json:"total,omitempty"`
+	Result     *bootstrap.Result `json:"result,omitempty"`
+	Error      string            `json:"error,omitempty"`
+}
