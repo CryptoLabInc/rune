@@ -21,8 +21,6 @@ import (
 	"math"
 	"time"
 
-	sdk "github.com/CryptoLabInc/envector-go-sdk"
-
 	"github.com/envector/rune-go/internal/adapters/embedder"
 	"github.com/envector/rune-go/internal/adapters/envector"
 	"github.com/envector/rune-go/internal/adapters/logio"
@@ -148,7 +146,7 @@ func (s *CaptureService) Handle(ctx context.Context, req *domain.CaptureRequest)
 		Metadata:  envelopes,
 		RequestID: newInsertRequestID(),
 	}
-	insertResult, err := s.insertWithRecovery(ctx, insertReq)
+	insertResult, err := insertWithRecovery(ctx, s.State, s.Envector, insertReq)
 	if err != nil {
 		return nil, fmt.Errorf("envector insert: %w", err)
 	}
@@ -274,7 +272,7 @@ func (s *CaptureService) runNoveltyCheck(ctx context.Context, embeddingText stri
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil
 	}
 
-	blobs, err := s.Envector.Score(ctx, vec)
+	blobs, err := scoreWithRecovery(ctx, s.State, s.Envector, vec)
 	if err != nil || len(blobs) == 0 {
 		slog.Warn("novelty check: score failed (non-fatal)", "err", err)
 		return &domain.NoveltyInfo{Score: 1.0, Class: "novel"}, nil, nil
@@ -346,45 +344,6 @@ func pickEmbedText(r *domain.DecisionRecord) string {
 		return r.ReusableInsight
 	}
 	return r.Payload.Text // fallback
-}
-
-// We cannot easily rely on tranport interceptor since Insert is streaming gRPC
-func (s *CaptureService) insertWithRecovery(ctx context.Context, req envector.InsertRequest) (*envector.InsertResult, error) {
-  // Send Insert request - first trial
-	res, err := s.Envector.Insert(ctx, req)
-	if err == nil {
-		return res, nil
-	}
-	if errors.Is(err, sdk.ErrAlreadyExists) {
-		slog.Info("capture: insert request_id already committed (idempotent retry)",
-			"request_id", req.RequestID)
-		return &envector.InsertResult{}, nil
-	}
-	if s.State == nil || !isInsertRetryable(err) {
-		return nil, err
-	}
-	
-  // On a retryable failure, wait for retrigger and retry once
-	if !s.State.WaitForActive(ctx, lifecycle.RecoverTimeout) {
-		return nil, err
-	}
-
-	res, err = s.Envector.Insert(ctx, req)
-	if err == nil {
-		return res, nil
-	}
-	if errors.Is(err, sdk.ErrAlreadyExists) {
-		slog.Info("capture: insert request_id already committed on retry",
-			"request_id", req.RequestID)
-		return &envector.InsertResult{}, nil
-	}
-
-	return nil, err
-}
-
-func isInsertRetryable(err error) bool {
-	var e *envector.Error
-	return errors.As(err, &e) && e.Retryable
 }
 
 // Identical format with enVector RequestHeader.Id

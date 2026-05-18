@@ -185,7 +185,7 @@ func (s *RecallService) searchWithExpansions(
 // as to where the pipeline shed rows.
 func (s *RecallService) searchSingle(ctx context.Context, vec []float32, topk int) ([]domain.SearchHit, error) {
 	scoreCtx, cancelScore := context.WithTimeout(ctx, envectorScoreTimeout)
-	blobs, err := s.Envector.Score(scoreCtx, vec)
+	blobs, err := scoreWithRecovery(scoreCtx, s.State, s.Envector, vec)
 	cancelScore()
 	if err != nil {
 		slog.Warn("recall: envector score failed", "err", err)
