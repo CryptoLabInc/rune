@@ -313,6 +313,52 @@ func TestInfo_RetriesErrorAfterCooldown(t *testing.T) {
 	}
 }
 
+func TestHealth_UptimeRegressionInvalidatesInfoCache(t *testing.T) {
+	fake, c := startFakeRuned(t)
+
+	// Daemon A serves: model "alpha", uptime 100
+	var uptime int64 = 100
+	var modelID = "alpha"
+	fake.infoFn = func(*runedv1.InfoRequest) (*runedv1.InfoResponse, error) {
+		return &runedv1.InfoResponse{ModelIdentity: modelID, VectorDim: 1024, MaxBatchSize: 4}, nil
+	}
+	fake.healthFn = func(*runedv1.HealthRequest) (*runedv1.HealthResponse, error) {
+		return &runedv1.HealthResponse{
+			Status:        runedv1.HealthResponse_STATUS_OK,
+			UptimeSeconds: atomic.LoadInt64(&uptime),
+		}, nil
+	}
+
+	// Prime cache + uptime tracker against daemon A
+	if snap, err := c.Info(context.Background()); err != nil || snap.ModelIdentity != "alpha" {
+		t.Fatalf("priming Info: snap=%+v err=%v", snap, err)
+	}
+	if _, err := c.Health(context.Background()); err != nil {
+		t.Fatalf("priming Health: %v", err)
+	}
+
+	// Daemon B comes up: uptime resets to 5, model changes to "beta"
+	atomic.StoreInt64(&uptime, 5)
+	modelID = "beta"
+
+	// Health observes the uptime regression: invalidates cache
+	if _, err := c.Health(context.Background()); err != nil {
+		t.Fatalf("post-restart Health: %v", err)
+	}
+
+	// Info re-fetches and reflects daemon B
+	snap, err := c.Info(context.Background())
+	if err != nil {
+		t.Fatalf("post-restart Info: %v", err)
+	}
+	if snap.ModelIdentity != "beta" {
+		t.Errorf("ModelIdentity: got %q, want beta (cache should have been invalidated)", snap.ModelIdentity)
+	}
+	if got := atomic.LoadInt32(&fake.infoCalls); got != 2 {
+		t.Errorf("Info RPC calls: got %d, want 2 (initial + post-invalidation)", got)
+	}
+}
+
 func TestHealth_StatusEnumMapping(t *testing.T) {
 	cases := []struct {
 		grpcStatus runedv1.HealthResponse_Status
