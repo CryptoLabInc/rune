@@ -71,3 +71,12 @@ func (ic *infoCache) Snapshot() InfoSnapshot {
 	defer ic.mu.Unlock()
 	return ic.snap
 }
+
+func (ic *infoCache) invalidate() {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	ic.loaded = false
+	ic.snap = InfoSnapshot{}
+	ic.lastErr = nil
+	ic.lastAttempt = time.Time{}
+}

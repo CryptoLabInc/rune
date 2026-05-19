@@ -15,6 +15,7 @@ package embedder
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	runedv1 "github.com/CryptoLabInc/runed/gen/runed/v1"
@@ -56,10 +57,12 @@ type Client interface {
 }
 
 type client struct {
-	sockPath string
-	conn     *grpc.ClientConn
-	pb       runedv1.RunedServiceClient
-	info     *infoCache
+	sockPath   string
+	conn       *grpc.ClientConn
+	pb         runedv1.RunedServiceClient
+	info       *infoCache
+	lastUptime atomic.Int64 // the most recent Health uptimes seconds.
+	// (new < previous) indicates the daemon restarted
 }
 
 type Opts struct {
@@ -176,9 +179,17 @@ func (c *client) Health(ctx context.Context) (HealthSnapshot, error) {
 	if err != nil {
 		return HealthSnapshot{}, MapGRPCError(err)
 	}
+
+	// Detect daemon restart and invalidate if restarted
+	newUptime := resp.GetUptimeSeconds()
+	if prev := c.lastUptime.Load(); prev > 0 && newUptime < prev {
+		c.info.invalidate()
+	}
+	c.lastUptime.Store(newUptime)
+
 	return HealthSnapshot{
 		Status:        statusName(resp.GetStatus()),
-		UptimeSeconds: resp.GetUptimeSeconds(),
+		UptimeSeconds: newUptime,
 		TotalRequests: resp.GetTotalRequests(),
 	}, nil
 }
