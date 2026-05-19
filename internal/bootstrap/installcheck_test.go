@@ -38,7 +38,7 @@ func writeFakeBinary(t *testing.T, path string) {
 }
 
 // findCheck returns the named check from r, or fails the test if missing.
-func findCheck(t *testing.T, r *DiagnosisResult, name string) DiagnosisCheck {
+func findCheck(t *testing.T, r *InstallChecks, name string) InstallCheck {
 	t.Helper()
 	for _, c := range r.Checks {
 		if c.Name == name {
@@ -46,10 +46,10 @@ func findCheck(t *testing.T, r *DiagnosisResult, name string) DiagnosisCheck {
 		}
 	}
 	t.Fatalf("check %q not found in result: %+v", name, r)
-	return DiagnosisCheck{}
+	return InstallCheck{}
 }
 
-func TestDiagnosis_HealthyInstall(t *testing.T) {
+func TestInstallChecks_HealthyInstall(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://vault.example:50051", "evt_test")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
@@ -63,7 +63,7 @@ func TestDiagnosis_HealthyInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	if !r.OK {
 		t.Errorf("OK should be true on healthy install; got %+v", r)
 	}
@@ -74,9 +74,9 @@ func TestDiagnosis_HealthyInstall(t *testing.T) {
 	}
 }
 
-func TestDiagnosis_MissingConfig(t *testing.T) {
+func TestInstallChecks_MissingConfig(t *testing.T) {
 	setRealms(t)
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	cfg := findCheck(t, r, CheckRuneConfig)
 	if cfg.Status != StatusFail {
 		t.Errorf("rune_config should fail when missing; got %+v", cfg)
@@ -86,7 +86,7 @@ func TestDiagnosis_MissingConfig(t *testing.T) {
 	}
 }
 
-func TestDiagnosis_CorruptConfig(t *testing.T) {
+func TestInstallChecks_CorruptConfig(t *testing.T) {
 	rune, _ := setRealms(t)
 	if err := os.MkdirAll(rune, 0o700); err != nil {
 		t.Fatal(err)
@@ -94,28 +94,28 @@ func TestDiagnosis_CorruptConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rune, "config.json"), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	cfg := findCheck(t, r, CheckRuneConfig)
 	if cfg.Status != StatusFail {
 		t.Errorf("rune_config should fail on parse error; got %+v", cfg)
 	}
 }
 
-func TestDiagnosis_MissingVaultFields(t *testing.T) {
+func TestInstallChecks_MissingVaultFields(t *testing.T) {
 	rune, _ := setRealms(t)
 	writeConfig(t, rune, "", "") // both empty
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	creds := findCheck(t, r, CheckVaultCreds)
 	if creds.Status != StatusFail {
 		t.Errorf("vault_creds should fail on empty fields; got %+v", creds)
 	}
 }
 
-func TestDiagnosis_MissingRunedBinary(t *testing.T) {
+func TestInstallChecks_MissingRunedBinary(t *testing.T) {
 	rune, _ := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	// No runed binary written.
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	bin := findCheck(t, r, CheckRunedBinary)
 	if bin.Status != StatusFail {
 		t.Errorf("runed_binary should fail when missing; got %+v", bin)
@@ -125,7 +125,7 @@ func TestDiagnosis_MissingRunedBinary(t *testing.T) {
 	}
 }
 
-func TestDiagnosis_NonExecutableBinary(t *testing.T) {
+func TestInstallChecks_NonExecutableBinary(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	binPath := filepath.Join(runed, "bin", "runed")
@@ -137,14 +137,14 @@ func TestDiagnosis_NonExecutableBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	bin := findCheck(t, r, CheckRunedBinary)
 	if bin.Status != StatusFail {
 		t.Errorf("runed_binary should fail when not executable; got %+v", bin)
 	}
 }
 
-func TestDiagnosis_PartialModelFile(t *testing.T) {
+func TestInstallChecks_PartialModelFile(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
@@ -157,14 +157,14 @@ func TestDiagnosis_PartialModelFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	mc := findCheck(t, r, CheckModelFile)
 	if mc.Status != StatusFail {
 		t.Errorf("model_file should fail on partial file; got %+v", mc)
 	}
 }
 
-func TestDiagnosis_NoModelYet_Warns(t *testing.T) {
+func TestInstallChecks_NoModelYet_Warns(t *testing.T) {
 	// Pre-first-activate state: binaries present but no model on disk.
 	// This is NOT a failure — runed will populate the model on first
 	// startup. Should warn.
@@ -176,7 +176,7 @@ func TestDiagnosis_NoModelYet_Warns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	mc := findCheck(t, r, CheckModelFile)
 	if mc.Status != StatusWarn {
 		t.Errorf("empty models dir should warn (not fail); got %+v", mc)
@@ -187,21 +187,21 @@ func TestDiagnosis_NoModelYet_Warns(t *testing.T) {
 	}
 }
 
-func TestDiagnosis_DaemonNotRunning_Warns(t *testing.T) {
+func TestInstallChecks_DaemonNotRunning_Warns(t *testing.T) {
 	// No socket at the default path — expected pre-activate state.
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
 	writeFakeBinary(t, filepath.Join(runed, "bin", "llama-server"))
 
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	sock := findCheck(t, r, CheckSocket)
 	if sock.Status != StatusWarn {
 		t.Errorf("daemon_socket should warn when not running; got %+v", sock)
 	}
 }
 
-func TestDiagnosis_DaemonReachable_OK(t *testing.T) {
+func TestInstallChecks_DaemonReachable_OK(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
@@ -227,14 +227,14 @@ func TestDiagnosis_DaemonReachable_OK(t *testing.T) {
 		}
 	}()
 
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	sock := findCheck(t, r, CheckSocket)
 	if sock.Status != StatusOK {
 		t.Errorf("daemon_socket should be ok when reachable; got %+v", sock)
 	}
 }
 
-func TestDiagnosis_SpawnLockPresent_Warns(t *testing.T) {
+func TestInstallChecks_SpawnLockPresent_Warns(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
@@ -246,7 +246,7 @@ func TestDiagnosis_SpawnLockPresent_Warns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := RunDiagnosis(context.Background())
+	r := RunInstallChecks(context.Background())
 	lock := findCheck(t, r, CheckSpawnLock)
 	if lock.Status != StatusWarn {
 		t.Errorf("spawn_lock should warn when present; got %+v", lock)

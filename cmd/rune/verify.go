@@ -10,20 +10,20 @@ import (
 	"github.com/envector/rune-go/internal/bootstrap"
 )
 
-func runDiagnosis(ctx context.Context, args []string, stdout io.Writer) int {
-	fs := flag.NewFlagSet("diagnosis", flag.ContinueOnError)
+func runVerify(ctx context.Context, args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 	jsonOut := fs.Bool("json", false, "emit JSON instead of human-readable text")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	result := bootstrap.RunDiagnosis(ctx)
+	result := bootstrap.RunInstallChecks(ctx)
 
 	if *jsonOut {
 		_ = json.NewEncoder(stdout).Encode(result)
 	} else {
-		renderDiagnosisText(stdout, result)
+		renderVerifyText(stdout, result)
 	}
 
 	if !result.OK {
@@ -32,7 +32,7 @@ func runDiagnosis(ctx context.Context, args []string, stdout io.Writer) int {
 	return 0
 }
 
-func renderDiagnosisText(w io.Writer, r *bootstrap.DiagnosisResult) {
+func renderVerifyText(w io.Writer, r *bootstrap.InstallChecks) {
 	for _, c := range r.Checks {
 		fmt.Fprintf(w, "%s %s\n", statusSymbol(c.Status), c.Name)
 		if c.Detail != "" {

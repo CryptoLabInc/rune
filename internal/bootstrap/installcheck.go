@@ -12,16 +12,16 @@ import (
 	"time"
 )
 
-type DiagnosisCheck struct {
+type InstallCheck struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"`             // "ok" | "warn" | "fail"
 	Detail  string `json:"detail,omitempty"`
 	FixHint string `json:"fix_hint,omitempty"`
 }
 
-type DiagnosisResult struct {
+type InstallChecks struct {
 	OK     bool             `json:"ok"`
-	Checks []DiagnosisCheck `json:"checks"`
+	Checks []InstallCheck `json:"checks"`
 }
 
 const (
@@ -54,12 +54,12 @@ type runeEmbedderBlock struct {
 	SocketPath string `json:"socket_path,omitempty"`
 }
 
-func RunDiagnosis(ctx context.Context) *DiagnosisResult {
+func RunInstallChecks(ctx context.Context) *InstallChecks {
 	paths, err := Resolve()
 	if err != nil {
-		return &DiagnosisResult{
+		return &InstallChecks{
 			OK: false,
-			Checks: []DiagnosisCheck{{
+			Checks: []InstallCheck{{
 				Name:    "path_resolve",
 				Status:  StatusFail,
 				Detail:  err.Error(),
@@ -69,7 +69,7 @@ func RunDiagnosis(ctx context.Context) *DiagnosisResult {
 	}
 
 	cfg, cfgChecks := loadRuneConfigChecks(paths)
-	checks := append([]DiagnosisCheck{}, cfgChecks...)
+	checks := append([]InstallCheck{}, cfgChecks...)
 	checks = append(checks, vaultCredsCheck(cfg))
 	checks = append(checks, executableCheck(CheckRunedBinary, paths.RunedBinary, "run `rune install` to fetch the runed bundle"))
 	checks = append(checks, executableCheck(CheckLlamaServer, paths.LlamaServer, "run `rune install` to fetch the runed bundle"))
@@ -77,7 +77,7 @@ func RunDiagnosis(ctx context.Context) *DiagnosisResult {
 	checks = append(checks, socketCheck(paths.RunedSocket, cfg))
 	checks = append(checks, spawnLockCheck(paths.RunedLock))
 
-	r := &DiagnosisResult{OK: true, Checks: checks}
+	r := &InstallChecks{OK: true, Checks: checks}
 	for _, c := range r.Checks {
 		if c.Status == StatusFail {
 			r.OK = false
@@ -86,11 +86,11 @@ func RunDiagnosis(ctx context.Context) *DiagnosisResult {
 	return r
 }
 
-func loadRuneConfigChecks(paths *Paths) (*runeMCPConfig, []DiagnosisCheck) {
+func loadRuneConfigChecks(paths *Paths) (*runeMCPConfig, []InstallCheck) {
 	data, err := os.ReadFile(paths.RuneConfig)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, []DiagnosisCheck{{
+			return nil, []InstallCheck{{
 				Name:    CheckRuneConfig,
 				Status:  StatusFail,
 				Detail:  fmt.Sprintf("%s does not exist", paths.RuneConfig),
@@ -98,7 +98,7 @@ func loadRuneConfigChecks(paths *Paths) (*runeMCPConfig, []DiagnosisCheck) {
 			}}
 		}
 
-		return nil, []DiagnosisCheck{{
+		return nil, []InstallCheck{{
 			Name:    CheckRuneConfig,
 			Status:  StatusFail,
 			Detail:  fmt.Sprintf("read %s: %v", paths.RuneConfig, err),
@@ -108,7 +108,7 @@ func loadRuneConfigChecks(paths *Paths) (*runeMCPConfig, []DiagnosisCheck) {
 
 	var cfg runeMCPConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, []DiagnosisCheck{{
+		return nil, []InstallCheck{{
 			Name:    CheckRuneConfig,
 			Status:  StatusFail,
 			Detail:  fmt.Sprintf("parse %s: %v", paths.RuneConfig, err),
@@ -116,16 +116,16 @@ func loadRuneConfigChecks(paths *Paths) (*runeMCPConfig, []DiagnosisCheck) {
 		}}
 	}
 
-	return &cfg, []DiagnosisCheck{{
+	return &cfg, []InstallCheck{{
 		Name:   CheckRuneConfig,
 		Status: StatusOK,
 		Detail: paths.RuneConfig,
 	}}
 }
 
-func vaultCredsCheck(cfg *runeMCPConfig) DiagnosisCheck {
+func vaultCredsCheck(cfg *runeMCPConfig) InstallCheck {
 	if cfg == nil {
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    CheckVaultCreds,
 			Status:  StatusFail,
 			Detail:  "config file unreadable",
@@ -141,7 +141,7 @@ func vaultCredsCheck(cfg *runeMCPConfig) DiagnosisCheck {
 		missing = append(missing, "vault.token")
 	}
 	if len(missing) > 0 {
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    CheckVaultCreds,
 			Status:  StatusFail,
 			Detail:  fmt.Sprintf("missing: %s", strings.Join(missing, ", ")),
@@ -149,18 +149,18 @@ func vaultCredsCheck(cfg *runeMCPConfig) DiagnosisCheck {
 		}
 	}
 
-	return DiagnosisCheck{
+	return InstallCheck{
 		Name:   CheckVaultCreds,
 		Status: StatusOK,
 		Detail: cfg.Vault.Endpoint,
 	}
 }
 
-func executableCheck(name, path, fixHint string) DiagnosisCheck {
+func executableCheck(name, path, fixHint string) InstallCheck {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DiagnosisCheck{
+			return InstallCheck{
 				Name:    name,
 				Status:  StatusFail,
 				Detail:  fmt.Sprintf("%s does not exist", path),
@@ -168,7 +168,7 @@ func executableCheck(name, path, fixHint string) DiagnosisCheck {
 			}
 		}
 
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    name,
 			Status:  StatusFail,
 			Detail:  fmt.Sprintf("stat %s: %v", path, err),
@@ -177,7 +177,7 @@ func executableCheck(name, path, fixHint string) DiagnosisCheck {
 	}
 
 	if info.IsDir() {
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    name,
 			Status:  StatusFail,
 			Detail:  fmt.Sprintf("%s is a directory, expected file", path),
@@ -186,7 +186,7 @@ func executableCheck(name, path, fixHint string) DiagnosisCheck {
 	}
 
 	if info.Mode()&0o111 == 0 {
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    name,
 			Status:  StatusFail,
 			Detail:  fmt.Sprintf("%s exists but is not executable (mode=%o)", path, info.Mode().Perm()),
@@ -194,7 +194,7 @@ func executableCheck(name, path, fixHint string) DiagnosisCheck {
 		}
 	}
 
-	return DiagnosisCheck{
+	return InstallCheck{
 		Name:   name,
 		Status: StatusOK,
 		Detail: fmt.Sprintf("%s (%.1f MB)", path, float64(info.Size())/(1024*1024)),
@@ -203,11 +203,11 @@ func executableCheck(name, path, fixHint string) DiagnosisCheck {
 
 const minModelSize int64 = 100 * 1024 * 1024 // Qwen3-Embedding-0.6B: ~340 MB
 
-func modelFileCheck(modelsDir string) DiagnosisCheck {
+func modelFileCheck(modelsDir string) InstallCheck {
 	entries, err := os.ReadDir(modelsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DiagnosisCheck{
+			return InstallCheck{
 				Name:    CheckModelFile,
 				Status:  StatusWarn,
 				Detail:  fmt.Sprintf("%s does not exist", modelsDir),
@@ -215,7 +215,7 @@ func modelFileCheck(modelsDir string) DiagnosisCheck {
 			}
 		}
 
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    CheckModelFile,
 			Status:  StatusFail,
 			Detail:  fmt.Sprintf("read %s: %v", modelsDir, err),
@@ -235,7 +235,7 @@ func modelFileCheck(modelsDir string) DiagnosisCheck {
 		}
 
 		if info.Size() < minModelSize {
-			return DiagnosisCheck{
+			return InstallCheck{
 				Name:    CheckModelFile,
 				Status:  StatusFail,
 				Detail:  fmt.Sprintf("%s is only %d bytes (looks partial)", filepath.Join(modelsDir, e.Name()), info.Size()),
@@ -246,7 +246,7 @@ func modelFileCheck(modelsDir string) DiagnosisCheck {
 	}
 
 	if len(found) == 0 {
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    CheckModelFile,
 			Status:  StatusWarn,
 			Detail:  fmt.Sprintf("no *.gguf in %s", modelsDir),
@@ -254,14 +254,14 @@ func modelFileCheck(modelsDir string) DiagnosisCheck {
 		}
 	}
 
-	return DiagnosisCheck{
+	return InstallCheck{
 		Name:   CheckModelFile,
 		Status: StatusOK,
 		Detail: strings.Join(found, ", "),
 	}
 }
 
-func socketCheck(defaultSocket string, cfg *runeMCPConfig) DiagnosisCheck {
+func socketCheck(defaultSocket string, cfg *runeMCPConfig) InstallCheck {
 	socket := defaultSocket
 	if cfg != nil && cfg.Embedder != nil && cfg.Embedder.SocketPath != "" {
 		socket = cfg.Embedder.SocketPath
@@ -269,7 +269,7 @@ func socketCheck(defaultSocket string, cfg *runeMCPConfig) DiagnosisCheck {
 
 	conn, err := net.DialTimeout("unix", socket, 200*time.Millisecond)
 	if err != nil {
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    CheckSocket,
 			Status:  StatusWarn,
 			Detail:  fmt.Sprintf("not reachable at %s", socket),
@@ -278,24 +278,24 @@ func socketCheck(defaultSocket string, cfg *runeMCPConfig) DiagnosisCheck {
 	}
 	_ = conn.Close()
 
-	return DiagnosisCheck{
+	return InstallCheck{
 		Name:   CheckSocket,
 		Status: StatusOK,
 		Detail: socket,
 	}
 }
 
-func spawnLockCheck(lockPath string) DiagnosisCheck {
+func spawnLockCheck(lockPath string) InstallCheck {
 	if _, err := os.Stat(lockPath); err != nil {
 		if os.IsNotExist(err) {
-			return DiagnosisCheck{
+			return InstallCheck{
 				Name:   CheckSpawnLock,
 				Status: StatusOK,
 				Detail: "absent",
 			}
 		}
 
-		return DiagnosisCheck{
+		return InstallCheck{
 			Name:    CheckSpawnLock,
 			Status:  StatusWarn,
 			Detail:  fmt.Sprintf("stat %s: %v", lockPath, err),
@@ -303,7 +303,7 @@ func spawnLockCheck(lockPath string) DiagnosisCheck {
 		}
 	}
 
-	return DiagnosisCheck{
+	return InstallCheck{
 		Name:    CheckSpawnLock,
 		Status:  StatusWarn,
 		Detail:  fmt.Sprintf("%s exists", lockPath),

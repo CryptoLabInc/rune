@@ -205,7 +205,7 @@ func TestRegister_ReadOnlyToolsBypassGate(t *testing.T) {
 			// `LifecycleService.Diagnostics` for the read path.
 			name:        "diagnostics",
 			args:        nil,
-			mustContain: []string{`"environment"`, `"vault"`, `"keys"`, `"embedding"`},
+			mustContain: []string{`"environment"`, `"install"`, `"vault"`, `"keys"`, `"embedding"`},
 			mustNotContain: []string{
 				"PIPELINE_NOT_READY",
 			},

@@ -6,7 +6,7 @@
 //	    GitHub Releases, extract it into ~/.runed/bin/
 //      Runed handles its own model on startup
 //
-//	rune diagnosis [--json]
+//	rune verify [--json]
 //	    Read-only health checks
 //
 //	rune version
@@ -42,8 +42,8 @@ func main() {
 	switch cmd {
 	case "install":
 		os.Exit(runInstall(ctx, args, os.Stdout, os.Stderr))
-	case "diagnosis":
-		os.Exit(runDiagnosis(ctx, args, os.Stdout))
+	case "verify":
+		os.Exit(runVerify(ctx, args, os.Stdout))
 	case "version":
 		os.Exit(runVersion(os.Stdout))
 	case "-h", "--help", "help":
@@ -63,7 +63,7 @@ Usage:
   rune install [--force] [--json] [--manifest-url URL]
         download the runed bundle from GitHub releases into ~/.runed/bin/
         (next: /rune:configure + /rune:activate to finish setup)
-  rune diagnosis [--json]
+  rune verify [--json]
         run health checks
   rune version
         print version and manifest URL

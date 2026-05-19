@@ -44,16 +44,16 @@ func TestRunVersion_EmptyManifest(t *testing.T) {
 	}
 }
 
-func TestRenderDiagnosisText_HappyPath(t *testing.T) {
-	r := &bootstrap.DiagnosisResult{
+func TestRenderVerifyText_HappyPath(t *testing.T) {
+	r := &bootstrap.InstallChecks{
 		OK: true,
-		Checks: []bootstrap.DiagnosisCheck{
+		Checks: []bootstrap.InstallCheck{
 			{Name: "rune_config", Status: bootstrap.StatusOK, Detail: "/path"},
 			{Name: "model_file", Status: bootstrap.StatusWarn, Detail: "absent", FixHint: "runed will fetch"},
 		},
 	}
 	var buf bytes.Buffer
-	renderDiagnosisText(&buf, r)
+	renderVerifyText(&buf, r)
 	out := buf.String()
 	if !strings.Contains(out, "[ok]") || !strings.Contains(out, "[warn]") {
 		t.Errorf("symbols missing: %q", out)
@@ -63,15 +63,15 @@ func TestRenderDiagnosisText_HappyPath(t *testing.T) {
 	}
 }
 
-func TestRenderDiagnosisText_FailFlagsStatus(t *testing.T) {
-	r := &bootstrap.DiagnosisResult{
+func TestRenderVerifyText_FailFlagsStatus(t *testing.T) {
+	r := &bootstrap.InstallChecks{
 		OK: false,
-		Checks: []bootstrap.DiagnosisCheck{
+		Checks: []bootstrap.InstallCheck{
 			{Name: "vault_creds", Status: bootstrap.StatusFail, Detail: "missing token", FixHint: "/rune:configure"},
 		},
 	}
 	var buf bytes.Buffer
-	renderDiagnosisText(&buf, r)
+	renderVerifyText(&buf, r)
 	out := buf.String()
 	if !strings.Contains(out, "[fail]") {
 		t.Errorf("[fail] symbol missing: %q", out)
@@ -84,14 +84,14 @@ func TestRenderDiagnosisText_FailFlagsStatus(t *testing.T) {
 	}
 }
 
-func TestRunDiagnosis_ExitCodeOnFail(t *testing.T) {
+func TestRunVerify_ExitCodeOnFail(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("RUNE_HOME", filepath.Join(dir, "rune"))
 	t.Setenv("RUNED_HOME", filepath.Join(dir, "runed"))
 
 	// No config file
 	var buf bytes.Buffer
-	code := runDiagnosis(context.Background(), nil, &buf)
+	code := runVerify(context.Background(), nil, &buf)
 	if code != 1 {
 		t.Errorf("exit = %d, want 1 (fail)", code)
 	}
@@ -100,14 +100,14 @@ func TestRunDiagnosis_ExitCodeOnFail(t *testing.T) {
 	}
 }
 
-func TestRunDiagnosis_JSONValidity(t *testing.T) {
+func TestRunVerify_JSONValidity(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("RUNE_HOME", filepath.Join(dir, "rune"))
 	t.Setenv("RUNED_HOME", filepath.Join(dir, "runed"))
 
 	var buf bytes.Buffer
-	_ = runDiagnosis(context.Background(), []string{"--json"}, &buf)
-	var got bootstrap.DiagnosisResult
+	_ = runVerify(context.Background(), []string{"--json"}, &buf)
+	var got bootstrap.InstallChecks
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("output not valid JSON: %v\n%s", err, buf.String())
 	}

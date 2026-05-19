@@ -15,6 +15,7 @@ import (
 	"github.com/envector/rune-go/internal/adapters/envector"
 	"github.com/envector/rune-go/internal/adapters/logio"
 	"github.com/envector/rune-go/internal/adapters/vault"
+	"github.com/envector/rune-go/internal/bootstrap"
 	"github.com/envector/rune-go/internal/domain"
 	"github.com/envector/rune-go/internal/lifecycle"
 )
@@ -96,18 +97,19 @@ func (s *LifecycleService) VaultStatus(ctx context.Context) (*VaultStatusResult,
 // 2. rune_diagnostics — read-only. server.py:L540-684. Spec §2.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// DiagnosticsResult — aggregates 7 sub-sections.
+// DiagnosticsResult — aggregates 8 sub-sections (env + install + runtime ×6)
 type DiagnosticsResult struct {
-	OK            bool          `json:"ok"`
-	Environment   EnvInfo       `json:"environment"`
-	State         *string       `json:"state,omitempty"`
-	DormantReason *string       `json:"dormant_reason,omitempty"`
-	DormantSince  *string       `json:"dormant_since,omitempty"`
-	Vault         VaultInfo     `json:"vault"`
-	Keys          KeysInfo      `json:"keys"`
-	Pipelines     PipelinesInfo `json:"pipelines"`
-	Embedding     EmbeddingInfo `json:"embedding"`
-	Envector      EnvectorInfo  `json:"envector"`
+	OK            bool                        `json:"ok"`
+	Environment   EnvInfo                     `json:"environment"`
+	Install       *bootstrap.InstallChecks  `json:"install,omitempty"`
+	State         *string                     `json:"state,omitempty"`
+	DormantReason *string                     `json:"dormant_reason,omitempty"`
+	DormantSince  *string                     `json:"dormant_since,omitempty"`
+	Vault         VaultInfo                   `json:"vault"`
+	Keys          KeysInfo                    `json:"keys"`
+	Pipelines     PipelinesInfo               `json:"pipelines"`
+	Embedding     EmbeddingInfo               `json:"embedding"`
+	Envector      EnvectorInfo                `json:"envector"`
 }
 
 // EnvInfo — OS, Go runtime version, cwd.
@@ -166,7 +168,7 @@ type EnvectorInfo struct {
 // DiagnosticsTimeout — Python ENVECTOR_DIAGNOSIS_TIMEOUT (server.py:L633). 5s.
 const DiagnosticsTimeout = 5 * time.Second
 
-// Diagnostics collects all 7 sections + derives top-level OK.
+// Diagnostics collects all 8 sections + derives top-level OK.
 func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 	r := &DiagnosticsResult{OK: true}
 
@@ -177,6 +179,12 @@ func (s *LifecycleService) Diagnostics(ctx context.Context) *DiagnosticsResult {
 		Runtime: runtime.Version(),
 		CWD:     cwd,
 		GOArch:  runtime.GOARCH,
+	}
+
+  // Installation
+	r.Install = bootstrap.RunInstallChecks(ctx)
+	if r.Install != nil && !r.Install.OK {
+		r.OK = false
 	}
 
 	// Config state
