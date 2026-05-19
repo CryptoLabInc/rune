@@ -49,7 +49,8 @@ type Deps struct {
 	Lifecycle *service.LifecycleService
 }
 
-const staleClientCloseTime = 5 * time.Second
+// TODO: revert this to 5s once closeAfterInterval is replaced with refcount/sync.WaitGroup
+const staleClientCloseTime = 30 * time.Second
 
 func (d *Deps) InjectVault(client vault.Client) {
 	prev := d.Vault
