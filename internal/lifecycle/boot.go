@@ -185,8 +185,6 @@ var BootBackoffs = []time.Duration{
 // available end-to-end, the boot loop should source dim from there instead.
 const DefaultKeyDim = 1024
 
-const embedderBootHealthTimeout = 2 * time.Second
-
 // bootResult is the outcome of one bootOnce attempt.
 type bootResult int
 
@@ -267,9 +265,9 @@ func RunBootLoop(ctx context.Context, m *Manager, deps BootAdapterInjector) {
 //   - bootDormant on terminal config-side failures (caller should not retry)
 //   - bootRetry   on transient failures (caller backs off and retries)
 //
-// On any failure path, state + lastError are updated. On post-Vault-dial
-// failures the partially-constructed adapter conns are closed before return
-// to avoid gRPC connection leak.
+// On any failure path, state + lastError are updated.
+//
+// Adapter injection is per-component, not all-or-nothing
 func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootResult {
 	cfg, err := config.Load()
 	if err != nil {
@@ -374,6 +372,16 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 		return bootRetry
 	}
 
+	keyDir, err := keymanager.KeyDir(bundle.KeyID)
+	if err != nil {
+		m.lastError.Store(fmt.Sprintf("resolve key dir: %v", err))
+		slog.Error("boot: failed to resolve key dir", "err", err)
+		return bootRetry
+	}
+
+	deps.InjectVault(vaultClient)
+	deps.ApplyVaultBundle(bundle)
+
 	embedderClient, err := embedder.New(embedder.ResolveSocketPath(""), embedder.Opts{
 		UnaryInterceptors: []grpc.UnaryClientInterceptor{
 			recovery.UnaryRecovery("embedder", m),
@@ -382,30 +390,9 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 	if err != nil {
 		m.lastError.Store(fmt.Sprintf("embedder dial: %v", err))
 		slog.Error("boot: failed to connect to embedder", "err", err)
-		_ = vaultClient.Close()
 		return bootRetry
 	}
-
-	// Verify daemon is reachable
-	healthCtx, healthCancel := context.WithTimeout(ctx, embedderBootHealthTimeout)
-	_, herr := embedderClient.Health(healthCtx)
-	healthCancel()
-	if herr != nil {
-		m.lastError.Store(fmt.Sprintf("embedder health: %v", herr))
-		slog.Warn("boot: embedder health probe failed", "err", herr)
-		_ = vaultClient.Close()
-		_ = embedderClient.Close()
-		return bootRetry
-	}
-
-	keyDir, err := keymanager.KeyDir(bundle.KeyID)
-	if err != nil {
-		m.lastError.Store(fmt.Sprintf("resolve key dir: %v", err))
-		slog.Error("boot: failed to resolve key dir", "err", err)
-		_ = vaultClient.Close()
-		_ = embedderClient.Close()
-		return bootRetry
-	}
+	deps.InjectEmbedder(embedderClient)
 
 	envectorClient, err := envector.NewClient(envector.ClientConfig{
 		Endpoint:  bundle.EnvectorEndpoint,
@@ -421,24 +408,16 @@ func bootOnce(ctx context.Context, m *Manager, deps BootAdapterInjector) bootRes
 	if err != nil {
 		m.lastError.Store(fmt.Sprintf("envector new client: %v", err))
 		slog.Error("boot: failed to connect to envector", "err", err)
-		_ = vaultClient.Close()
-		_ = embedderClient.Close()
 		return bootRetry
 	}
 
 	if err := envectorClient.OpenIndex(ctx); err != nil {
 		m.lastError.Store(fmt.Sprintf("envector open index: %v", err))
 		slog.Error("boot: envector index activation failed", "err", err)
-		_ = vaultClient.Close()
-		_ = embedderClient.Close()
 		_ = envectorClient.Close()
 		return bootRetry
 	}
-
-	deps.InjectVault(vaultClient)
-	deps.InjectEmbedder(embedderClient)
 	deps.InjectEnvector(envectorClient)
-	deps.ApplyVaultBundle(bundle)
 
 	return bootActive
 }
