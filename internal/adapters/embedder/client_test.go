@@ -29,7 +29,7 @@ type fakeRuned struct {
 	infoFn       func(*runedv1.InfoRequest) (*runedv1.InfoResponse, error)
 	healthFn     func(*runedv1.HealthRequest) (*runedv1.HealthResponse, error)
 
-	infoCalls       int32 // atomic — Info should be invoked exactly once across the lifetime of an infoCache
+	infoCalls       int32 // atomic — counts Info RPC attempts (success cached, error retried after cooldown)
 	embedCalls      int32 // atomic — used by retry test to count attempts
 	embedBatchCalls int32 // atomic — used by batch-split test
 }
@@ -245,11 +245,14 @@ func TestInfo_CachesAcrossCalls(t *testing.T) {
 		}
 	}
 	if got := atomic.LoadInt32(&fake.infoCalls); got != 1 {
-		t.Errorf("Info RPC calls: got %d, want 1 (sync.Once cache)", got)
+		t.Errorf("Info RPC calls: got %d, want 1", got)
 	}
 }
 
-func TestInfo_CachesError(t *testing.T) {
+func TestInfo_ErrorReturnsLastErrorWithinCooldown(t *testing.T) {
+	restore := embedder.SetInfoRetryCooldown(1 * time.Second)
+	defer restore()
+
 	fake, c := startFakeRuned(t)
 	fake.infoFn = func(*runedv1.InfoRequest) (*runedv1.InfoResponse, error) {
 		return nil, status.Error(codes.Unavailable, "down")
@@ -260,11 +263,53 @@ func TestInfo_CachesError(t *testing.T) {
 	}
 	_, err2 := c.Info(context.Background())
 	if err2 == nil {
-		t.Fatal("second Info: expected cached error")
+		t.Fatal("second Info: expected error")
 	}
-	// Both calls return the same cached error; only one RPC fires.
 	if got := atomic.LoadInt32(&fake.infoCalls); got != 1 {
-		t.Errorf("Info RPC calls: got %d, want 1 (error caches too)", got)
+		t.Errorf("Info RPC calls: got %d, want 1 (second call within cooldown)", got)
+	}
+}
+
+func TestInfo_RetriesErrorAfterCooldown(t *testing.T) {
+	restore := embedder.SetInfoRetryCooldown(5 * time.Millisecond)
+	defer restore()
+
+	fake, c := startFakeRuned(t)
+	var attempts int32
+	fake.infoFn = func(*runedv1.InfoRequest) (*runedv1.InfoResponse, error) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n < 2 {
+			return nil, status.Error(codes.Unavailable, "down")
+		}
+		return &runedv1.InfoResponse{
+			DaemonVersion: "0.1.0-test",
+			ModelIdentity: "qwen3-test",
+			VectorDim:     1024,
+			MaxTextLength: 8192,
+			MaxBatchSize:  4,
+		}, nil
+	}
+
+	if _, err := c.Info(context.Background()); err == nil {
+		t.Fatal("first Info: expected error")
+	}
+
+	time.Sleep(20 * time.Millisecond) // wait cooldown
+
+	snap, err := c.Info(context.Background())
+	if err != nil {
+		t.Fatalf("second Info after cooldown: %v", err)
+	}
+	if snap.ModelIdentity != "qwen3-test" {
+		t.Errorf("snap: got %+v", snap)
+	}
+
+	if _, err := c.Info(context.Background()); err != nil {
+		t.Fatalf("third Info: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&fake.infoCalls); got != 2 {
+		t.Errorf("Info RPC calls: got %d, want 2 (1 failed + 1 succeeded)", got)
 	}
 }
 

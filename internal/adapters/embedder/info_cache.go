@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"time"
 
 	runedv1 "github.com/CryptoLabInc/runed/gen/runed/v1"
 )
@@ -13,44 +14,60 @@ import (
 // Spec: docs/v04/spec/components/embedder.md §Info 캐시.
 //
 // Behavior:
-//   - sync.Once ensures first Get() triggers exactly one Info RPC
-//   - subsequent Get() calls return cached snapshot (or cached error)
-//   - no TTL — embedder config changes require daemon restart
-//
-// Logs a slog.Info breadcrumb on successful load (model_identity tracking
-// for post-MVP re-embedding migration — D30). MVP scope is logging only;
-// automatic model-change detection is deferred.
+//   - Success: snapshot cached for the lifetime of the cache
+//   - Error  : NOT cached. The next Get() re-attempts the RPC. Within the cooldown
+//     window the most recent error is returned without an RPC
+
 type infoCache struct {
-	once sync.Once
-	snap InfoSnapshot
-	err  error
-	svc  runedv1.RunedServiceClient
+	mu          sync.Mutex
+	loaded      bool // sticky once true
+	snap        InfoSnapshot
+	lastErr     error
+	lastAttempt time.Time // zero means "no attempt yet"
+	svc         runedv1.RunedServiceClient
 }
 
+var infoRetryCooldown = 3 * time.Second
+
 func (ic *infoCache) Get(ctx context.Context) (InfoSnapshot, error) {
-	ic.once.Do(func() {
-		resp, err := ic.svc.Info(ctx, &runedv1.InfoRequest{})
-		if err != nil {
-			ic.err = MapGRPCError(err)
-			return
-		}
-		ic.snap = InfoSnapshot{
-			DaemonVersion: resp.GetDaemonVersion(),
-			ModelIdentity: resp.GetModelIdentity(),
-			VectorDim:     int(resp.GetVectorDim()),
-			MaxTextLength: int(resp.GetMaxTextLength()),
-			MaxBatchSize:  int(resp.GetMaxBatchSize()),
-		}
-		slog.Info("embedder info loaded",
-			"daemon_version", ic.snap.DaemonVersion,
-			"model_identity", ic.snap.ModelIdentity,
-			"vector_dim", ic.snap.VectorDim,
-			"max_batch_size", ic.snap.MaxBatchSize,
-		)
-	})
-	return ic.snap, ic.err
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+
+	if ic.loaded {
+		return ic.snap, nil
+	}
+	if !ic.lastAttempt.IsZero() && time.Since(ic.lastAttempt) < infoRetryCooldown {
+		return InfoSnapshot{}, ic.lastErr
+	}
+	ic.lastAttempt = time.Now()
+
+	resp, err := ic.svc.Info(ctx, &runedv1.InfoRequest{})
+	if err != nil {
+		ic.lastErr = err
+		return InfoSnapshot{}, err
+	}
+	ic.snap = InfoSnapshot{
+		DaemonVersion: resp.GetDaemonVersion(),
+		ModelIdentity: resp.GetModelIdentity(),
+		VectorDim:     int(resp.GetVectorDim()),
+		MaxTextLength: int(resp.GetMaxTextLength()),
+		MaxBatchSize:  int(resp.GetMaxBatchSize()),
+	}
+	ic.loaded = true
+	ic.lastErr = nil
+	slog.Info("embedder info loaded",
+		"daemon_version", ic.snap.DaemonVersion,
+		"model_identity", ic.snap.ModelIdentity,
+		"vector_dim", ic.snap.VectorDim,
+		"max_batch_size", ic.snap.MaxBatchSize,
+	)
+	return ic.snap, nil
 }
 
 // Snapshot returns the cached value without triggering load.
-// Returns zero InfoSnapshot if Get() has never been called.
-func (ic *infoCache) Snapshot() InfoSnapshot { return ic.snap }
+// Returns zero InfoSnapshot if Get() has not yet succeeded.
+func (ic *infoCache) Snapshot() InfoSnapshot {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	return ic.snap
+}
