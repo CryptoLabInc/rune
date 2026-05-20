@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Platform-detecting wrapper that fetches and runs the rune CLI binary
+# from GitHub Releases
+# We don't use bash installer to prevent agents from decomposing script
+# into ad-hoc steps rather than just running bash script
+
+# Usage: invoked transparently by agent or user as `rune <subcommand>`.
+set -euo pipefail
+
+RUNE_VERSION="${RUNE_VERSION:-v0.4.0}"
+
+CACHE_ROOT="$HOME/.cache/rune"
+CACHE_DIR="$CACHE_ROOT/$RUNE_VERSION"
+
+# TODO: Windows
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)   ASSET="rune-linux-amd64"  ;;
+  Linux-aarch64)  ASSET="rune-linux-arm64"  ;;
+  Darwin-x86_64)  ASSET="rune-darwin-amd64" ;;
+  Darwin-arm64)   ASSET="rune-darwin-arm64" ;;
+  *)
+    echo "rune: unsupported platform $(uname -s)-$(uname -m)" >&2
+    echo "       Supported: Linux x86_64/aarch64, macOS x86_64/arm64" >&2
+    exit 1
+    ;;
+esac
+
+BIN="$CACHE_DIR/$ASSET"
+
+if [ ! -x "$BIN" ]; then
+  mkdir -p "$CACHE_DIR"
+  RELEASE_BASE="https://github.com/CryptoLabInc/rune/releases/download/$RUNE_VERSION"
+  echo "rune: fetching $ASSET ($RUNE_VERSION)..." >&2
+
+  # Download atomically by rename to prevent partially downloaded binary
+  curl --fail --silent --show-error --location \
+    "$RELEASE_BASE/$ASSET" -o "$BIN.tmp"
+  curl --fail --silent --show-error --location \
+    "$RELEASE_BASE/checksums.txt" -o "$CACHE_DIR/checksums.txt.tmp"
+  mv "$CACHE_DIR/checksums.txt.tmp" "$CACHE_DIR/checksums.txt"
+
+  # Verify
+  EXPECTED="$(grep " $ASSET\$" "$CACHE_DIR/checksums.txt" | cut -d' ' -f1)"
+  if [ -z "$EXPECTED" ]; then
+    rm -f "$BIN.tmp"
+    echo "rune: $ASSET not listed in checksums.txt for $RUNE_VERSION" >&2
+    exit 1
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL="$(sha256sum "$BIN.tmp" | cut -d' ' -f1)"
+  else
+    ACTUAL="$(shasum -a 256 "$BIN.tmp" | cut -d' ' -f1)"
+  fi
+
+  if [ "$ACTUAL" != "$EXPECTED" ]; then
+    rm -f "$BIN.tmp"
+    echo "rune: checksum mismatch for $ASSET" >&2
+    echo "       expected: $EXPECTED" >&2
+    echo "       actual:   $ACTUAL" >&2
+    exit 1
+  fi
+
+  chmod +x "$BIN.tmp"
+  mv "$BIN.tmp" "$BIN"
+fi
+
+exec "$BIN" "$@"
