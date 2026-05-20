@@ -1,0 +1,86 @@
+name: Release rune CLI
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on version tags
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to release (e.g. v0.4.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Skip publishing GitHub Release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: [self-hosted, linux]
+    steps:
+      # Setup
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building release for $VERSION"
+
+      # Build and test
+      - name: Cross-build CLI binaries
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/release-rune-cli.sh "${VERSION}"
+
+      - name: List artifacts
+        run: ls -lh dist/
+
+      - name: Smoke test with linux-amd64
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          BIN=./dist/rune-linux-amd64
+          chmod +x "$BIN"
+          OUT="$("$BIN" version)"
+          echo "$OUT"
+          case "$OUT" in
+            *"$VERSION"*) echo "smoke test passed" ;;
+            *) echo "smoke test FAILED - expected version $VERSION in output" >&2; exit 1 ;;
+          esac
+
+      # Release
+      - name: Publish GitHub Release
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: rune CLI ${{ steps.version.outputs.version }}
+          files: |
+            dist/rune-linux-amd64
+            dist/rune-linux-arm64
+            dist/rune-darwin-amd64
+            dist/rune-darwin-arm64
+            dist/checksums.txt
+          fail_on_unmatched_files: true
+          generate_release_notes: true
