@@ -29,6 +29,7 @@ import (
 
 	"github.com/envector/rune-go/internal/adapters/config"
 	"github.com/envector/rune-go/internal/adapters/logio"
+	"github.com/envector/rune-go/internal/bootstrap"
 	"github.com/envector/rune-go/internal/lifecycle"
 	"github.com/envector/rune-go/internal/mcp"
 	"github.com/envector/rune-go/internal/obs"
@@ -140,6 +141,17 @@ func buildDeps() *mcp.Deps {
 		runeDir = filepath.Join(home, ".rune")
 	}
 	captureLog := logio.New(filepath.Join(runeDir, logio.DefaultFilename))
+
+	// Boot-failure log under the RUNE_HOME-aware root (bootstrap.Paths, #138)
+	// so it follows the same root override as the rest of rune-mcp state.
+	// Best-effort: if path resolution fails, leave the logger unset and the
+	// boot loop keeps in-memory LastBootError only.
+	if paths, perr := bootstrap.Resolve(); perr == nil {
+		bootLogPath := filepath.Join(paths.RuneHome, "logs", "boot.log")
+		mgr.SetBootLog(lifecycle.NewBootLogger(bootLogPath, lifecycle.DefaultBootLogMaxBytes))
+	} else {
+		slog.Warn("boot_log: path resolve failed — disk persistence disabled", "err", perr)
+	}
 
 	cap := service.NewCaptureService()
 	cap.State = mgr

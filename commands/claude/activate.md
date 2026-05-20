@@ -50,17 +50,36 @@ active, ask the server to re-run the boot loop, and confirm health.
    Use a check mark for healthy items, "x" for failures with the specific
    message on the same line.
 
-7. If the boot loop succeeded:
+7. If the boot loop succeeded (`vault.last_boot_error` absent and all
+   subsystems healthy):
    - Respond: "Rune activated. Organizational memory is now online."
 
-8. If any subsystem failed:
-   - Show the full validation report.
-   - Surface the specific recovery action per failure:
-     - Vault unreachable: "Verify the Vault server is running and the endpoint is correct."
-     - Vault token rejected: "Token may be expired — run `/rune:configure` to update."
-     - runed not running: "Start the embedding daemon."
-     - enVector unreachable: "Check the cluster's external connectivity from this host."
-   - Suggest `/rune:status` for the full health snapshot.
+8. **If boot failed (`vault.last_boot_error` present)** — fast-fail. Note this
+   is keyed off `last_boot_error`, not `state`: a transient failure (e.g.
+   unreachable Vault) leaves the persisted `state` at `"active"` while the boot
+   loop retries, so `state` alone would miss it.
+   - Read `diagnostics.vault.last_boot_error`. It contains the boot loop's
+     classified root cause + a user-actionable hint.
+   - Render the recovery in **one block** — relay the `hint` verbatim and stop:
+     ```
+     Activation failed — <kind>
+     <hint>
+
+     Details: <detail>   (only when kind == "unknown" or hint is generic)
+     Attempts: <attempts> (only when > 1)
+     ```
+   - The `hint` is authoritative — it already names the specific fix. Relay it
+     verbatim, then suggest the matching re-run: `/rune:configure` when
+     credentials must change (auth / token / endpoint / TLS), otherwise
+     `/rune:activate` once the user applies the hint (`embedder_unreachable`
+     needs the `runed` daemon started first). The full per-`kind` table is in
+     `commands/claude/configure.md` §5 for the rare case the hint needs
+     supplementation.
+   - DO NOT retry `reload_pipelines` automatically. DO NOT probe with shell
+     tools. The classifier has already inspected the underlying error.
+   - If `last_boot_error` is unexpectedly missing (older rune-mcp binary), fall
+     back to the diagnostics `vault.error` / `embedding.health_error` /
+     `envector.error` fields and surface those.
 
 **Note**: This is a session-local resume — the MCP server stays the same
 process. There is no Claude Code restart required (Task #28 wired the

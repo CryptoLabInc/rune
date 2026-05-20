@@ -55,6 +55,11 @@ func redact(s string) string {
 	return s
 }
 
+// Redact is the exported entry point for redacting a string outside the
+// slog handler path (e.g. boot log file writer, MCP tool result fields).
+// Same semantics as the internal redact used by filteringHandler.
+func Redact(s string) string { return redact(s) }
+
 // NewHandler wraps an inner slog.Handler with sensitive-data redaction.
 // Falls back to a stderr text handler at the given level when inner is
 // nil.

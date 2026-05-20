@@ -70,6 +70,9 @@ func GracefulShutdown(ctx context.Context, tracker *InflightTracker, closers []C
 		ZeroizeDEK(dek)
 	}
 
+	// The boot log file is flushed + closed via the closers list (BootLogger
+	// satisfies Closer); callers pass Manager.BootLog() alongside the adapter
+	// closers. Nothing boot-log-specific to do here.
 	return nil
 }
 
