@@ -116,7 +116,7 @@ func TestDownloadAndVerify_ProgressCallbackInvoked(t *testing.T) {
 func TestFileSHA256_KnownContent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f")
-	body := []byte("rune-go")
+	body := []byte("rune-cli")
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestFileSHA256_KnownContent(t *testing.T) {
 func TestFileMatchesSHA256(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "f")
-	body := []byte("rune-go")
+	body := []byte("rune-cli")
 	want := sha256Hex(body)
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatal(err)

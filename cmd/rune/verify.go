@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/envector/rune-go/internal/bootstrap"
+	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 )
 
 func runVerify(ctx context.Context, args []string, stdout io.Writer) int {

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/envector/rune-go/internal/bootstrap"
+	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 )
 
 func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) int {

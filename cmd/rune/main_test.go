@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/envector/rune-go/internal/bootstrap"
+	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 )
 
 func TestRunVersion_PrintConstants(t *testing.T) {
