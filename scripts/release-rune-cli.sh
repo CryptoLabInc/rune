@@ -13,10 +13,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/dist"
 
 TARGETS=(
-  "linux  amd64  rune-linux-amd64"
-  "linux  arm64  rune-linux-arm64"
-  "darwin amd64  rune-darwin-amd64"
-  "darwin arm64  rune-darwin-arm64"
+  "linux   amd64  rune-linux-amd64"
+  "linux   arm64  rune-linux-arm64"
+  "darwin  amd64  rune-darwin-amd64"
+  "darwin  arm64  rune-darwin-arm64"
+  "windows amd64  rune-windows-amd64.exe"
 )
 
 rm -rf "$OUT"

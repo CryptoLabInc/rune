@@ -1,7 +1,7 @@
 name: Release rune CLI
 
-# Workflow creates a prerelease when any `v*` tag pushed and
-# maintainer later change to release via Github
+# Workflow creates a prerelease when any `v*` tag is pushed; maintainer
+# later promotes prerelease to release via GitHub
 
 on:
   push:
@@ -23,12 +23,23 @@ permissions:
   contents: write # softprops/action-gh-release
 
 jobs:
-  release:
-    runs-on: [self-hosted, linux]
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    os: linux,   arch: amd64 }
+          - { runner: ubuntu-24.04-arm, os: linux,   arch: arm64 }
+          - { runner: macos-14,         os: darwin,  arch: arm64 }
+          - { runner: macos-14,         os: darwin,  arch: amd64 }
+          - { runner: windows-latest,   os: windows, arch: amd64 }
     steps:
       # Setup
       - name: Resolve version
         id: version
+        shell: bash
         env:
           DISPATCH_VERSION: ${{ inputs.version }}
         run: |
@@ -38,7 +49,7 @@ jobs:
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building prerelease for $VERSION"
+          echo "Building $VERSION for ${{ matrix.os }}/${{ matrix.arch }}"
 
       - name: Checkout
         uses: actions/checkout@v6
@@ -54,28 +65,76 @@ jobs:
           cache: true
 
       # Build and test
-      - name: Cross-build CLI binaries
+      - name: Build binary
+        shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: scripts/release-rune-cli.sh "${VERSION}"
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+          ASSET="rune-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X main.runeVersion=${VERSION}" \
+            -o "dist/${ASSET}" \
+            ./cmd/rune
+          ls -lh "dist/${ASSET}"
 
-      - name: List artifacts
-        run: ls -lh dist/
-
-      - name: Smoke test with linux-amd64
+      - name: Test
+        shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          BIN=./dist/rune-linux-amd64
-          chmod +x "$BIN"
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+          BIN="./dist/rune-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+          chmod +x "$BIN" 2>/dev/null || true
           OUT="$("$BIN" version)"
           echo "$OUT"
           case "$OUT" in
-            *"$VERSION"*) echo "smoke test passed" ;;
-            *) echo "smoke test FAILED - expected version $VERSION in output" >&2; exit 1 ;;
+            *"$VERSION"*) echo "test ok" ;;
+            *) echo "::error::version $VERSION not found in output: $OUT" >&2; exit 1 ;;
           esac
 
-      # Publish as prerelease
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rune-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/rune-*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish prerelease
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="$DISPATCH_VERSION"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: List and checksum
+        run: |
+          ls -lh dist/
+          (cd dist && sha256sum rune-* > checksums.txt)
+          cat dist/checksums.txt
+
       - name: Publish prerelease
         if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
         uses: softprops/action-gh-release@v3
@@ -88,6 +147,7 @@ jobs:
             dist/rune-linux-arm64
             dist/rune-darwin-amd64
             dist/rune-darwin-arm64
+            dist/rune-windows-amd64.exe
             dist/checksums.txt
           fail_on_unmatched_files: true
           generate_release_notes: true
