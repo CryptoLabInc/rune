@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Platform-detecting wrapper that fetches and runs the rune CLI binary
-# from GitHub Releases
-# We don't use bash installer to prevent agents from decomposing script
-# into ad-hoc steps rather than just running bash script
-
+# from GitHub Releases.
+# We don't use a bash installer to prevent agents from decomposing the
+# script into ad-hoc steps rather than just invoking it
+#
+# Windows support: this wrapper is bash-only. Native Windows shells
+# (PowerShell / cmd) cannot execute this. Windows users must invoke it
+# from WSL or Git Bash, where `uname -s` returns MSYS_NT-* or MINGW64_NT-*;
+#
 # Usage: invoked transparently by agent or user as `rune <subcommand>`.
 set -euo pipefail
 
@@ -12,15 +16,16 @@ RUNE_VERSION="${RUNE_VERSION:-v0.4.0}"
 CACHE_ROOT="$HOME/.cache/rune"
 CACHE_DIR="$CACHE_ROOT/$RUNE_VERSION"
 
-# TODO: Windows
 case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64)   ASSET="rune-linux-amd64"  ;;
-  Linux-aarch64)  ASSET="rune-linux-arm64"  ;;
-  Darwin-x86_64)  ASSET="rune-darwin-amd64" ;;
-  Darwin-arm64)   ASSET="rune-darwin-arm64" ;;
+  Linux-x86_64)               ASSET="rune-linux-amd64"      ;;
+  Linux-aarch64)              ASSET="rune-linux-arm64"      ;;
+  Darwin-x86_64)              ASSET="rune-darwin-amd64"     ;;
+  Darwin-arm64)               ASSET="rune-darwin-arm64"     ;;
+  MINGW64_NT-*-x86_64)        ASSET="rune-windows-amd64.exe" ;;
+  MSYS_NT-*-x86_64)           ASSET="rune-windows-amd64.exe" ;;
   *)
     echo "rune: unsupported platform $(uname -s)-$(uname -m)" >&2
-    echo "       Supported: Linux x86_64/aarch64, macOS x86_64/arm64" >&2
+    echo "       Supported: Linux x86_64/aarch64, macOS x86_64/arm64, Windows x86_64 via WSL or Git Bash" >&2
     exit 1
     ;;
 esac
