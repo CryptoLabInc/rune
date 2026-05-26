@@ -1,15 +1,24 @@
 // CLI installer and diagnostics tool for Rune
 //
+// `rune install` downloads two binaries from GitHub Releases and places
+// them under the home realms they belong to:
+//
+//	~/.rune/bin/rune-mcp (rune plugin realm)
+//	~/.runed/bin/runed   (runed daemon realm)
+//
 // Subcommands:
+//
 //	rune install [--force] [--json] [--manifest-url URL]
-//	    Download the runed bundle (runed daemon + llama-server) from
-//	    GitHub Releases, extract it into ~/.runed/bin/
-//      Runed handles its own model on startup
+//	    Fetch the manifest, and place the rune-mcp and runed binaries
 //
 //	rune verify [--json]
 //	    Read-only health checks
 //
 //	rune version
+//	    Print the rune CLI version and the manifest URL
+//
+//	rune mcp-server [args...]
+//      The plugin manifest's mcpServers entry uses this to spawn mcp server without absolute path in plugin.json
 
 package main
 
@@ -46,6 +55,8 @@ func main() {
 		os.Exit(runVerify(ctx, args, os.Stdout))
 	case "version":
 		os.Exit(runVersion(os.Stdout))
+	case "mcp-server":
+		os.Exit(runMCPServer(ctx, args, os.Stderr))
 	case "-h", "--help", "help":
 		printHelp(os.Stdout)
 		os.Exit(0)
@@ -61,16 +72,18 @@ func printHelp(w io.Writer) {
 
 Usage:
   rune install [--force] [--json] [--manifest-url URL]
-        download the runed bundle from GitHub releases into ~/.runed/bin/
+        download rune-mcp into ~/.rune/bin/ and runed into ~/.runed/bin/
         (next: /rune:configure + /rune:activate to finish setup)
   rune verify [--json]
-        run health checks
+        run read-only health checks
   rune version
         print version and manifest URL
+  rune mcp-server [args...]
+        forward stdio to ~/.rune/bin/rune-mcp (plugin-manifest entry point)
 
 Environment:
-  RUNE_HOME       override ~/.rune/  (rune-mcp's realm)
-  RUNED_HOME      override ~/.runed/ (runed daemon's realm)
+  RUNE_HOME       override ~/.rune/  (rune plugin realm: config + rune-mcp)
+  RUNED_HOME      override ~/.runed/ (runed daemon realm)
   RUNE_MANIFEST   override the build-baked manifest URL (mostly for tests)
 `)
 }
