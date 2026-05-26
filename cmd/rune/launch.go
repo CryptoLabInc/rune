@@ -7,7 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
+	"time"
 )
+
+const gracefulShutdownGrace = 5 * time.Second
 
 func execInstalledBinary(ctx context.Context, binDir, name string, args []string, stderr io.Writer) int {
 	binPath := filepath.Join(binDir, name)
@@ -23,6 +27,12 @@ func execInstalledBinary(ctx context.Context, binDir, name string, args []string
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	// Forward SIGTERM to the child instead of SIGKILL
+	cmd.Cancel = func() error {
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
+	cmd.WaitDelay = gracefulShutdownGrace
+
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return exitErr.ExitCode()
