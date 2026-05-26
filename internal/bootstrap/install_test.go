@@ -12,49 +12,65 @@ import (
 )
 
 type installFixture struct {
-	srv               *httptest.Server
-	bundleBody        []byte
-	bundleSHA         string
-	manifestBundleSHA string
-	bundleHits        int
+	srv      *httptest.Server
+	runed    []byte
+	runeMCP  []byte
+	runedSHA string
+	mcpSHA   string
+
+	// Override SHA in the manifest to simulate a checksum mismatch
+	mismatchStep string // "" | StepRuned | StepRuneMCP
+
+	hits map[string]int
 }
 
 func newFixture(t *testing.T) *installFixture {
 	t.Helper()
-	bundle := makeBundleTarball(t, map[string][]byte{
-		"bin/runed":        []byte("runed-binary-bytes"),
-		"bin/llama-server": []byte("llama-binary-bytes"),
-	})
 	fx := &installFixture{
-		bundleBody: bundle,
-		bundleSHA:  sha256Hex(bundle),
+		runed:   []byte("runed-binary-bytes"),
+		runeMCP: []byte("rune-mcp-binary-bytes"),
+		hits:    map[string]int{},
 	}
+	fx.runedSHA = sha256Hex(fx.runed)
+	fx.mcpSHA = sha256Hex(fx.runeMCP)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
-		bundleSHA := fx.manifestBundleSHA
-		if bundleSHA == "" {
-			bundleSHA = fx.bundleSHA
+		runedSHA := fx.runedSHA
+		mcpSHA := fx.mcpSHA
+
+		switch fx.mismatchStep {
+		case StepRuned:
+			runedSHA = "00" + runedSHA[2:]
+		case StepRuneMCP:
+			mcpSHA = "00" + mcpSHA[2:]
 		}
+
 		manifest := map[string]any{
 			"version":          1,
-			"rune_mcp_version": "v0.4.0-test",
-			"runed_bundles": map[string]any{
+			"rune_mcp_version": "v0.1.0-test",
+			"runed_version":    "v0.1.0-test",
+			"platforms": map[string]any{
 				PlatformTuple(): map[string]any{
-					"url":    fx.srv.URL + "/bundle.tar.gz",
-					"sha256": bundleSHA,
-					"size":   len(fx.bundleBody),
+					"runed":    map[string]any{"url": fx.srv.URL + "/runed", "sha256": runedSHA, "size": len(fx.runed)},
+					"rune_mcp": map[string]any{"url": fx.srv.URL + "/rune-mcp", "sha256": mcpSHA, "size": len(fx.runeMCP)},
 				},
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(manifest)
 	})
-	mux.HandleFunc("/bundle.tar.gz", func(w http.ResponseWriter, r *http.Request) {
-		fx.bundleHits++
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fx.bundleBody)))
-		_, _ = w.Write(fx.bundleBody)
-	})
+
+	serveBinary := func(name string, body []byte) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			fx.hits[name]++
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+			_, _ = w.Write(body)
+		}
+	}
+
+	mux.HandleFunc("/runed", serveBinary("/runed", fx.runed))
+	mux.HandleFunc("/rune-mcp", serveBinary("/rune-mcp", fx.runeMCP))
 
 	fx.srv = httptest.NewServer(mux)
 	t.Cleanup(fx.srv.Close)
@@ -64,7 +80,7 @@ func newFixture(t *testing.T) *installFixture {
 
 func (fx *installFixture) manifestURL() string { return fx.srv.URL + "/manifest.json" }
 
-func TestInstall_NeverTouchesRune(t *testing.T) {
+func TestInstall_DoesNotWriteRuneConfig(t *testing.T) {
 	rune, _ := setRealms(t)
 	fx := newFixture(t)
 
@@ -72,72 +88,119 @@ func TestInstall_NeverTouchesRune(t *testing.T) {
 		t.Fatalf("Install: %v", err)
 	}
 
-	if _, err := os.Stat(rune); !os.IsNotExist(err) {
-		t.Errorf("~/.rune/ should not have been created by rune install; got err=%v", err)
+	if _, err := os.Stat(filepath.Join(rune, "config.json")); !os.IsNotExist(err) {
+		t.Errorf("~/.rune/config.json should not be written by rune install; got err=%v", err)
 	}
 }
 
-func TestInstall_Idempotent_SkipsExistingBundle(t *testing.T) {
+func TestInstall_HappyPath_PlacesBothBinaries(t *testing.T) {
+	rune, runed := setRealms(t)
+	fx := newFixture(t)
+
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: fx.manifestURL()})
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if !r.OK {
+		t.Errorf("Result.OK = false, want true (r=%+v)", r)
+	}
+
+	for _, p := range []string{
+		filepath.Join(runed, "bin", "runed"),
+		filepath.Join(rune, "bin", "rune-mcp"),
+	} {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Errorf("missing %s: %v", p, err)
+			continue
+		}
+		// chmod 0755 was applied
+		if info.Mode().Perm()&0o100 == 0 {
+			t.Errorf("%s is not executable: mode=%v", p, info.Mode())
+		}
+	}
+	if fx.hits["/runed"] != 1 || fx.hits["/rune-mcp"] != 1 {
+		t.Errorf("expected one hit per artifact; got %+v", fx.hits)
+	}
+	if _, err := os.Stat(filepath.Join(runed, "bin", "llama-server")); !os.IsNotExist(err) {
+		t.Errorf("llama-server should NOT be installed by rune install; got err=%v", err)
+	}
+}
+
+func TestInstall_Idempotent_SkipsExistingBinaries(t *testing.T) {
 	setRealms(t)
 	fx := newFixture(t)
 
 	if _, err := Install(context.Background(), InstallOptions{ManifestURL: fx.manifestURL()}); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
-	if fx.bundleHits != 1 {
-		t.Fatalf("first install: bundleHits=%d, want 1", fx.bundleHits)
+
+	beforeHits := map[string]int{}
+	for k, v := range fx.hits {
+		beforeHits[k] = v
 	}
 
 	r, err := Install(context.Background(), InstallOptions{ManifestURL: fx.manifestURL()})
 	if err != nil {
 		t.Fatalf("second install: %v", err)
 	}
-	if fx.bundleHits != 1 {
-		t.Errorf("second install re-downloaded bundle: hits=%d", fx.bundleHits)
+
+	// Second install must not re-download any binary
+	for _, name := range []string{"/runed", "/rune-mcp"} {
+		if fx.hits[name] != beforeHits[name] {
+			t.Errorf("second install re-downloaded %s: hits=%d, want %d", name, fx.hits[name], beforeHits[name])
+		}
 	}
+
 	skipMap := map[string]bool{}
 	for _, s := range r.Skipped {
 		skipMap[s] = true
 	}
-	if !skipMap[StepBundle] {
-		t.Errorf("Skipped missing bundle: %v", r.Skipped)
+	for _, step := range []string{StepRuned, StepRuneMCP} {
+		if !skipMap[step] {
+			t.Errorf("Skipped missing %s: %v", step, r.Skipped)
+		}
 	}
 }
 
-func TestInstall_Force_ReDownloadsBundle(t *testing.T) {
+func TestInstall_Force_ReDownloadsAllBinaries(t *testing.T) {
 	setRealms(t)
 	fx := newFixture(t)
 
 	if _, err := Install(context.Background(), InstallOptions{ManifestURL: fx.manifestURL()}); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
+
 	if _, err := Install(context.Background(), InstallOptions{
 		ManifestURL: fx.manifestURL(),
 		Force:       true,
 	}); err != nil {
 		t.Fatalf("force install: %v", err)
 	}
-	if fx.bundleHits != 2 {
-		t.Errorf("force should re-download bundle: hits=%d, want 2", fx.bundleHits)
+
+	for _, name := range []string{"/runed", "/rune-mcp"} {
+		if fx.hits[name] != 2 {
+			t.Errorf("force should re-download %s: hits=%d, want 2", name, fx.hits[name])
+		}
 	}
 }
 
-func TestInstall_BundleChecksumMismatch_PartialFailure(t *testing.T) {
-	_, runed := setRealms(t)
+func TestInstall_ChecksumMismatch_PartialFailure(t *testing.T) {
+	rune, _ := setRealms(t)
 	fx := newFixture(t)
-	fx.manifestBundleSHA = "00" + fx.bundleSHA[2:]
+	fx.mismatchStep = StepRuneMCP
 
 	r, err := Install(context.Background(), InstallOptions{ManifestURL: fx.manifestURL()})
 	if err == nil {
-		t.Fatalf("expected bundle checksum error")
+		t.Fatalf("expected checksum error")
 	}
-	if r.Failed[StepBundle] == "" {
-		t.Errorf("Failed missing bundle: %+v", r.Failed)
+	if r.Failed[StepRuneMCP] == "" {
+		t.Errorf("Failed missing %s: %+v", StepRuneMCP, r.Failed)
 	}
 	if r.Status != "partial" {
 		t.Errorf("Status=%q, want partial", r.Status)
 	}
-	if _, err := os.Stat(filepath.Join(runed, "bin", "runed")); !os.IsNotExist(err) {
-		t.Errorf("binary should not exist after checksum failure (err=%v)", err)
+	if _, err := os.Stat(filepath.Join(rune, "bin", "rune-mcp")); !os.IsNotExist(err) {
+		t.Errorf("rune-mcp should not exist after checksum failure (err=%v)", err)
 	}
 }

@@ -9,35 +9,38 @@ import (
 
 // Overrides default root: `~/.rune/`
 const envRuneHome = "RUNE_HOME"
+
 // Overrides default root: `~/.runed/`
 const envRunedHome = "RUNED_HOME"
 const envManifest = "RUNE_MANIFEST"
 
 // Two separate roots, NO cross-contamination:
 //
-//	~/.rune/
-//	└── config.json       - /rune:configure handle this
-//
-//	~/.runed/             - Runed itself handle this through `rune install`
+//	~/.rune/              - Rune plugin realm (config + rune-mcp binary)
 //	├── bin/
-//	│   ├── runed
-//	│   └── llama-server
+//	│   └── rune-mcp      - placed here by `rune install`
+//	└── config.json       - /rune:configure handles this
+//
+//	~/.runed/             - Runed daemon realm
+//	├── bin/
+//	│   ├── runed         - placed by `rune install`
+//	│   └── llama-server  - placed by runed on first boot (self-bootstrap)
 //	├── models/
-//	│   └── *.gguf
+//	│   └── *.gguf        - placed by runed on first boot
 //	├── embedding.sock
 //	├── spawn.lock
 //	├── install.lock
 //	├── cache/
 //	└── logs/daemon.log
-//
-// XXX: `rm -rf ~/.rune` clears rune-mcp state including Vault credentials;
-// `rm -rf ~/.runed` clears Runed daemon state including model
-type Paths struct {
-  // Rune
-	RuneHome   string // ~/.rune
-	RuneConfig string // ~/.rune/config.json
 
-  // Runed
+type Paths struct {
+	// Rune
+	RuneHome      string // ~/.rune
+	RuneBin       string // ~/.rune/bin
+	RuneMCPBinary string // ~/.rune/bin/rune-mcp
+	RuneConfig    string // ~/.rune/config.json
+
+	// Runed
 	RunedHome   string // ~/.runed
 	RunedBin    string // ~/.runed/bin
 	RunedModels string // ~/.runed/models
@@ -56,7 +59,7 @@ func Resolve() (*Paths, error) {
 		return nil, fmt.Errorf("resolve user home: %w", err)
 	}
 
-  // Rune
+	// Rune
 	runeHome := os.Getenv(envRuneHome)
 	if runeHome == "" {
 		runeHome = filepath.Join(userHome, ".rune")
@@ -67,7 +70,7 @@ func Resolve() (*Paths, error) {
 		return nil, fmt.Errorf("absolute path for rune home %s: %w", runeHome, err)
 	}
 
-  // Runed
+	// Runed
 	runedHome := os.Getenv(envRunedHome)
 	if runedHome == "" {
 		runedHome = filepath.Join(userHome, ".runed")
@@ -82,10 +85,13 @@ func Resolve() (*Paths, error) {
 }
 
 func newPaths(runeHome, runedHome string) *Paths {
+	runeBin := filepath.Join(runeHome, "bin")
 	runedBin := filepath.Join(runedHome, "bin")
 	return &Paths{
-		RuneHome:   runeHome,
-		RuneConfig: filepath.Join(runeHome, "config.json"),
+		RuneHome:      runeHome,
+		RuneBin:       runeBin,
+		RuneMCPBinary: filepath.Join(runeBin, "rune-mcp"),
+		RuneConfig:    filepath.Join(runeHome, "config.json"),
 
 		RunedHome:   runedHome,
 		RunedBin:    runedBin,
@@ -100,9 +106,9 @@ func newPaths(runeHome, runedHome string) *Paths {
 	}
 }
 
-// RuneHome is not created here
 func (p *Paths) EnsureDirs() error {
 	for _, d := range []string{
+		p.RuneBin,
 		p.RunedHome, p.RunedBin, p.RunedModels, p.RunedLogs, p.Cache,
 	} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
