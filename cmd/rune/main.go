@@ -18,7 +18,11 @@
 //	    Print the rune CLI version and the manifest URL
 //
 //	rune mcp-server [args...]
-//      The plugin manifest's mcpServers entry uses this to spawn mcp server without absolute path in plugin.json
+//      Forward stdio to ~/.rune/bin/rune-mcp. The plugin manifest's
+//      mcpServers entry uses this to spawn mcp server
+//
+//	rune runed [args...]
+//      Forward stdio + args to ~/.runed/bin/runed
 
 package main
 
@@ -57,6 +61,8 @@ func main() {
 		os.Exit(runVersion(os.Stdout))
 	case "mcp-server":
 		os.Exit(runMCPServer(ctx, args, os.Stderr))
+	case "runed":
+		os.Exit(runRuned(ctx, args, os.Stderr))
 	case "-h", "--help", "help":
 		printHelp(os.Stdout)
 		os.Exit(0)
@@ -80,6 +86,8 @@ Usage:
         print version and manifest URL
   rune mcp-server [args...]
         forward stdio to ~/.rune/bin/rune-mcp (plugin-manifest entry point)
+  rune runed [args...]
+        forward stdio + args to ~/.runed/bin/runed
 
 Environment:
   RUNE_HOME       override ~/.rune/  (rune plugin realm: config + rune-mcp)
