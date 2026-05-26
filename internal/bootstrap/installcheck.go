@@ -14,13 +14,13 @@ import (
 
 type InstallCheck struct {
 	Name    string `json:"name"`
-	Status  string `json:"status"`             // "ok" | "warn" | "fail"
+	Status  string `json:"status"` // "ok" | "warn" | "fail"
 	Detail  string `json:"detail,omitempty"`
 	FixHint string `json:"fix_hint,omitempty"`
 }
 
 type InstallChecks struct {
-	OK     bool             `json:"ok"`
+	OK     bool           `json:"ok"`
 	Checks []InstallCheck `json:"checks"`
 }
 
@@ -34,7 +34,6 @@ const (
 	CheckRuneConfig  = "rune_config"
 	CheckVaultCreds  = "vault_creds"
 	CheckRunedBinary = "runed_binary"
-	CheckLlamaServer = "llama_server"
 	CheckModelFile   = "model_file"
 	CheckSocket      = "daemon_socket"
 	CheckSpawnLock   = "spawn_lock"
@@ -71,8 +70,7 @@ func RunInstallChecks(ctx context.Context) *InstallChecks {
 	cfg, cfgChecks := loadRuneConfigChecks(paths)
 	checks := append([]InstallCheck{}, cfgChecks...)
 	checks = append(checks, vaultCredsCheck(cfg))
-	checks = append(checks, executableCheck(CheckRunedBinary, paths.RunedBinary, "run `rune install` to fetch the runed bundle"))
-	checks = append(checks, executableCheck(CheckLlamaServer, paths.LlamaServer, "run `rune install` to fetch the runed bundle"))
+	checks = append(checks, executableCheck(CheckRunedBinary, paths.RunedBinary, "run `rune install` to fetch runed"))
 	checks = append(checks, modelFileCheck(paths.RunedModels))
 	checks = append(checks, socketCheck(paths.RunedSocket, cfg))
 	checks = append(checks, spawnLockCheck(paths.RunedLock))

@@ -11,9 +11,9 @@ import (
 
 type InstallOptions struct {
 	ManifestURL string
-	Force bool // `rune install --force` to force re-download
-	Progress ProgressFunc
-	Log func(format string, args ...any)
+	Force       bool // `rune install --force` to force re-download
+	Progress    ProgressFunc
+	Log         func(format string, args ...any)
 }
 
 type Result struct {
@@ -32,9 +32,11 @@ type ArtifactInfo struct {
 
 const (
 	StepManifest = "manifest"
-	StepBundle   = "runed_bundle"
-	StepProbe    = "probe"
+	StepRuned    = "runed"
+	StepRuneMCP  = "rune_mcp"
 )
+
+const binaryMode = 0o755 // executable
 
 func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 	logf := opts.Log
@@ -42,7 +44,7 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		logf = func(string, ...any) {}
 	}
 
-  // Resolve path and ensure directories
+	// Resolve paths and ensure directories
 	paths, err := Resolve()
 	if err != nil {
 		return nil, err
@@ -51,7 +53,7 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		return nil, err
 	}
 
-  // Acquire lock for installation
+	// Acquire lock for installation
 	unlock, err := acquireInstallLock(ctx, paths.InstallLock, InstallLockTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("install: acquire lock: %w", err)
@@ -65,7 +67,7 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 	}
 
 	// Fetch manifest
-	logf("[1/2] manifest: fetching from %s", opts.ManifestURL)
+	logf("[1/3] manifest: fetching from %s", opts.ManifestURL)
 	manifest, err := FetchManifest(ctx, opts.ManifestURL)
 	if err != nil {
 		r.Failed[StepManifest] = err.Error()
@@ -73,33 +75,69 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		return r, err
 	}
 	r.Completed = append(r.Completed, StepManifest)
-	logf("[1/2] manifest: ok (version %d, rune-mcp %s)", manifest.Version, manifest.RuneMCPVersion)
+	logf("[1/3] manifest: ok (rune-mcp %s, runed %s)", manifest.RuneMCPVersion, manifest.RunedVersion)
 
-	bundleSpec, err := manifest.BundleForCurrentPlatform()
+	artifacts, err := manifest.ArtifactsForCurrentPlatform()
 	if err != nil {
-		r.Failed[StepBundle] = err.Error()
+		r.Failed[StepRuned] = err.Error() // not exact, but just for notifying failure
 		r.Status = "partial"
 		return r, err
 	}
 
-  // Runed binaries -> `~/.runed/bin/`
-	if err := installBundle(ctx, paths, bundleSpec, opts, r, logf); err != nil {
-		r.Failed[StepBundle] = err.Error()
-		r.Status = "partial"
-		return r, err
+	// Per-artifact installation (Result.Status = "partial" on any failure)
+	type install struct {
+		step string
+		spec ArtifactSpec
+		dest string
+	}
+	installs := []install{
+		{StepRuned, artifacts.Runed, paths.RunedBinary},
+		{StepRuneMCP, artifacts.RuneMCP, paths.RuneMCPBinary},
 	}
 
-  // Probe
+	for i, in := range installs {
+		stepNum := i + 2 // starting from [2/3]
+		if !opts.Force {
+			if fileExists(in.dest) {
+				logf("[%d/3] %s: skipped (already at %s)", stepNum, in.step, in.dest)
+				r.Completed = append(r.Completed, in.step)
+				r.Skipped = append(r.Skipped, in.step)
+
+				continue
+			}
+		}
+
+		logf("[%d/3] %s (%d bytes): downloading...", stepNum, in.step, in.spec.Size)
+		if err := DownloadAndVerify(ctx, in.spec, in.dest, opts.Progress); err != nil {
+			r.Failed[in.step] = err.Error()
+			r.Status = "partial"
+			return r, err
+		}
+		if err := os.Chmod(in.dest, binaryMode); err != nil {
+			r.Failed[in.step] = err.Error()
+			r.Status = "partial"
+			return r, fmt.Errorf("install: chmod %s: %w", in.dest, err)
+		}
+
+		r.Completed = append(r.Completed, in.step)
+		if info, statErr := os.Stat(in.dest); statErr == nil {
+			r.Installed[filepath.Base(in.dest)] = ArtifactInfo{Path: in.dest, Size: info.Size()}
+		}
+		logf("[%d/3] %s: installed at %s", stepNum, in.step, in.dest)
+	}
+
+	// Probe socket
 	if probeSocket(paths.RunedSocket) {
 		logf("probe: daemon already running at %s", paths.RunedSocket)
 	} else {
-    logf("probe: daemon not running (expected: first /rune:activate will spawn it)")
+		logf("probe: daemon not running (expected: first /rune:activate will spawn it)")
 	}
 
 	r.OK = true
 	if onlySkipped(r) {
 		r.Status = "no_op"
 	}
+
 	return r, nil
 }
 
@@ -120,42 +158,6 @@ func onlySkipped(r *Result) bool {
 		}
 	}
 	return len(r.Skipped) > 0
-}
-
-func installBundle(ctx context.Context, paths *Paths, spec ArtifactSpec, opts InstallOptions, r *Result, logf func(string, ...any)) error {
-	if !opts.Force {
-		if fileExists(paths.RunedBinary) && fileExists(paths.LlamaServer) {
-			logf("[2/2] runed bundle: skipped (binaries already present at %s)", paths.RunedBin)
-			r.Completed = append(r.Completed, StepBundle)
-			r.Skipped = append(r.Skipped, StepBundle)
-			return nil
-		}
-	}
-
-	cachePath := filepath.Join(paths.Cache, "runed-bundle.tar.gz")
-	logf("[2/2] runed bundle (%d bytes): downloading...", spec.Size)
-	if err := DownloadAndVerify(ctx, spec, cachePath, opts.Progress); err != nil {
-		return err
-	}
-
-	logf("[2/2] runed bundle: extracting to %s ...", paths.RunedBin)
-	extracted, err := ExtractBundle(cachePath, paths.RunedBin)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(cachePath); err != nil && !os.IsNotExist(err) {
-		logf("warning: failed to remove cache %s: %v", cachePath, err)
-	}
-
-	r.Completed = append(r.Completed, StepBundle)
-	for _, p := range extracted {
-		if info, statErr := os.Stat(p); statErr == nil {
-			r.Installed[filepath.Base(p)] = ArtifactInfo{Path: p, Size: info.Size()}
-		}
-	}
-	logf("[2/2] runed bundle: extracted %d files", len(extracted))
-
-	return nil
 }
 
 func probeSocket(path string) bool {

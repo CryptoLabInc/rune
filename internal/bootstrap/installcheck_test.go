@@ -53,7 +53,6 @@ func TestInstallChecks_HealthyInstall(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://vault.example:50051", "evt_test")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
-	writeFakeBinary(t, filepath.Join(runed, "bin", "llama-server"))
 	// Plausibly-real GGUF: a file with size >= minModelSize.
 	if err := os.MkdirAll(filepath.Join(runed, "models"), 0o700); err != nil {
 		t.Fatal(err)
@@ -148,7 +147,6 @@ func TestInstallChecks_PartialModelFile(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
-	writeFakeBinary(t, filepath.Join(runed, "bin", "llama-server"))
 	if err := os.MkdirAll(filepath.Join(runed, "models"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +169,6 @@ func TestInstallChecks_NoModelYet_Warns(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
-	writeFakeBinary(t, filepath.Join(runed, "bin", "llama-server"))
 	if err := os.MkdirAll(filepath.Join(runed, "models"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +189,6 @@ func TestInstallChecks_DaemonNotRunning_Warns(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
-	writeFakeBinary(t, filepath.Join(runed, "bin", "llama-server"))
 
 	r := RunInstallChecks(context.Background())
 	sock := findCheck(t, r, CheckSocket)
@@ -205,7 +201,6 @@ func TestInstallChecks_DaemonReachable_OK(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
-	writeFakeBinary(t, filepath.Join(runed, "bin", "llama-server"))
 
 	// Stand up a unix-domain listener at the expected socket path.
 	if err := os.MkdirAll(runed, 0o700); err != nil {
@@ -238,7 +233,6 @@ func TestInstallChecks_SpawnLockPresent_Warns(t *testing.T) {
 	rune, runed := setRealms(t)
 	writeConfig(t, rune, "tcp://x", "y")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
-	writeFakeBinary(t, filepath.Join(runed, "bin", "llama-server"))
 	if err := os.MkdirAll(runed, 0o700); err != nil {
 		t.Fatal(err)
 	}

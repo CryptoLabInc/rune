@@ -16,28 +16,42 @@ const ManifestVersion = 1
 const defaultManifestFetchTimeout = 30 * time.Second
 
 // Example JSON:
+//
 //	{
 //	  "version": 1,
-//	  "rune_mcp_version": "v0.4.0",
-//	  "runed_bundles": {
-//	    "linux-amd64":  {"url": "...", "sha256": "...", "size": 22846457},
-//	    "darwin-arm64": {"url": "...", "sha256": "...", "size": 21998765}
+//	  "rune_mcp_version": "v0.1.0",
+//	  "runed_version":    "v0.1.0-alpha.1",
+//	  "platforms": {
+//	    "linux-amd64": {
+//	      "runed":    {"url": "...", "sha256": "...", "size": 8123456},
+//	      "rune_mcp": {"url": "...", "sha256": "...", "size": 16234567}
+//	    },
+//	    "darwin-arm64": { ... }
 //	  }
 //	}
+
 type Manifest struct {
-	Version        int                     `json:"version"`
-	RuneMCPVersion string                  `json:"rune_mcp_version"`
-	RunedBundles   map[string]ArtifactSpec `json:"runed_bundles"`
+	Version        int                          `json:"version"`
+	RuneMCPVersion string                       `json:"rune_mcp_version"`
+	RunedVersion   string                       `json:"runed_version"`
+	Platforms      map[string]PlatformArtifacts `json:"platforms"`
+}
+
+type PlatformArtifacts struct {
+	Runed   ArtifactSpec `json:"runed"`    // ~/.runed/bin
+	RuneMCP ArtifactSpec `json:"rune_mcp"` // ~/.rune/bin
 }
 
 type ArtifactSpec struct {
 	URL    string `json:"url"`
 	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size"`
+	Size   int64  `json:"size,omitempty"` // optional; used for progress UX and sanity check
 }
 
-var ErrUnsupportedManifestVersion = errors.New("manifest: unsupported version")
-var ErrNoBundleForPlatform = errors.New("manifest: no bundle for this platform")
+var (
+	ErrUnsupportedManifestVersion = errors.New("manifest: unsupported version")
+	ErrNoArtifactForPlatform      = errors.New("manifest: no artifacts for this platform")
+)
 
 func FetchManifest(ctx context.Context, manifestURL string) (*Manifest, error) {
 	if v := os.Getenv(envManifest); v != "" {
@@ -64,7 +78,7 @@ func FetchManifest(ctx context.Context, manifestURL string) (*Manifest, error) {
 		return nil, fmt.Errorf("manifest: GET %s: HTTP %d", manifestURL, resp.StatusCode)
 	}
 
-	const maxBody = 1 << 20 // multi-MB might be misconfiguration
+	const maxBody = 1 << 20 // multi-MB would be misconfiguration
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("manifest: read body: %w", err)
@@ -82,20 +96,31 @@ func FetchManifest(ctx context.Context, manifestURL string) (*Manifest, error) {
 	if m.Version != ManifestVersion {
 		return nil, fmt.Errorf("%w: got %d, want %d", ErrUnsupportedManifestVersion, m.Version, ManifestVersion)
 	}
-	if len(m.RunedBundles) == 0 {
-		return nil, errors.New("manifest: runed_bundles is empty")
+	if len(m.Platforms) == 0 {
+		return nil, errors.New("manifest: platforms is empty")
 	}
+
 	return &m, nil
 }
 
-func (m *Manifest) BundleForCurrentPlatform() (ArtifactSpec, error) {
+func (m *Manifest) ArtifactsForCurrentPlatform() (PlatformArtifacts, error) {
 	tuple := PlatformTuple()
-	spec, ok := m.RunedBundles[tuple]
+	arts, ok := m.Platforms[tuple]
 	if !ok {
-		return ArtifactSpec{}, fmt.Errorf("%w: %s", ErrNoBundleForPlatform, tuple)
+		return PlatformArtifacts{}, fmt.Errorf("%w: %s", ErrNoArtifactForPlatform, tuple)
 	}
-	if spec.URL == "" || spec.SHA256 == "" {
-		return ArtifactSpec{}, fmt.Errorf("manifest: bundle for %s missing url or sha256", tuple)
+
+	for _, pair := range []struct {
+		name string
+		spec ArtifactSpec
+	}{
+		{"runed", arts.Runed},
+		{"rune_mcp", arts.RuneMCP},
+	} {
+		if pair.spec.URL == "" || pair.spec.SHA256 == "" {
+			return PlatformArtifacts{}, fmt.Errorf("manifest: %s artifact for %s missing url or sha256", pair.name, tuple)
+		}
 	}
-	return spec, nil
+
+	return arts, nil
 }

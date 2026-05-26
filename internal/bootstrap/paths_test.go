@@ -79,7 +79,7 @@ func TestResolve_Independent(t *testing.T) {
 	}
 }
 
-func TestEnsureDirs_CreatesRunedOnly(t *testing.T) {
+func TestEnsureDirs_CreatesAllInstallDirs(t *testing.T) {
 	t.Setenv(envRuneHome, filepath.Join(t.TempDir(), "rune"))
 	t.Setenv(envRunedHome, filepath.Join(t.TempDir(), "runed"))
 	p, err := Resolve()
@@ -95,6 +95,7 @@ func TestEnsureDirs_CreatesRunedOnly(t *testing.T) {
 	}
 
 	for _, expected := range []string{
+		p.RuneBin,
 		p.RunedHome, p.RunedBin, p.RunedModels, p.RunedLogs, p.Cache,
 	} {
 		info, err := os.Stat(expected)
@@ -107,8 +108,8 @@ func TestEnsureDirs_CreatesRunedOnly(t *testing.T) {
 		}
 	}
 
-	if _, err := os.Stat(p.RuneHome); !os.IsNotExist(err) {
-		t.Errorf("RuneHome %s should not be created by EnsureDirs (rune install must not touch rune-mcp's realm); got err=%v", p.RuneHome, err)
+	if _, err := os.Stat(p.RuneConfig); !os.IsNotExist(err) {
+		t.Errorf("RuneConfig %s should not be created by EnsureDirs; got err=%v", p.RuneConfig, err)
 	}
 }
 
