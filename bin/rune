@@ -1,73 +1,90 @@
 #!/usr/bin/env bash
-# Platform-detecting wrapper that fetches and runs the rune CLI binary
-# from GitHub Releases.
-# We don't use a bash installer to prevent agents from decomposing the
-# script into ad-hoc steps rather than just invoking it
+# bin/rune - Rune plugin bootstrap entrypoint at ${CLAUDE_PLUGIN_ROOT}/bin/rune
+#
+# Responsibility: ensure the rune CLI Go binary exists at
+# ~/.rune/bin/rune (the canonical install location)
+#
+# Subcommand surface:
+#   - When ~/.rune/bin/rune already exists: delegates ALL subcommands
+#     unchanged (safety guard)
+#   - When ~/.rune/bin/rune is missing: only `install` is accepted as
+#     the bootstrap entry point
 #
 # Windows support: this wrapper is bash-only. Native Windows shells
 # (PowerShell / cmd) cannot execute this. Windows users must invoke it
-# from WSL or Git Bash, where `uname -s` returns MSYS_NT-* or MINGW64_NT-*;
-#
-# Usage: invoked transparently by agent or user as `rune <subcommand>`.
+# from WSL or Git Bash, where `uname -s` returns MSYS_NT-* or MINGW64_NT-*
 set -euo pipefail
 
 RUNE_VERSION="${RUNE_VERSION:-v0.4.0}"
+RUNE_HOME="${RUNE_HOME:-$HOME/.rune}"
+TARGET="$RUNE_HOME/bin/rune"
 
-CACHE_ROOT="$HOME/.cache/rune"
-CACHE_DIR="$CACHE_ROOT/$RUNE_VERSION"
+# Delegate to ~/.rune/bin/rune
+if [ -x "$TARGET" ]; then
+  exec "$TARGET" "$@"
+fi
 
+# Bootstrap path (~/.rune/bin/rune missing)
+case "${1:-}" in
+  install)
+    ;;
+  *)
+    echo "rune: rune is not fully configured yet." >&2
+    echo "       Running /rune:configure first." >&2
+    exit 127
+    ;;
+esac
+
+# Map (OS, arch) to release asset name
 case "$(uname -s)-$(uname -m)" in
-  Linux-x86_64)               ASSET="rune-linux-amd64"      ;;
-  Linux-aarch64)              ASSET="rune-linux-arm64"      ;;
-  Darwin-x86_64)              ASSET="rune-darwin-amd64"     ;;
-  Darwin-arm64)               ASSET="rune-darwin-arm64"     ;;
-  MINGW64_NT-*-x86_64)        ASSET="rune-windows-amd64.exe" ;;
-  MSYS_NT-*-x86_64)           ASSET="rune-windows-amd64.exe" ;;
+  Linux-x86_64)         ASSET="rune-linux-amd64"        ;;
+  Linux-aarch64)        ASSET="rune-linux-arm64"        ;;
+  Darwin-x86_64)        ASSET="rune-darwin-amd64"       ;;
+  Darwin-arm64)         ASSET="rune-darwin-arm64"       ;;
+  MINGW64_NT-*-x86_64)  ASSET="rune-windows-amd64.exe"  ;;
+  MSYS_NT-*-x86_64)     ASSET="rune-windows-amd64.exe"  ;;
   *)
     echo "rune: unsupported platform $(uname -s)-$(uname -m)" >&2
-    echo "       Supported: Linux x86_64/aarch64, macOS x86_64/arm64, Windows x86_64 via WSL or Git Bash" >&2
+    echo "      Supported: Linux x86_64/aarch64, macOS x86_64/arm64, Windows x86_64 via WSL/Git Bash" >&2
     exit 1
     ;;
 esac
 
-BIN="$CACHE_DIR/$ASSET"
+echo "rune: bootstrapping CLI ($ASSET $RUNE_VERSION) to $TARGET" >&2
 
-if [ ! -x "$BIN" ]; then
-  mkdir -p "$CACHE_DIR"
-  RELEASE_BASE="https://github.com/CryptoLabInc/rune/releases/download/$RUNE_VERSION"
-  echo "rune: fetching $ASSET ($RUNE_VERSION)..." >&2
+RELEASE_BASE="https://github.com/CryptoLabInc/rune/releases/download/$RUNE_VERSION"
+mkdir -p "$(dirname "$TARGET")"
 
-  # Download atomically by rename to prevent partially downloaded binary
-  curl --fail --silent --show-error --location \
-    "$RELEASE_BASE/$ASSET" -o "$BIN.tmp"
-  curl --fail --silent --show-error --location \
-    "$RELEASE_BASE/checksums.txt" -o "$CACHE_DIR/checksums.txt.tmp"
-  mv "$CACHE_DIR/checksums.txt.tmp" "$CACHE_DIR/checksums.txt"
+# Download and verify
+TMP="$(mktemp -t rune-bootstrap-XXXXXX)"
+SUMS="$(mktemp -t rune-bootstrap-sums-XXXXXX)"
+trap 'rm -f "$TMP" "$SUMS"' EXIT
 
-  # Verify
-  EXPECTED="$(grep " $ASSET\$" "$CACHE_DIR/checksums.txt" | cut -d' ' -f1)"
-  if [ -z "$EXPECTED" ]; then
-    rm -f "$BIN.tmp"
-    echo "rune: $ASSET not listed in checksums.txt for $RUNE_VERSION" >&2
-    exit 1
-  fi
+curl --fail --silent --show-error --location "$RELEASE_BASE/$ASSET"        -o "$TMP"
+curl --fail --silent --show-error --location "$RELEASE_BASE/checksums.txt" -o "$SUMS"
 
-  if command -v sha256sum >/dev/null 2>&1; then
-    ACTUAL="$(sha256sum "$BIN.tmp" | cut -d' ' -f1)"
-  else
-    ACTUAL="$(shasum -a 256 "$BIN.tmp" | cut -d' ' -f1)"
-  fi
-
-  if [ "$ACTUAL" != "$EXPECTED" ]; then
-    rm -f "$BIN.tmp"
-    echo "rune: checksum mismatch for $ASSET" >&2
-    echo "       expected: $EXPECTED" >&2
-    echo "       actual:   $ACTUAL" >&2
-    exit 1
-  fi
-
-  chmod +x "$BIN.tmp"
-  mv "$BIN.tmp" "$BIN"
+EXPECTED="$(grep " $ASSET\$" "$SUMS" | cut -d' ' -f1)"
+if [ -z "$EXPECTED" ]; then
+  echo "rune: $ASSET not listed in checksums.txt for $RUNE_VERSION" >&2
+  exit 1
 fi
 
-exec "$BIN" "$@"
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL="$(sha256sum "$TMP" | cut -d' ' -f1)"
+else
+  ACTUAL="$(shasum -a 256 "$TMP" | cut -d' ' -f1)"
+fi
+
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+  echo "rune: checksum mismatch for $ASSET" >&2
+  echo "      expected: $EXPECTED" >&2
+  echo "      actual:   $ACTUAL" >&2
+  exit 1
+fi
+
+# Post-download
+chmod +x "$TMP"
+mv -f "$TMP" "$TARGET"
+
+# Delegate to the freshly-installed Go binary
+exec "$TARGET" "$@"

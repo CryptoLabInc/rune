@@ -13,8 +13,8 @@
   ],
   "mcpServers": {
     "envector": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/rune-mcp",
-      "description": "enVector MCP server (Go binary, v0.4 migration)"
+      "command": "${HOME}/.rune/bin/rune-mcp",
+      "description": "enVector MCP server. Populated by '${CLAUDE_PLUGIN_ROOT}/bin/rune install'; before that, this path doesn't exist and the spawn fails - which the skill markdown catches and recovers from"
     }
   }
 }
