@@ -22,7 +22,10 @@
 //      mcpServers entry uses this to spawn mcp server
 //
 //	rune runed [args...]
-//      Forward stdio + args to ~/.runed/bin/runed
+//      Forward stdio + args to ~/.runed/bin/runed (foreground)
+//
+//	rune runed --detach [args...]
+//      Execute runed as a user-space daemon and supervise its lifecycle in a restart loop
 
 package main
 
@@ -87,7 +90,10 @@ Usage:
   rune mcp-server [args...]
         forward stdio to ~/.rune/bin/rune-mcp (plugin-manifest entry point)
   rune runed [args...]
-        forward stdio + args to ~/.runed/bin/runed
+        forward stdio + args to ~/.runed/bin/runed (foreground)
+  rune runed --detach [args...]
+        supervise runed as a background daemon: detach + log to
+        ~/.runed/logs/daemon.log + auto-restart on crash
 
 Environment:
   RUNE_HOME       override ~/.rune/  (rune plugin realm: config + rune-mcp)
