@@ -49,6 +49,12 @@ $ gemini extensions install https://github.com/CryptoLabInc/rune.git
 > $skill-installer install https://github.com/CryptoLabInc/rune.git
 ```
 
+> **Your next step is always `/rune:configure`.** The plugin install
+> only places a small bootstrap; the actual runtime (rune-mcp + runed
+> daemon) is downloaded the first time you run `/rune:configure`, in a
+> single flow that also collects your Vault credentials. You never need
+> to run a separate install command yourself.
+
 ### Configure
 
 ```
@@ -59,7 +65,7 @@ $ gemini extensions install https://github.com/CryptoLabInc/rune.git
 You'll need from your team admin:
 - **Vault endpoint** + **token**
 
-That's all. enVector Cloud credentials are delivered automatically via the Vault bundle.
+That's all. enVector Cloud credentials are delivered automatically via the Vault bundle. On a fresh machine, `/rune:configure` also handles binary download and daemon setup in the same step.
 
 Don't have these? See [rune-admin](https://github.com/CryptoLabInc/rune-admin) for deployment, or [examples/team-setup-example.md](examples/team-setup-example.md) for a walkthrough.
 
