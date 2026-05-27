@@ -1,6 +1,6 @@
 ---
 description: Activate Rune (resume from dormant) and verify pipelines come up healthy
-allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__envector__activate, mcp__envector__diagnostics, mcp__envector__vault_status
+allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__rune__activate, mcp__rune__diagnostics, mcp__rune__vault_status
 ---
 
 # /rune:activate — Activate Plugin
@@ -8,13 +8,13 @@ allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/
 Resume Rune from a dormant state and verify the boot loop reaches Active.
 
 The MCP server is a Go binary spawned by Claude Code from the plugin manifest's
-`${HOME}/.rune/bin/rune-mcp`. `mcp__envector__activate` runs the prereq
+`${HOME}/.rune/bin/rune-mcp`. `mcp__rune__activate` runs the prereq
 checks server-side (config presence + runed socket reachability, plus a
 runed Health probe) and only triggers the boot loop if everything's ready.
 
 ## Preflight: auto-install on first MCP call
 
-`mcp__envector__*` tools spawn the MCP server lazily - on a fresh
+`mcp__rune__*` tools spawn the MCP server lazily - on a fresh
 `claude plugin install rune`, the binary the manifest points at
 (`${HOME}/.rune/bin/rune-mcp`) does not exist yet, so the very first
 MCP call below will fail with a transport / connection / spawn error.
@@ -40,7 +40,7 @@ error and stop. Do NOT loop the install. The user does NOT type
 
 ## Steps
 
-### 1. Call `mcp__envector__activate`
+### 1. Call `mcp__rune__activate`
 
 That's it - no Read, no Edit, no manual state inspection. The MCP tool
 performs:
@@ -79,7 +79,7 @@ The response shape:
 **`configure_required`** - Vault credentials missing.
 - Render: `"Rune is not yet configured. Run /rune:configure to set Vault credentials."`
 - Use the `hint` verbatim - it already names the exact next step.
-- Stop. Do NOT call `mcp__envector__diagnostics`; the agent already has the answer.
+- Stop. Do NOT call `mcp__rune__diagnostics`; the agent already has the answer.
 
 **`install_pending`** - the activate handler tried to auto-spawn the runed
 daemon (via `${HOME}/bin/rune runed --detach` or the
@@ -118,7 +118,7 @@ it can serve embeddings.
 - Stop. DO NOT poll automatically; DO NOT re-run `/rune:activate`.
 
 **`active`** — happy path. Pipelines initialized, ready to capture/recall.
-- Optionally call `mcp__envector__diagnostics` ONCE to render the
+- Optionally call `mcp__rune__diagnostics` ONCE to render the
   per-subsystem summary below. Skip if you only need to confirm activation;
   `response.reload.state == "active"` is authoritative.
 
@@ -134,7 +134,7 @@ it can serve embeddings.
 
 ### 3. Render success snapshot (active path only)
 
-When `status == "active"`, call `mcp__envector__diagnostics` once and
+When `status == "active"`, call `mcp__rune__diagnostics` once and
 render the per-subsystem report (use ✓ for healthy, ✗ for failures with
 the specific error on the same line):
 

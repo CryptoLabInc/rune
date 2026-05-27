@@ -1,6 +1,6 @@
 ---
 description: Check Rune plugin activation status and infrastructure health
-allowed-tools: Bash(cat ~/.rune/*), Bash(ls:*), Read, mcp__envector__diagnostics, mcp__envector__vault_status
+allowed-tools: Bash(cat ~/.rune/*), Bash(ls:*), Read, mcp__rune__diagnostics, mcp__rune__vault_status
 ---
 
 # /rune:status — Plugin Status
