@@ -1,6 +1,6 @@
 ---
 description: Configure Rune — collect Vault credentials and write ~/.rune/config.json
-allowed-tools: Bash(cp:*), Read, AskUserQuestion, mcp__envector__configure, mcp__envector__activate, mcp__envector__diagnostics
+allowed-tools: Bash(cp:*), Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), Read, AskUserQuestion, mcp__envector__configure, mcp__envector__activate, mcp__envector__diagnostics
 ---
 
 # /rune:configure — Setup & Configuration
@@ -9,10 +9,36 @@ Single entry after `claude plugin install rune`. Collects Vault credentials,
 calls `mcp__envector__configure` (atomic 0600 write + soft Vault probe), and
 hands off to `mcp__envector__activate` to bring pipelines online.
 
-The MCP server is a Go binary fetched by `rune install` (or auto-spawned
-by Claude Code from the plugin manifest, depending on the deployment).
-There is no Python venv, no install script, and no separate `claude mcp add`
-step.
+The MCP server is a Go binary placed at `~/.rune/bin/rune-mcp` by the
+plugin's bootstrap (see Preflight below). The plugin manifest's
+`mcpServers.envector.command` resolves directly to that path; Claude
+spawns it on the first `mcp__envector__*` call.
+
+## Preflight: auto-install on first MCP call
+
+`mcp__envector__*` tools spawn the MCP server lazily - on a fresh
+`claude plugin install rune`, the binary the manifest points at
+(`${HOME}/.rune/bin/rune-mcp`) does not exist yet, so the very first
+MCP call below will fail with a transport / connection / spawn error.
+
+When that happens, recover by running ONE of these install entry points
+via the Bash tool, in priority order — try the first applicable:
+
+1. **`~/.rune/bin/rune install`** - when the canonical Go binary
+   already exists and is executable. One exec hop, no bash wrapper.
+   Used in steady state and on every install after the first.
+2. **`bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune install"`** - when
+   `~/.rune/bin/rune` doesn't exist yet (very first install). The
+   plugin's bash bootstrap downloads the Go binary to
+   `~/.rune/bin/rune` and then delegates to it for the actual install.
+
+Surface the install output to the user verbatim so they see what got
+installed - this is the only point in any /rune:* skill where the user
+sees the underlying `rune install` happen.
+
+Retry the failed MCP call once. If the retry ALSO fails, surface the
+error and stop. Do NOT loop the install. The user does NOT type
+`rune install` themselves - this preflight is the only sanctioned path.
 
 ## Quick Update Mode
 

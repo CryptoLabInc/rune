@@ -1,17 +1,42 @@
 ---
 description: Activate Rune (resume from dormant) and verify pipelines come up healthy
-allowed-tools: mcp__envector__activate, mcp__envector__diagnostics, mcp__envector__vault_status
+allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__envector__activate, mcp__envector__diagnostics, mcp__envector__vault_status
 ---
 
 # /rune:activate — Activate Plugin
 
 Resume Rune from a dormant state and verify the boot loop reaches Active.
 
-The MCP server is a Go binary auto-spawned by Claude Code from the plugin
-manifest. `mcp__envector__activate` runs the prereq checks server-side
-(config presence + runed socket) and only triggers the boot loop if both
-prereqs pass - so this skill is now a single tool call plus result
-rendering.
+The MCP server is a Go binary spawned by Claude Code from the plugin manifest's
+`${HOME}/.rune/bin/rune-mcp`. `mcp__envector__activate` runs the prereq
+checks server-side (config presence + runed socket reachability, plus a
+runed Health probe) and only triggers the boot loop if everything's ready.
+
+## Preflight: auto-install on first MCP call
+
+`mcp__envector__*` tools spawn the MCP server lazily - on a fresh
+`claude plugin install rune`, the binary the manifest points at
+(`${HOME}/.rune/bin/rune-mcp`) does not exist yet, so the very first
+MCP call below will fail with a transport / connection / spawn error.
+
+When that happens, recover by running ONE of these install entry points
+via the Bash tool, in priority order — try the first applicable:
+
+1. **`~/.rune/bin/rune install`** - when the canonical Go binary
+   already exists and is executable. One exec hop, no bash wrapper.
+   Used in steady state and on every install after the first.
+2. **`bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune install"`** - when
+   `~/.rune/bin/rune` doesn't exist yet (very first install). The
+   plugin's bash bootstrap downloads the Go binary to
+   `~/.rune/bin/rune` and then delegates to it for the actual install.
+
+Surface the install output to the user verbatim so they see what got
+installed - this is the only point in any /rune:* skill where the user
+sees the underlying `rune install` happen.
+
+Retry the failed MCP call once. If the retry ALSO fails, surface the
+error and stop. Do NOT loop the install. The user does NOT type
+`rune install` themselves - this preflight is the only sanctioned path.
 
 ## Steps
 
@@ -56,10 +81,16 @@ The response shape:
 - Use the `hint` verbatim - it already names the exact next step.
 - Stop. Do NOT call `mcp__envector__diagnostics`; the agent already has the answer.
 
-**`install_pending`** — runed daemon not installed or not running.
-- Render: `"runed daemon not reachable. Run `rune install` (and ensure the daemon is running), then re-run /rune:activate."`
-- The `hint` field carries the exact socket path that was probed.
-- Stop. Don't call diagnostics.
+**`install_pending`** - the activate handler tried to auto-spawn the runed
+daemon (via `${HOME}/bin/rune runed --detach` or the
+canonical equivalent) but couldn't make the socket reachable. The
+response's `hint` field already contains the specific recovery - usually
+the agent-facing form is `bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune install"`
+(or `~/.rune/bin/rune install` once the CLI is installed).
+- Render the `hint` verbatim to the user, then invoke the hint (recovery command).
+- After install succeeds, retry `/rune:activate` once.
+- Do NOT instruct the user to type the underlying `rune install`
+  themselves - the agent runs it. Stop. Don't call diagnostics.
 
 **`waiting_for_bootstrap`** - runed is up but still self-bootstrapping.
 This is expected on the very first activate after a fresh install: runed
