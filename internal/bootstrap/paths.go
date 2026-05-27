@@ -42,16 +42,17 @@ type Paths struct {
 	InstalledManifest string // ~/.rune/installed.json - install audit log
 
 	// Runed
-	RunedHome   string // ~/.runed
-	RunedBin    string // ~/.runed/bin
-	RunedModels string // ~/.runed/models
-	RunedSocket string // ~/.runed/embedding.sock
-	RunedLock   string // ~/.runed/spawn.lock
-	RunedLogs   string // ~/.runed/logs
-	RunedBinary string // ~/.runed/bin/runed
-	LlamaServer string // ~/.runed/bin/llama-server
-	InstallLock string // ~/.runed/install.lock
-	Cache       string // ~/.runed/cache
+	RunedHome      string // ~/.runed
+	RunedBin       string // ~/.runed/bin
+	RunedModels    string // ~/.runed/models
+	RunedSocket    string // ~/.runed/embedding.sock
+	RunedLock      string // ~/.runed/spawn.lock
+	RunedLogs      string // ~/.runed/logs
+	RunedBinary    string // ~/.runed/bin/runed
+	InstallLock    string // ~/.runed/install.lock
+	SupervisorLock string // ~/.runed/supervisor.lock (`rune runed --detach` hold it during lifetime)
+	DaemonLog      string // ~/.runed/logs/daemon.log
+	Cache          string // ~/.runed/cache
 }
 
 func Resolve() (*Paths, error) {
@@ -95,16 +96,17 @@ func newPaths(runeHome, runedHome string) *Paths {
 		RuneConfig:        filepath.Join(runeHome, "config.json"),
 		InstalledManifest: filepath.Join(runeHome, "installed.json"),
 
-		RunedHome:   runedHome,
-		RunedBin:    runedBin,
-		RunedModels: filepath.Join(runedHome, "models"),
-		RunedSocket: filepath.Join(runedHome, "embedding.sock"),
-		RunedLock:   filepath.Join(runedHome, "spawn.lock"),
-		RunedLogs:   filepath.Join(runedHome, "logs"),
-		RunedBinary: filepath.Join(runedBin, "runed"),
-		LlamaServer: filepath.Join(runedBin, "llama-server"),
-		InstallLock: filepath.Join(runedHome, "install.lock"),
-		Cache:       filepath.Join(runedHome, "cache"),
+		RunedHome:      runedHome,
+		RunedBin:       runedBin,
+		RunedModels:    filepath.Join(runedHome, "models"),
+		RunedSocket:    filepath.Join(runedHome, "embedding.sock"),
+		RunedLock:      filepath.Join(runedHome, "spawn.lock"),
+		RunedLogs:      filepath.Join(runedHome, "logs"),
+		RunedBinary:    filepath.Join(runedBin, "runed"),
+		InstallLock:    filepath.Join(runedHome, "install.lock"),
+		SupervisorLock: filepath.Join(runedHome, "supervisor.lock"),
+		DaemonLog:      filepath.Join(runedHome, "logs", "daemon.log"),
+		Cache:          filepath.Join(runedHome, "cache"),
 	}
 }
 
