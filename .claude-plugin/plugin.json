@@ -12,9 +12,9 @@
     "./agents/claude/retriever.md"
   ],
   "mcpServers": {
-    "envector": {
+    "rune": {
       "command": "${HOME}/.rune/bin/rune-mcp",
-      "description": "enVector MCP server. Populated by '${CLAUDE_PLUGIN_ROOT}/bin/rune install'; before that, this path doesn't exist and the spawn fails - which the skill markdown catches and recovers from"
+      "description": "Rune MCP server (talks to Vault + embedder + enVector). Populated by '${CLAUDE_PLUGIN_ROOT}/bin/rune install'; before that, this path doesn't exist and the spawn fails - which the skill markdown catches and recovers from"
     }
   }
 }

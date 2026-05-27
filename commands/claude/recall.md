@@ -1,6 +1,6 @@
 ---
 description: Search organizational memory for past decisions and context
-allowed-tools: Bash(cat ~/.rune/*), Read, mcp__envector__*
+allowed-tools: Bash(cat ~/.rune/*), Read, mcp__rune__*
 ---
 
 # /rune:recall — Search Memory
@@ -18,7 +18,7 @@ The argument `$ARGUMENTS` contains the search query.
 ## When Active
 
 1. Parse `$ARGUMENTS` as the search query.
-2. Use the envector MCP tools to search encrypted vectors.
+2. Use the Rune MCP tools to search encrypted vectors.
 3. Return relevant results with:
    - Source attribution (who/when)
    - Relevant excerpts

@@ -1,6 +1,6 @@
 ---
 description: Capture organizational context to encrypted memory
-allowed-tools: Bash(cat ~/.rune/*), Read, mcp__envector__*
+allowed-tools: Bash(cat ~/.rune/*), Read, mcp__rune__*
 ---
 
 # /rune:capture — Store Context
@@ -19,7 +19,7 @@ The argument `$ARGUMENTS` contains the context to capture.
 
 1. Parse `$ARGUMENTS` as the context to capture.
 2. Add metadata: timestamp, domain classification (infer from content).
-3. Use the envector MCP tools to embed and store the context.
+3. Use the Rune MCP tools to embed and store the context.
 4. Confirm what was stored with a brief summary.
 
 ## Example
