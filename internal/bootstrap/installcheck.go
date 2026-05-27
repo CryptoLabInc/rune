@@ -70,7 +70,7 @@ func RunInstallChecks(ctx context.Context) *InstallChecks {
 	cfg, cfgChecks := loadRuneConfigChecks(paths)
 	checks := append([]InstallCheck{}, cfgChecks...)
 	checks = append(checks, vaultCredsCheck(cfg))
-	checks = append(checks, executableCheck(CheckRunedBinary, paths.RunedBinary, "run `rune install` to fetch runed"))
+	checks = append(checks, executableCheck(CheckRunedBinary, paths.RunedBinary, "agent: invoke "+AgentInstallRecoveryHint()+" to fetch runed"))
 	checks = append(checks, modelFileCheck(paths.RunedModels))
 	checks = append(checks, socketCheck(paths.RunedSocket, cfg))
 	checks = append(checks, spawnLockCheck(paths.RunedLock))

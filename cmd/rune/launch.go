@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 )
 
 const gracefulShutdownGrace = 5 * time.Second
@@ -18,8 +20,9 @@ func execInstalledBinary(ctx context.Context, binDir, name string, args []string
 
 	if _, err := os.Stat(binPath); err != nil {
 		fmt.Fprintf(stderr,
-			"rune: %s not installed at %s.\nRun `rune install` first (then restart your Claude session if you were trying to launch rune-mcp).\n",
-			name, binPath)
+			"rune: %s not installed at %s (exit 127).\n"+
+				"Agent recovery: invoke %s, then re-attempt the failed slash command.\n",
+			name, binPath, bootstrap.AgentInstallRecoveryHint())
 		return 127 // not installed (missing binary)
 	}
 

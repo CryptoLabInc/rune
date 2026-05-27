@@ -125,3 +125,13 @@ func (p *Paths) EnsureDirs() error {
 func PlatformTuple() string {
 	return runtime.GOOS + "-" + runtime.GOARCH // {os}-{arch}, e.g. "linux-amd64"
 }
+
+func AgentInstallRecoveryHint() string {
+	if paths, err := Resolve(); err == nil {
+		if _, err := os.Stat(paths.RuneCLIBinary); err == nil {
+			return fmt.Sprintf("`%s install`", paths.RuneCLIBinary)
+		}
+	}
+
+	return "`bash -c \"${CLAUDE_PLUGIN_ROOT}/bin/rune install\"`"
+}
