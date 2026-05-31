@@ -126,6 +126,28 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		logf("[%d/3] %s: installed at %s", stepNum, in.step, in.dest)
 	}
 
+	// Record install audit
+	auditArtifacts := make(map[string]InstalledArtifact, len(installs))
+	for _, in := range installs {
+		entry := InstalledArtifact{
+			URL:    in.spec.URL,
+			SHA256: in.spec.SHA256,
+			Path:   in.dest,
+			Size:   in.spec.Size,
+		}
+
+		if info, statErr := os.Stat(in.dest); statErr == nil {
+			entry.Size = info.Size()
+		}
+
+		auditArtifacts[in.step] = entry
+	}
+	if err := WriteInstalledManifest(paths, opts.ManifestURL, manifest, auditArtifacts); err != nil {
+		logf("warning: installed.json write failed: %v", err) // not fatal error
+	} else {
+		logf("audit: installed.json updated at %s", paths.InstalledManifest)
+	}
+
 	// Probe socket
 	if probeSocket(paths.RunedSocket) {
 		logf("probe: daemon already running at %s", paths.RunedSocket)

@@ -35,10 +35,11 @@ const envManifest = "RUNE_MANIFEST"
 
 type Paths struct {
 	// Rune
-	RuneHome      string // ~/.rune
-	RuneBin       string // ~/.rune/bin
-	RuneMCPBinary string // ~/.rune/bin/rune-mcp
-	RuneConfig    string // ~/.rune/config.json
+	RuneHome          string // ~/.rune
+	RuneBin           string // ~/.rune/bin
+	RuneMCPBinary     string // ~/.rune/bin/rune-mcp
+	RuneConfig        string // ~/.rune/config.json
+	InstalledManifest string // ~/.rune/installed.json - install audit log
 
 	// Runed
 	RunedHome   string // ~/.runed
@@ -88,10 +89,11 @@ func newPaths(runeHome, runedHome string) *Paths {
 	runeBin := filepath.Join(runeHome, "bin")
 	runedBin := filepath.Join(runedHome, "bin")
 	return &Paths{
-		RuneHome:      runeHome,
-		RuneBin:       runeBin,
-		RuneMCPBinary: filepath.Join(runeBin, "rune-mcp"),
-		RuneConfig:    filepath.Join(runeHome, "config.json"),
+		RuneHome:          runeHome,
+		RuneBin:           runeBin,
+		RuneMCPBinary:     filepath.Join(runeBin, "rune-mcp"),
+		RuneConfig:        filepath.Join(runeHome, "config.json"),
+		InstalledManifest: filepath.Join(runeHome, "installed.json"),
 
 		RunedHome:   runedHome,
 		RunedBin:    runedBin,
