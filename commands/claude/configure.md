@@ -84,20 +84,33 @@ Issue a SINGLE `AskUserQuestion` with three bundled questions. The tool
 accepts 1–4 questions per call; bundling saves 2 turns + ~50k cache_read
 tokens per separated call.
 
-Questions:
+**Mental model**: the user comes in with an admin-issued endpoint, an
+`evt_...` token, and (for self-signed) a `ca.pem` - all from their Vault
+admin. The agent's job is to collect and format-check those values, NOT to
+invent `localhost` defaults. Give each question exactly two paths: "I have
+it (paste below)" or "I don't have it yet (stop)".
 
-1. **Vault Endpoint** (required, format: `tcp://<host>:50051`).
-   Auto-prepend `tcp://` if the user omits the scheme.
+Questions (use this exact option intent - do not synthesize `tcp://localhost`-style defaults):
+
+1. **Vault Endpoint** (required, format: `tcp://<host>:50051`; auto-prepend `tcp://` if the scheme is omitted).
+   - "Paste endpoint below":  paste the `tcp://host:port` value from your admin into the Other field.
+   - "I don't have one yet": stop; request the endpoint from your Vault admin first.
 2. **Vault Token** (required, format: `evt_xxx...`).
+   - "Paste token below": paste the `evt_...` token from your admin.
+   - "I don't have one yet": stop; request a token from your Vault admin first.
 3. **TLS Mode**:
-   - `self-signed` — team uses a self-signed CA (Recommended).
-   - `public_ca` — Let's Encrypt etc.; system CA pool handles verification.
-   - `no_tls` — local dev only; Vault must also be running with
-     `server.grpc.tls.disable: true`. Warn if selected.
+   - `self-signed`: team uses a self-signed CA (Recommended).
+   - `public_ca`: Let's Encrypt etc.; system CA pool handles verification.
+   - `no_tls`: local dev only; Vault must also be running with `server.grpc.tls.disable: true`. Warn if selected.
 
-**If `self-signed` was chosen**: follow-up `AskUserQuestion` with the
-single question "Path to CA certificate PEM file:" (one question, one turn).
+**If `self-signed` was chosen**: follow-up `AskUserQuestion` with the single
+question "Path to CA certificate PEM file:" - offer "Paste path below"
+(`~` expansion supported) and "I don't have it yet" (stop; request `ca.pem` from your admin).
 Otherwise skip the follow-up.
+
+**On any "I don't have it yet" answer**: stop the flow immediately.
+Tell the user exactly what to request from their Vault admin (endpoint / `evt_...` token / `ca.pem`),
+point them at `setup/check-prerequisites.md`, and exit **without writing any files** - do not call `mcp__rune__configure`.
 
 Resulting argument mapping for the configure call:
 

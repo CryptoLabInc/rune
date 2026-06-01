@@ -67,7 +67,7 @@ You'll need from your team admin:
 
 That's all. enVector Cloud credentials are delivered automatically via the Vault bundle. On a fresh machine, `/rune:configure` also handles binary download and daemon setup in the same step.
 
-Don't have these? See [rune-admin](https://github.com/CryptoLabInc/rune-admin) for deployment, or [examples/team-setup-example.md](examples/team-setup-example.md) for a walkthrough.
+Don't have these? See [rune-admin](https://github.com/CryptoLabInc/rune-admin) for deployment, [setup/check-prerequisites.md](setup/check-prerequisites.md) for the full prerequisite checklist, or [examples/team-setup-example.md](examples/team-setup-example.md) for a walkthrough.
 
 ### That's It
 
