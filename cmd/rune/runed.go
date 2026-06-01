@@ -11,7 +11,7 @@ import (
 
 // runRuned dispatches `rune runed [args...]`:
 //   - Without `--detach`: forwards stdio + args to ~/.runed/bin/runed.
-//     Runed is executed in the foerground.
+//     Runed is executed in the foreground.
 //   - With `--detach`: supervisor mode - re-exec itself with setsid()
 //     to become a process group leader, redirect stdio to ~/.runed/logs/daemon.log,
 //     take ~/.runed/supervisor.lock to prevent race, and watch runed in a restart loop.
