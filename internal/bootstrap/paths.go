@@ -50,6 +50,7 @@ type Paths struct {
 	RunedLock      string // ~/.runed/spawn.lock
 	RunedLogs      string // ~/.runed/logs
 	RunedBinary    string // ~/.runed/bin/runed
+	LlamaServer    string // ~/.runed/bin/llama-server (extracted from runed tarball; RUNED_LLAMA_SERVER env points here)
 	InstallLock    string // ~/.runed/install.lock
 	SupervisorLock string // ~/.runed/supervisor.lock (`rune runed --detach` hold it during lifetime)
 	DaemonLog      string // ~/.runed/logs/daemon.log
@@ -105,6 +106,7 @@ func newPaths(runeHome, runedHome string) *Paths {
 		RunedLock:      filepath.Join(runedHome, "spawn.lock"),
 		RunedLogs:      filepath.Join(runedHome, "logs"),
 		RunedBinary:    filepath.Join(runedBin, "runed"),
+		LlamaServer:    filepath.Join(runedBin, "llama-server"),
 		InstallLock:    filepath.Join(runedHome, "install.lock"),
 		SupervisorLock: filepath.Join(runedHome, "supervisor.lock"),
 		DaemonLog:      filepath.Join(runedHome, "logs", "daemon.log"),

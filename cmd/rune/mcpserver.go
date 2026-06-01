@@ -15,5 +15,5 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 		return 1
 	}
 
-	return execInstalledBinary(ctx, paths.RuneBin, "rune-mcp", args, stderr)
+	return execInstalledBinary(ctx, paths.RuneBin, "rune-mcp", args, nil, stderr)
 }

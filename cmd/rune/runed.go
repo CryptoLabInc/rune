@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 	"github.com/CryptoLabInc/rune-cli/internal/supervisor"
@@ -23,9 +24,16 @@ func runRuned(ctx context.Context, args []string, stderr io.Writer) int {
 		return 1
 	}
 
+	// Point runed at the llama-server that `rune install` extracted from the
+	// runed full-stack tarball. Without this, runed would re-download
+	// llama-server from its own manifest. Set on the process env (rather
+	// than via execInstalledBinary's extraEnv) so the supervisor path's
+	// re-exec/setsid/fork chain also propagates it to the daemon's child.
+	_ = os.Setenv("RUNED_LLAMA_SERVER", paths.LlamaServer)
+
 	detach, forwardedArgs := extractDetachFlag(args)
 	if !detach {
-		return execInstalledBinary(ctx, paths.RunedBin, "runed", forwardedArgs, stderr)
+		return execInstalledBinary(ctx, paths.RunedBin, "runed", forwardedArgs, nil, stderr)
 	}
 
 	if err := paths.EnsureDirs(); err != nil {

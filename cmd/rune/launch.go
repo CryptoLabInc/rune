@@ -15,7 +15,7 @@ import (
 
 const gracefulShutdownGrace = 5 * time.Second
 
-func execInstalledBinary(ctx context.Context, binDir, name string, args []string, stderr io.Writer) int {
+func execInstalledBinary(ctx context.Context, binDir, name string, args []string, extraEnv []string, stderr io.Writer) int {
 	binPath := filepath.Join(binDir, name)
 
 	if _, err := os.Stat(binPath); err != nil {
@@ -30,6 +30,9 @@ func execInstalledBinary(ctx context.Context, binDir, name string, args []string
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	// Forward SIGTERM to the child instead of SIGKILL
 	cmd.Cancel = func() error {
 		return cmd.Process.Signal(syscall.SIGTERM)
