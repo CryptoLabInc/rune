@@ -37,6 +37,7 @@ type Paths struct {
 	// Rune
 	RuneHome          string // ~/.rune
 	RuneBin           string // ~/.rune/bin
+	RuneCLIBinary     string // ~/.rune/bin/rune
 	RuneMCPBinary     string // ~/.rune/bin/rune-mcp
 	RuneConfig        string // ~/.rune/config.json
 	InstalledManifest string // ~/.rune/installed.json - install audit log
@@ -92,6 +93,7 @@ func newPaths(runeHome, runedHome string) *Paths {
 	return &Paths{
 		RuneHome:          runeHome,
 		RuneBin:           runeBin,
+		RuneCLIBinary:     filepath.Join(runeBin, "rune"),
 		RuneMCPBinary:     filepath.Join(runeBin, "rune-mcp"),
 		RuneConfig:        filepath.Join(runeHome, "config.json"),
 		InstalledManifest: filepath.Join(runeHome, "installed.json"),
