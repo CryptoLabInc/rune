@@ -143,6 +143,34 @@ jobs:
           (cd dist && sha256sum rune-* > checksums.txt)
           cat dist/checksums.txt
 
+      - name: Verify pinned releases existency
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUNE_MCP_VERSION=$(awk '/^rune_mcp_version:/ {print $2}' .release-pins.yaml)
+          RUNED_VERSION=$(awk    '/^runed_version:/    {print $2}' .release-pins.yaml)
+          if [ -z "${RUNE_MCP_VERSION:-}" ] || [ -z "${RUNED_VERSION:-}" ]; then
+            echo "::error::missing pin in .release-pins.yaml (rune_mcp_version=${RUNE_MCP_VERSION:-}, runed_version=${RUNED_VERSION:-})" >&2
+            exit 1
+          fi
+          echo "Checking pinned releases: rune-mcp=${RUNE_MCP_VERSION}, runed=${RUNED_VERSION}"
+
+          fail=0
+          if ! gh release view "${RUNE_MCP_VERSION}" --repo CryptoLabInc/rune-mcp >/dev/null 2>&1; then
+            echo "::error::rune-mcp ${RUNE_MCP_VERSION} (pinned in .release-pins.yaml) is not published. Release it before tagging rune, or bump the pin." >&2
+            fail=1
+          fi
+          if ! gh release view "${RUNED_VERSION}" --repo CryptoLabInc/runed >/dev/null 2>&1; then
+            echo "::error::runed ${RUNED_VERSION} (pinned in .release-pins.yaml) is not published. Release it before tagging rune, or bump the pin." >&2
+            fail=1
+          fi
+          
+          [ "$fail" -eq 0 ] || exit 1
+          echo "Both pinned releases are published."
+
       - name: Generate manifest
         shell: bash
         env:
