@@ -108,15 +108,10 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		}
 
 		logf("[%d/3] %s (%d bytes): downloading...", stepNum, in.step, in.spec.Size)
-		if err := DownloadAndVerify(ctx, in.spec, in.dest, opts.Progress); err != nil {
+		if err := installArtifact(ctx, paths, in.spec, in.dest, opts.Progress); err != nil {
 			r.Failed[in.step] = err.Error()
 			r.Status = "partial"
 			return r, err
-		}
-		if err := os.Chmod(in.dest, binaryMode); err != nil {
-			r.Failed[in.step] = err.Error()
-			r.Status = "partial"
-			return r, fmt.Errorf("install: chmod %s: %w", in.dest, err)
 		}
 
 		r.Completed = append(r.Completed, in.step)
@@ -180,6 +175,46 @@ func onlySkipped(r *Result) bool {
 		}
 	}
 	return len(r.Skipped) > 0
+}
+
+// spec.Extract == ""      : raw binaries are downloaded directly to dest
+// spec.Extract == "tar.gz": archive is extracted into dest
+// Others treat as error
+func installArtifact(ctx context.Context, paths *Paths, spec ArtifactSpec, dest string, progress ProgressFunc) error {
+	switch spec.Extract {
+	case "": // raw binaries
+		if err := DownloadAndVerify(ctx, spec, dest, progress); err != nil {
+			return err
+		}
+		if err := os.Chmod(dest, binaryMode); err != nil {
+			return fmt.Errorf("install: chmod %s: %w", dest, err)
+		}
+
+		return nil
+	case "tar.gz": // Tarball archive
+		// Download archive under paths.Cache first
+		tarPath := filepath.Join(paths.Cache, filepath.Base(dest)+".tar.gz")
+		if err := DownloadAndVerify(ctx, spec, tarPath, progress); err != nil {
+			return err
+		}
+		defer os.Remove(tarPath)
+
+		// Extract to destDir
+		destDir := filepath.Dir(dest)
+		if err := ExtractTarball(tarPath, destDir); err != nil {
+			return fmt.Errorf("install: extract %s into %s: %w", tarPath, destDir, err)
+		}
+		if !fileExists(dest) {
+			return fmt.Errorf("install: tarball did not have expected file at %s", dest)
+		}
+		if err := os.Chmod(dest, binaryMode); err != nil {
+			return fmt.Errorf("install: chmod %s: %w", dest, err)
+		}
+
+		return nil
+	default:
+		return fmt.Errorf("install: unsupported extract type %q", spec.Extract)
+	}
 }
 
 func probeSocket(path string) bool {

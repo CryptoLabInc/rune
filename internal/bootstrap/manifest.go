@@ -43,9 +43,10 @@ type PlatformArtifacts struct {
 }
 
 type ArtifactSpec struct {
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
-	Size   int64  `json:"size,omitempty"` // optional; used for progress UX and sanity check
+	URL     string `json:"url"`
+	SHA256  string `json:"sha256"`
+	Size    int64  `json:"size,omitempty"`    // optional; used for progress UX and sanity check
+	Extract string `json:"extract,omitempty"` // "" = raw binary, "tar.gz" = extract tarball
 }
 
 var (
