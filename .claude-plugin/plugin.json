@@ -13,8 +13,9 @@
   ],
   "mcpServers": {
     "rune": {
-      "command": "${HOME}/.rune/bin/rune-mcp",
-      "description": "Rune MCP server (talks to Vault + embedder + enVector). Populated by '${CLAUDE_PLUGIN_ROOT}/bin/rune install'; before that, this path doesn't exist and the spawn fails - which the skill markdown catches and recovers from"
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/rune",
+      "args": ["mcp-server"],
+      "description": "Rune MCP server entry point. Routes through the always-present bin/rune bootstrap (the CLI's documented 'mcp-server' entry point) so a fresh install self-heals: on first spawn it installs the CLI + rune-mcp if missing, then forwards stdio to ~/.rune/bin/rune-mcp, which boots dormant until /rune:configure. No manual /mcp reconnect needed."
     }
   }
 }

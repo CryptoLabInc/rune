@@ -7,8 +7,10 @@
 # Subcommand surface:
 #   - When ~/.rune/bin/rune already exists: delegates ALL subcommands
 #     unchanged (safety guard)
-#   - When ~/.rune/bin/rune is missing: only `install` is accepted as
-#     the bootstrap entry point
+#   - When ~/.rune/bin/rune is missing: `install` and `mcp-server` are
+#     accepted as bootstrap entry points (mcp-server self-installs the
+#     CLI + rune-mcp first, so a fresh plugin install boots without a
+#     manual /mcp reconnect)
 #
 # Windows support: this wrapper is bash-only. Native Windows shells
 # (PowerShell / cmd) cannot execute this. Windows users must invoke it
@@ -20,12 +22,21 @@ TARGET="$RUNE_HOME/bin/rune"
 
 # Delegate to ~/.rune/bin/rune
 if [ -x "$TARGET" ]; then
+  # MCP entry point: ensure rune-mcp is also present before forwarding.
+  # A partial install (CLI present, rune-mcp missing) would otherwise fail
+  # the spawn. Install output goes to stderr — stdout is the MCP channel.
+  if [ "${1:-}" = "mcp-server" ] && [ ! -x "$RUNE_HOME/bin/rune-mcp" ]; then
+    "$TARGET" install >&2 || true
+  fi
   exec "$TARGET" "$@"
 fi
 
 # Bootstrap path (~/.rune/bin/rune missing)
+# `mcp-server` is accepted here too (not just `install`): it is the plugin
+# manifest's spawn-time entry point, so a fresh install must self-heal
+# instead of failing the MCP spawn (which would force a manual /mcp reconnect).
 case "${1:-}" in
-  install)
+  install|mcp-server)
     ;;
   *)
     echo "rune: rune is not fully configured yet." >&2
@@ -112,6 +123,13 @@ fi
 # Post-download
 chmod +x "$TMP"
 mv -f "$TMP" "$TARGET"
+
+# If we bootstrapped via the `mcp-server` entry point, the rune-mcp binary
+# must also exist before we can forward stdio to it — install it now.
+# (stderr, not stdout: stdout becomes the MCP channel after exec.)
+if [ "${1:-}" = "mcp-server" ] && [ ! -x "$RUNE_HOME/bin/rune-mcp" ]; then
+  "$TARGET" install >&2 || { echo "rune: mcp-server bootstrap (install) failed" >&2; exit 127; }
+fi
 
 # Delegate to the freshly-installed Go binary
 exec "$TARGET" "$@"
