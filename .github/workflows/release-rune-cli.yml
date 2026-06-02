@@ -201,14 +201,52 @@ jobs:
             --pattern 'checksums.txt' \
             --dir _downstream/rune-mcp
 
-          runed_sha() {
-            local os=$1 arch=$2
-            awk '{print $1}' "_downstream/runed/runed-${RUNED_VERSION}-${os}-${arch}.tar.gz.sha256"
+          # Downstream assets are now named by build OS (e.g. ubuntu-2204 /
+          # mac-14) rather than GOOS — see CryptoLabInc/runed#9 and the matching
+          # rune-mcp change. Map each manifest platform's GOOS to the os-type
+          # the downstream repos emit (they build natively: linux on ubuntu,
+          # darwin on mac) and discover the exact OS version from the downloaded
+          # filenames, so a downstream runner bump needs no change here.
+          ostype_for() {
+            case "$1" in
+              linux)  echo ubuntu ;;
+              darwin) echo mac ;;
+              *) echo "::error::no os-type mapping for GOOS=$1" >&2; return 1 ;;
+            esac
           }
-          runemcp_sha() {
-            local os=$1 arch=$2
-            awk -v f="rune-mcp-${os}-${arch}" '$2 == f {print $1}' "_downstream/rune-mcp/checksums.txt"
+          # runed tarball basename for goos/goarch, matched from the downloaded
+          # <name>.tar.gz.sha256 files.
+          runed_tarball() {
+            local goos=$1 goarch=$2 ostype f
+            ostype=$(ostype_for "$goos") || return 1
+            f=$(cd _downstream/runed && ls "runed-${RUNED_VERSION}-${ostype}-"*"-${goarch}.tar.gz.sha256" 2>/dev/null | head -1) || true
+            if [ -z "$f" ]; then
+              echo "::error::no runed asset for ${goos}/${goarch} (expected runed-${RUNED_VERSION}-${ostype}-<ver>-${goarch}.tar.gz)" >&2
+              return 1
+            fi
+            echo "${f%.sha256}"
           }
+          # rune-mcp asset basename for goos/goarch, matched from checksums.txt.
+          runemcp_asset() {
+            local goos=$1 goarch=$2 ostype name
+            ostype=$(ostype_for "$goos") || return 1
+            name=$(awk -v re="^rune-mcp-${ostype}-.*-${goarch}$" '$2 ~ re {print $2}' _downstream/rune-mcp/checksums.txt | head -1)
+            if [ -z "$name" ]; then
+              echo "::error::no rune-mcp asset for ${goos}/${goarch}" >&2
+              return 1
+            fi
+            echo "$name"
+          }
+          runed_sha()   { awk '{print $1}'                  "_downstream/runed/$1.sha256"; }
+          runemcp_sha() { awk -v f="$1" '$2 == f {print $1}' _downstream/rune-mcp/checksums.txt; }
+
+          # Resolve asset name + checksum once per platform.
+          RUNED_DARWIN_ARM64=$(runed_tarball darwin arm64); RUNED_DARWIN_ARM64_SHA=$(runed_sha "$RUNED_DARWIN_ARM64")
+          RUNED_LINUX_AMD64=$(runed_tarball linux amd64);   RUNED_LINUX_AMD64_SHA=$(runed_sha "$RUNED_LINUX_AMD64")
+          RUNED_LINUX_ARM64=$(runed_tarball linux arm64);   RUNED_LINUX_ARM64_SHA=$(runed_sha "$RUNED_LINUX_ARM64")
+          MCP_DARWIN_ARM64=$(runemcp_asset darwin arm64);   MCP_DARWIN_ARM64_SHA=$(runemcp_sha "$MCP_DARWIN_ARM64")
+          MCP_LINUX_AMD64=$(runemcp_asset linux amd64);     MCP_LINUX_AMD64_SHA=$(runemcp_sha "$MCP_LINUX_AMD64")
+          MCP_LINUX_ARM64=$(runemcp_asset linux arm64);     MCP_LINUX_ARM64_SHA=$(runemcp_sha "$MCP_LINUX_ARM64")
 
           RUNED_BASE="https://github.com/CryptoLabInc/runed/releases/download/${RUNED_VERSION}"
           MCP_BASE="https://github.com/CryptoLabInc/rune-mcp/releases/download/${RUNE_MCP_VERSION}"
@@ -222,35 +260,35 @@ jobs:
             "platforms": {
               "darwin-arm64": {
                 "runed": {
-                  "url":     "${RUNED_BASE}/runed-${RUNED_VERSION}-darwin-arm64.tar.gz",
-                  "sha256":  "$(runed_sha darwin arm64)",
+                  "url":     "${RUNED_BASE}/${RUNED_DARWIN_ARM64}",
+                  "sha256":  "${RUNED_DARWIN_ARM64_SHA}",
                   "extract": "tar.gz"
                 },
                 "rune_mcp": {
-                  "url":    "${MCP_BASE}/rune-mcp-darwin-arm64",
-                  "sha256": "$(runemcp_sha darwin arm64)"
+                  "url":    "${MCP_BASE}/${MCP_DARWIN_ARM64}",
+                  "sha256": "${MCP_DARWIN_ARM64_SHA}"
                 }
               },
               "linux-amd64": {
                 "runed": {
-                  "url":     "${RUNED_BASE}/runed-${RUNED_VERSION}-linux-amd64.tar.gz",
-                  "sha256":  "$(runed_sha linux amd64)",
+                  "url":     "${RUNED_BASE}/${RUNED_LINUX_AMD64}",
+                  "sha256":  "${RUNED_LINUX_AMD64_SHA}",
                   "extract": "tar.gz"
                 },
                 "rune_mcp": {
-                  "url":    "${MCP_BASE}/rune-mcp-linux-amd64",
-                  "sha256": "$(runemcp_sha linux amd64)"
+                  "url":    "${MCP_BASE}/${MCP_LINUX_AMD64}",
+                  "sha256": "${MCP_LINUX_AMD64_SHA}"
                 }
               },
               "linux-arm64": {
                 "runed": {
-                  "url":     "${RUNED_BASE}/runed-${RUNED_VERSION}-linux-arm64.tar.gz",
-                  "sha256":  "$(runed_sha linux arm64)",
+                  "url":     "${RUNED_BASE}/${RUNED_LINUX_ARM64}",
+                  "sha256":  "${RUNED_LINUX_ARM64_SHA}",
                   "extract": "tar.gz"
                 },
                 "rune_mcp": {
-                  "url":    "${MCP_BASE}/rune-mcp-linux-arm64",
-                  "sha256": "$(runemcp_sha linux arm64)"
+                  "url":    "${MCP_BASE}/${MCP_LINUX_ARM64}",
+                  "sha256": "${MCP_LINUX_ARM64_SHA}"
                 }
               }
             }
