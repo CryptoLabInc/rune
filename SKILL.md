@@ -312,8 +312,6 @@ When Rune is active, proactively capture significant decisions when you detect a
 - "The key insight is..."
 - "Based on [data/research/testing]..."
 
-**Full Pattern Reference**: See [patterns/capture-triggers.md](patterns/capture-triggers.md) for 200+ comprehensive trigger phrases organized by role and domain.
-
 **Significance Threshold**: 0.7 (captures meaningful decisions, filters trivial content)
 
 **Automatic Redaction**: Always redact API keys, passwords, tokens, PII, and sensitive data before capture.
@@ -337,8 +335,6 @@ When users ask questions about past decisions, automatically search organization
 - "What's our approach to..."
 - "What were the trade-offs..."
 - "Who decided on..."
-
-**Full Pattern Reference**: See [patterns/retrieval-patterns.md](patterns/retrieval-patterns.md) for 150+ comprehensive query patterns organized by intent and domain.
 
 **Search Strategy**: Semantic similarity search on FHE-encrypted vectors, ranked by relevance and recency.
 

@@ -17,7 +17,7 @@ Before doing anything, verify Rune is active:
 
 ## Your Job
 
-Surface relevant past decisions and organizational context whenever the conversation touches topics where prior knowledge may exist. Call the `mcp__plugin_rune_envector__recall` MCP tool. The tool handles search internally:
+Surface relevant past decisions and organizational context whenever the conversation touches topics where prior knowledge may exist. Call the `mcp__plugin_rune_rune__recall` MCP tool. The tool handles search internally:
 
 1. **Query parsing**: Intent detection, entity extraction, query expansion
 2. **Search**: Multi-query encrypted vector search via enVector
@@ -42,7 +42,7 @@ In short: if the team is **working toward a decision or exploring a topic** wher
 ## How to Call
 
 ```
-mcp__plugin_rune_envector__recall(
+mcp__plugin_rune_rune__recall(
     query="<topic, decision context, or question being discussed>",
     topk=5,
     domain="architecture",   # optional: filter by domain

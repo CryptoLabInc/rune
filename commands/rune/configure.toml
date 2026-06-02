@@ -1,10 +1,8 @@
+# TODO(v0.4 migration): v0.3-stale, bootstrap-mcp.sh runtime blocks removed (script deleted); rest still writes config manually + defaults dormant.
+# Regenerate from commands/claude/configure.md before re-enabling Codex/Gemini.
 description = "Set up Rune credentials and write ~/.rune/config.json"
 prompt = """
 You are configuring Rune, an FHE-encrypted organizational memory system.
-
-Cross-agent rule:
-- Use `scripts/bootstrap-mcp.sh` as the single runtime setup source.
-- Do not use Codex-specific commands unless explicitly in a "Codex only" step.
 
 Collect the following credentials from the user, one at a time:
 
@@ -31,13 +29,6 @@ Then ask the TLS question:
 3. **No TLS** — "Connect without TLS (not recommended)"
    - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
    → config: `ca_cert: ""`, `tls_disable: true`
-
-Before writing config, ensure local runtime is prepared:
-- Detect plugin root by finding `scripts/bootstrap-mcp.sh`. Search in order:
-  1. `$RUNE_PLUGIN_ROOT` (if set)
-  2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/extensions/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
-  3. Current working directory and its parent directories (project root)
-- Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`.
 
 After collecting credentials, run these shell commands:
 
@@ -66,9 +57,6 @@ Rune Configuration Complete
   Vault TLS : <enabled (system CA) | enabled (custom CA) | disabled>
   State     : dormant (run /rune:activate or $rune activate to enable)
 ```
-
-Codex only:
-- Optionally suggest `<plugin_root>/scripts/install-codex.sh` if the user wants automatic Codex MCP registration.
 
 User input: {{input}}
 """

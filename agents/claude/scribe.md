@@ -22,7 +22,7 @@ Monitor the current conversation for **significant decisions and organizational 
 1. **Policy Evaluation** — decide whether to capture
 2. **Structured Extraction** — extract decision fields as JSON
 
-Then call the `mcp__plugin_rune_envector__capture` MCP tool with the `extracted` parameter. The MCP server handles novelty checking (Memory-as-Filter), encryption, and storage — no LLM API key required.
+Then call the `mcp__plugin_rune_rune__capture` MCP tool with the `extracted` parameter. The MCP server handles novelty checking (Memory-as-Filter), encryption, and storage — no LLM API key required.
 
 ## Step 1: Policy Evaluation
 
@@ -235,7 +235,7 @@ If the original message is in a non-English language, **translate all extracted 
 ## Step 3: Call the MCP Tool
 
 ```
-mcp__plugin_rune_envector__capture(
+mcp__plugin_rune_rune__capture(
     text="<the original significant text>",
     source="claude_agent",
     user="<user if known>",
