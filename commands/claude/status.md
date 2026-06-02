@@ -49,6 +49,7 @@ Use checkmarks for healthy items, X marks for issues.
 
 **Embedder rendering rules** (from diagnostics `embedding` section):
 - Check when `status == "OK"` and neither `info_error` nor `health_error` is set
+- **`IDLE` is healthy, not a fault** — render a paused/ready marker (e.g. `⏸`), NOT an X. The embedder intentionally stopped its llama-server after an idle period (`RUNED_IDLE_TIMEOUT`) to free model memory; the next capture/recall resumes it automatically. Surface the diagnostics `message` (e.g. "…resumes on next request") so the user knows nothing is broken — no action needed.
 - X mark when `status` is `LOADING` / `DEGRADED` / `SHUTTING_DOWN` / `UNSPECIFIED`, or when any error field is populated
 - Show `socket_path` always when populated - it's the only way users can tell which runed instance they're talking to. Recall: runed is a shared singleton across sessions, so divergent socket paths between teammates indicate a misconfiguration.
 - Format `uptime_seconds` as a human-readable duration (e.g. `8h8m`, `37s`)
