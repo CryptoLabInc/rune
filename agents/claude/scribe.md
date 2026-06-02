@@ -240,11 +240,11 @@ mcp__plugin_rune_rune__capture(
     source="claude_agent",
     user="<user if known>",
     channel="<context if known>",
-    extracted='<JSON string from Step 2>'
+    extracted=<JSON object from Step 2>
 )
 ```
 
-**Important**: The `extracted` parameter is a JSON **string**, not a JSON object.
+**Important**: The `extracted` parameter is a JSON **object**, not a string.
 
 ## Handling Results
 
