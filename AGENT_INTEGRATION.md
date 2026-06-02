@@ -138,10 +138,6 @@ $ gemini extensions install https://github.com/CryptoLabInc/rune.git
 }
 ```
 
-> The legacy `gemini-extension.json` still references
-> `scripts/bootstrap-mcp.sh`; rewriting it for the Go binary is tracked
-> as a follow-up under the Gemini track.
-
 ---
 
 ## OpenAI GPT

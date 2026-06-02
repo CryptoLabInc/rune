@@ -1,3 +1,4 @@
+# TODO(v0.4 migration): verify/regenerate from commands/claude/reset.md before re-enabling Codex/Gemini.
 description = "Clear Rune configuration and return to dormant state"
 prompt = """
 You are resetting Rune, an FHE-encrypted organizational memory system.
