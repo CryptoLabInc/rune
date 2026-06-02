@@ -15,7 +15,8 @@
     "rune": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/rune",
       "args": ["mcp-server"],
-      "description": "Rune MCP server entry point. Routes through the always-present bin/rune bootstrap (the CLI's documented 'mcp-server' entry point) so a fresh install self-heals: on first spawn it installs the CLI + rune-mcp if missing, then forwards stdio to ~/.rune/bin/rune-mcp, which boots dormant until /rune:configure. No manual /mcp reconnect needed."
+      "timeout": 30000,
+      "description": "Rune MCP server (talks to Vault + embedder + enVector). The command is the plugin's bash wrapper, which always exists at session start; on first run it self-install rune-mcp, then exec - MCP server comes online in the same session with no restart."
     }
   }
 }

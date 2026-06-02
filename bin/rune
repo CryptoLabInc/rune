@@ -10,7 +10,7 @@
 #   - When ~/.rune/bin/rune is missing: `install` and `mcp-server` are
 #     accepted as bootstrap entry points (mcp-server self-installs the
 #     CLI + rune-mcp first, so a fresh plugin install boots without a
-#     manual /mcp reconnect)
+#     manual /mcp reconnect or session restart)
 #
 # Windows support: this wrapper is bash-only. Native Windows shells
 # (PowerShell / cmd) cannot execute this. Windows users must invoke it
@@ -20,14 +20,8 @@ set -euo pipefail
 RUNE_HOME="${RUNE_HOME:-$HOME/.rune}"
 TARGET="$RUNE_HOME/bin/rune"
 
-# Delegate to ~/.rune/bin/rune
+# Delegate to ~/.rune/bin/rune immediately
 if [ -x "$TARGET" ]; then
-  # MCP entry point: ensure rune-mcp is also present before forwarding.
-  # A partial install (CLI present, rune-mcp missing) would otherwise fail
-  # the spawn. Install output goes to stderr — stdout is the MCP channel.
-  if [ "${1:-}" = "mcp-server" ] && [ ! -x "$RUNE_HOME/bin/rune-mcp" ]; then
-    "$TARGET" install >&2 || true
-  fi
   exec "$TARGET" "$@"
 fi
 
@@ -45,6 +39,42 @@ case "${1:-}" in
     ;;
 esac
 
+# Concurrency-safe CLI download
+mkdir -p "$RUNE_HOME"
+LOCK_DIR="$RUNE_HOME/bootstrap.lock.d"
+TMP=""
+SUMS=""
+cleanup() {
+  [ -n "$TMP" ] && rm -f "$TMP"
+  [ -n "$SUMS" ] && rm -f "$SUMS"
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+waited=0
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do # another session hold lock
+  if [ -x "$TARGET" ]; then
+    exec "$TARGET" "$@"   # bootstrap finished
+  fi
+
+  sleep 1
+  waited=$((waited + 1))
+  if [ "$waited" -ge 120 ]; then
+    echo "rune: bootstrap lock held >120s, reclaiming" >&2
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+    waited=0
+  fi
+done
+
+# Check error
+trap cleanup EXIT INT TERM
+
+if [ -x "$TARGET" ]; then
+  cleanup
+  trap - EXIT INT TERM
+  exec "$TARGET" "$@"
+fi
+
+# Lazy version evaluation
 # Priority: RUNE_VERSION > latest release (including pre-release for now)
 # TODO: switch to .../rune/releases/latest
 RUNE_VERSION="${RUNE_VERSION:-}"
@@ -96,7 +126,6 @@ mkdir -p "$(dirname "$TARGET")"
 # Download and verify
 TMP="$(mktemp -t rune-bootstrap-XXXXXX)"
 SUMS="$(mktemp -t rune-bootstrap-sums-XXXXXX)"
-trap 'rm -f "$TMP" "$SUMS"' EXIT
 
 curl --fail --silent --show-error --location "$RELEASE_BASE/$ASSET"        -o "$TMP"
 curl --fail --silent --show-error --location "$RELEASE_BASE/checksums.txt" -o "$SUMS"
@@ -120,16 +149,12 @@ if [ "$ACTUAL" != "$EXPECTED" ]; then
   exit 1
 fi
 
-# Post-download
+# Atomic publish
 chmod +x "$TMP"
 mv -f "$TMP" "$TARGET"
-
-# If we bootstrapped via the `mcp-server` entry point, the rune-mcp binary
-# must also exist before we can forward stdio to it — install it now.
-# (stderr, not stdout: stdout becomes the MCP channel after exec.)
-if [ "${1:-}" = "mcp-server" ] && [ ! -x "$RUNE_HOME/bin/rune-mcp" ]; then
-  "$TARGET" install >&2 || { echo "rune: mcp-server bootstrap (install) failed" >&2; exit 127; }
-fi
+TMP=""
 
 # Delegate to the freshly-installed Go binary
+cleanup
+trap - EXIT INT TERM
 exec "$TARGET" "$@"
