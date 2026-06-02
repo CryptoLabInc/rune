@@ -6,12 +6,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
 type InstallOptions struct {
 	ManifestURL string
-	Force       bool // `rune install --force` to force re-download
+	Force       bool     // `rune install --force` to force re-download
+	Target      []string // empty = all; StepRuneMCP | StepRuned
 	Progress    ProgressFunc
 	Log         func(format string, args ...any)
 }
@@ -66,8 +68,14 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		Installed: map[string]ArtifactInfo{},
 	}
 
+	// Total step count
+	total := 3 // all steps
+	if len(opts.Target) > 0 {
+		total = 1 + len(opts.Target) // manifest + num artifacts
+	}
+
 	// Fetch manifest
-	logf("[1/3] manifest: fetching from %s", opts.ManifestURL)
+	logf("[1/%d] manifest: fetching from %s", total, opts.ManifestURL)
 	manifest, err := FetchManifest(ctx, opts.ManifestURL)
 	if err != nil {
 		r.Failed[StepManifest] = err.Error()
@@ -75,7 +83,7 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		return r, err
 	}
 	r.Completed = append(r.Completed, StepManifest)
-	logf("[1/3] manifest: ok (rune-mcp %s, runed %s)", manifest.RuneMCPVersion, manifest.RunedVersion)
+	logf("[1/%d] manifest: ok (rune-mcp %s, runed %s)", total, manifest.RuneMCPVersion, manifest.RunedVersion)
 
 	artifacts, err := manifest.ArtifactsForCurrentPlatform()
 	if err != nil {
@@ -95,11 +103,18 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		{StepRuneMCP, artifacts.RuneMCP, paths.RuneMCPBinary},
 	}
 
+	// Filter install target
+	if len(opts.Target) > 0 {
+		installs = slices.DeleteFunc(installs, func(in install) bool {
+			return !slices.Contains(opts.Target, in.step)
+		})
+	}
+
 	for i, in := range installs {
-		stepNum := i + 2 // starting from [2/3]
+		stepNum := i + 2 // step 1: manifest
 		if !opts.Force {
 			if fileExists(in.dest) {
-				logf("[%d/3] %s: skipped (already at %s)", stepNum, in.step, in.dest)
+				logf("[%d/%d] %s: skipped (already at %s)", stepNum, total, in.step, in.dest)
 				r.Completed = append(r.Completed, in.step)
 				r.Skipped = append(r.Skipped, in.step)
 
@@ -107,7 +122,7 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 			}
 		}
 
-		logf("[%d/3] %s (%d bytes): downloading...", stepNum, in.step, in.spec.Size)
+		logf("[%d/%d] %s (%d bytes): downloading...", stepNum, total, in.step, in.spec.Size)
 		if err := installArtifact(ctx, paths, in.spec, in.dest, opts.Progress); err != nil {
 			r.Failed[in.step] = err.Error()
 			r.Status = "partial"
@@ -118,29 +133,32 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		if info, statErr := os.Stat(in.dest); statErr == nil {
 			r.Installed[filepath.Base(in.dest)] = ArtifactInfo{Path: in.dest, Size: info.Size()}
 		}
-		logf("[%d/3] %s: installed at %s", stepNum, in.step, in.dest)
+		logf("[%d/%d] %s: installed at %s", stepNum, total, in.step, in.dest)
 	}
 
-	// Record install audit
-	auditArtifacts := make(map[string]InstalledArtifact, len(installs))
-	for _, in := range installs {
-		entry := InstalledArtifact{
-			URL:    in.spec.URL,
-			SHA256: in.spec.SHA256,
-			Path:   in.dest,
-			Size:   in.spec.Size,
+	// Record install audit is only available with full `rune install` (no not allow partial record)
+	if len(opts.Target) == 0 {
+		auditArtifacts := make(map[string]InstalledArtifact, len(installs))
+		for _, in := range installs {
+			entry := InstalledArtifact{
+				URL:    in.spec.URL,
+				SHA256: in.spec.SHA256,
+				Path:   in.dest,
+				Size:   in.spec.Size,
+			}
+
+			if info, statErr := os.Stat(in.dest); statErr == nil {
+				entry.Size = info.Size()
+			}
+
+			auditArtifacts[in.step] = entry
 		}
 
-		if info, statErr := os.Stat(in.dest); statErr == nil {
-			entry.Size = info.Size()
+		if err := WriteInstalledManifest(paths, opts.ManifestURL, manifest, auditArtifacts); err != nil {
+			logf("warning: installed.json write failed: %v", err) // not fatal error
+		} else {
+			logf("audit: installed.json updated at %s", paths.InstalledManifest)
 		}
-
-		auditArtifacts[in.step] = entry
-	}
-	if err := WriteInstalledManifest(paths, opts.ManifestURL, manifest, auditArtifacts); err != nil {
-		logf("warning: installed.json write failed: %v", err) // not fatal error
-	} else {
-		logf("audit: installed.json updated at %s", paths.InstalledManifest)
 	}
 
 	// Probe socket
