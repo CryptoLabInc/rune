@@ -24,22 +24,34 @@ func runRuned(ctx context.Context, args []string, stderr io.Writer) int {
 		return 1
 	}
 
-	// Point runed at the llama-server that `rune install` extracted from the
-	// runed full-stack tarball. Without this, runed would re-download
-	// llama-server from its own manifest. Set on the process env (rather
+	// If a llama-server is present in ~/.runed/bin, point runed at it so it skips
+	// re-download. When it's absent, leave the env UNSET so runed
+	// self-bootstraps llama-server on first boot. Set on the process env (rather
 	// than via execInstalledBinary's extraEnv) so the supervisor path's
 	// re-exec/setsid/fork chain also propagates it to the daemon's child.
-	_ = os.Setenv("RUNED_LLAMA_SERVER", paths.LlamaServer)
+	if _, err := os.Stat(paths.LlamaServer); err == nil {
+		_ = os.Setenv("RUNED_LLAMA_SERVER", paths.LlamaServer)
+	}
 
 	detach, forwardedArgs := extractDetachFlag(args)
 	if !detach {
 		return execInstalledBinary(ctx, paths.RunedBin, "runed", forwardedArgs, nil, stderr)
 	}
 
+	// Verify path since `rune runed --detach` return immediately without error (exit 0)
+	if _, err := os.Stat(paths.RunedBinary); err != nil {
+		fmt.Fprintf(stderr,
+			"rune: runed not installed at %s (exit 127).\n"+
+				"Agent recovery: invoke %s, then re-attempt.\n",
+			paths.RunedBinary, bootstrap.AgentInstallRecoveryHint())
+		return 127
+	}
+
 	if err := paths.EnsureDirs(); err != nil {
 		fmt.Fprintf(stderr, "rune: ensure dirs: %v\n", err)
 		return 1
 	}
+
 	if err := supervisor.EnsureLogDir(paths.DaemonLog); err != nil {
 		fmt.Fprintf(stderr, "rune: prepare log dir: %v\n", err)
 		return 1

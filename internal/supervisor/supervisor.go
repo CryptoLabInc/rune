@@ -114,6 +114,7 @@ func runWatcher(ctx context.Context, cfg Config) error {
 		cmd.Stderr = os.Stderr
 
 		fmt.Fprintf(os.Stderr, "supervisor: starting %s %v\n", cfg.RunedBinary, cfg.RunedArgs)
+		started := time.Now()
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("supervisor: start %s: %w", cfg.RunedBinary, err)
 		}
@@ -139,7 +140,12 @@ func runWatcher(ctx context.Context, cfg Config) error {
 				return nil // clean exit
 			}
 
+			// Reset backoff count if child live longer than crash window
 			now := time.Now()
+			if now.Sub(started) > cfg.MaxCrashWindow {
+				backoffIdx = 0
+			}
+
 			crashes = append(crashes, now)
 			cutoff := now.Add(-cfg.MaxCrashWindow) // crashes older than now - cfg.MaxCrashWindow are considered expired
 			i := 0
