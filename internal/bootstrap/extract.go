@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 )
 
-// Unapck tarPath into destDir
+// Unpack tarPath into destDir, caller should hold install lock to prevent concurrent extraction
 func ExtractTarball(tarPath, destDir string) error {
 	f, err := os.Open(tarPath)
 	if err != nil {
@@ -63,18 +63,9 @@ func ExtractTarball(tarPath, destDir string) error {
 				mode = 0o644
 			}
 
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
-			if err != nil {
-				return fmt.Errorf("extract: open %s: %w", target, err)
-			}
-
-			if _, err := io.Copy(out, tr); err != nil {
-				_ = out.Close()
-				return fmt.Errorf("extract: write %s: %w", target, err)
-			}
-
-			if err := out.Close(); err != nil {
-				return fmt.Errorf("extract: close %s: %w", target, err)
+			// Atomic extraction
+			if err := extractRegularFile(tr, target, mode); err != nil {
+				return err
 			}
 		default:
 			// non-regular binareis (symlink, devices, etc) are skipped
@@ -89,4 +80,43 @@ func safeJoin(destAbs, name string) (string, error) {
 	}
 
 	return filepath.Join(destAbs, path), nil
+}
+
+func extractRegularFile(r io.Reader, dest string, mode os.FileMode) error {
+	// Try extraction as temp file
+	tmp := dest + ".partial"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return fmt.Errorf("extract: open %s: %w", tmp, err)
+	}
+
+	if _, err := io.Copy(out, r); err != nil {
+		_ = out.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("extract: write %s: %w", tmp, err)
+	}
+
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("extract: fsync %s: %w", tmp, err)
+	}
+
+	if err := out.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("extract: close %s: %w", tmp, err)
+	}
+
+	if err := os.Chmod(tmp, mode); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("extract: chmod %s: %w", tmp, err)
+	}
+
+	// Rename to dest for atomicity
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("extract: rename %s to %s: %w", tmp, dest, err)
+	}
+
+	return nil
 }
