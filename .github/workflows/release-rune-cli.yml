@@ -311,7 +311,6 @@ jobs:
             dist/rune-linux-amd64
             dist/rune-linux-arm64
             dist/rune-darwin-arm64
-            # dist/rune-windows-amd64.exe
             dist/checksums.txt
             dist/manifest.json
           fail_on_unmatched_files: true
