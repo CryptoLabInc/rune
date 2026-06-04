@@ -10,6 +10,8 @@ import (
 	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 )
 
+const mcpSelfhealBudget = 25 * time.Second // (download:25s + (exec + MCP handshake):5s) < plugin manifest 30s MCP connection timeout
+
 func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 	paths, err := bootstrap.Resolve()
 	if err != nil {
@@ -27,8 +29,11 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 			manifest = env
 		}
 
+		healCtx, cancel := context.WithTimeout(ctx, mcpSelfhealBudget)
+		defer cancel()
+
 		// Concurrency-safe install
-		_, instErr := bootstrap.Install(ctx, bootstrap.InstallOptions{
+		_, instErr := bootstrap.Install(healCtx, bootstrap.InstallOptions{
 			ManifestURL: manifest,
 			Target:      []string{bootstrap.StepRuneMCP},
 			Log: func(format string, a ...any) {
@@ -36,9 +41,9 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 			},
 		})
 		if instErr != nil {
-			// Sessions which do not invoke install wait here
-			if !waitForFile(ctx, paths.RuneMCPBinary, bootstrap.InstallLockTimeout) {
-				fmt.Fprintf(stderr, "rune: failed to install rune-mcp: %v\n", instErr)
+			if !waitForFile(healCtx, paths.RuneMCPBinary, mcpSelfhealBudget) {
+				fmt.Fprintf(stderr, "rune: failed to install rune-mcp within %s: %v\n", mcpSelfhealBudget, instErr)
+				fmt.Fprintln(stderr, "     another session may still be installing it; reconnect via /mcp once it completes")
 				return 1
 			}
 
