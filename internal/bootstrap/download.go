@@ -19,14 +19,13 @@ import (
 
 var ErrChecksumMismatch = errors.New("checksum mismatch")
 
-// HTTP client with timeout
-var downloadClient = &http.Client{
-	Transport: &http.Transport{
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		IdleConnTimeout:       30 * time.Second,
-	},
+var downloadClient = &http.Client{Transport: newDownloadTransport()}
+
+func newDownloadTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone() // Get default values
+	t.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	t.ResponseHeaderTimeout = 30 * time.Second
+	return t
 }
 
 type ProgressFunc func(downloaded, total int64)
@@ -35,6 +34,9 @@ func DownloadAndVerify(ctx context.Context, spec ArtifactSpec, destPath string, 
 	if spec.URL == "" || spec.SHA256 == "" {
 		return errors.New("download: spec missing url or sha256")
 	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, spec.URL, nil)
 	if err != nil {
@@ -66,7 +68,17 @@ func DownloadAndVerify(ctx context.Context, spec ArtifactSpec, destPath string, 
 
 	h := sha256.New()
 	total := resp.ContentLength // -1 when unknown
-	written, err := streamWithProgress(resp.Body, f, h, total, progress)
+
+	const stallTimeout = 30 * time.Second
+	wd := time.AfterFunc(stallTimeout, cancel)
+	defer wd.Stop()
+
+	written, err := streamWithProgress(resp.Body, f, h, total, func(d, t int64) {
+		wd.Reset(stallTimeout)
+		if progress != nil {
+			progress(d, t)
+		}
+	})
 	if err != nil {
 		return fmt.Errorf("download: write %s: %w", partial, err)
 	}
