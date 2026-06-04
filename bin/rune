@@ -85,10 +85,10 @@ if [ -z "$RUNE_VERSION" ]; then
   # Use token if exist
   token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
   if [ -n "$token" ]; then
-    body="$(curl --fail --silent --show-error --location \
+    body="$(curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
       --header "Authorization: Bearer $token" "$api" || true)"
   else
-    body="$(curl --fail --silent --show-error --location "$api" || true)"
+    body="$(curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 "$api" || true)"
   fi
 
   RUNE_VERSION="$(printf '%s' "$body" \
@@ -122,12 +122,12 @@ echo "rune: bootstrapping CLI ($ASSET $RUNE_VERSION) to $TARGET" >&2
 RELEASE_BASE="https://github.com/CryptoLabInc/rune/releases/download/$RUNE_VERSION"
 mkdir -p "$(dirname "$TARGET")"
 
-# Download and verify
-TMP="$(mktemp -t rune-bootstrap-XXXXXX)"
+# Leave TMP on the same filesystem as TARGET
+TMP="$(mktemp "$(dirname "$TARGET")/.rune-bootstrap-XXXXXX")"
 SUMS="$(mktemp -t rune-bootstrap-sums-XXXXXX)"
 
-curl --fail --silent --show-error --location "$RELEASE_BASE/$ASSET"        -o "$TMP"
-curl --fail --silent --show-error --location "$RELEASE_BASE/checksums.txt" -o "$SUMS"
+curl --fail --silent --show-error --location --connect-timeout 10 --max-time 120 "$RELEASE_BASE/$ASSET"        -o "$TMP"
+curl --fail --silent --show-error --location --connect-timeout 10 --max-time 30  "$RELEASE_BASE/checksums.txt" -o "$SUMS"
 
 EXPECTED="$(grep " $ASSET\$" "$SUMS" | cut -d' ' -f1)"
 if [ -z "$EXPECTED" ]; then
