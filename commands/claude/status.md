@@ -92,7 +92,7 @@ Examples:
 - `kind=vault_network` → "Vault endpoint `<endpoint>` is not reachable.
   Verify the host/port and your network/firewall."
 - `kind=embedder_unreachable` → "Embedder daemon (`runed`) is not running on
-  its UDS socket. Start it with `runed start`."
+  its UDS socket. Re-run `/rune:activate` to (re)spawn it."
 - `kind=unknown` → show both `hint` and `detail` and suggest sharing with admin.
 
 DO NOT call shell tools (`openssl`, `nc`, `curl`, etc.) to "verify" the

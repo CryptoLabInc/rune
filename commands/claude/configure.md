@@ -9,36 +9,34 @@ Single entry after `claude plugin install rune`. Collects Vault credentials,
 calls `mcp__rune__configure` (atomic 0600 write + soft Vault probe), and
 hands off to `mcp__rune__activate` to bring pipelines online.
 
-The MCP server is a Go binary placed at `~/.rune/bin/rune-mcp` by the
-plugin's bootstrap (see Preflight below). The plugin manifest's
-`mcpServers.rune.command` resolves directly to that path; Claude
-spawns it on the first `mcp__rune__*` call.
+The MCP server is a Go binary at `~/.rune/bin/rune-mcp`. The plugin manifest
+spawns it via the committed bash wrapper `${CLAUDE_PLUGIN_ROOT}/bin/rune
+mcp-server` (always present at session start). On a fresh install the wrapper
+bootstraps the rune CLI and self-installs rune-mcp, then execs it — so the MCP
+server comes online in the SAME session, with no restart.
 
-## Preflight: auto-install on first MCP call
+## Preflight: the first MCP call self-installs
 
-`mcp__rune__*` tools spawn the MCP server lazily - on a fresh
-`claude plugin install rune`, the binary the manifest points at
-(`${HOME}/.rune/bin/rune-mcp`) does not exist yet, so the very first
-MCP call below will fail with a transport / connection / spawn error.
+On a fresh `claude plugin install rune`, the first `mcp__rune__*` call spawns
+`${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server`, which self-installs rune-mcp
+(downloading the CLI + rune-mcp if needed) and then serves — so the call is
+EXPECTED to succeed in-session. On a cold download it may be slow (bounded by
+the manifest's spawn timeout); that is normal, not an error.
 
-When that happens, recover by running ONE of these install entry points
-via the Bash tool, in priority order — try the first applicable:
+You normally do NOT need to run anything here. ONLY if a `mcp__rune__*` call
+actually fails with a transport / connection / spawn error (e.g. the server
+shows failed in `/mcp`) — a genuinely broken bootstrap — recover by running
+ONE of these via the Bash tool, then retry the failed MCP call once:
 
-1. **`~/.rune/bin/rune install`** - when the canonical Go binary
-   already exists and is executable. One exec hop, no bash wrapper.
-   Used in steady state and on every install after the first.
+1. **`~/.rune/bin/rune install`** - when the canonical Go binary already
+   exists and is executable (steady state).
 2. **`bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune install"`** - when
-   `~/.rune/bin/rune` doesn't exist yet (very first install). The
-   plugin's bash bootstrap downloads the Go binary to
-   `~/.rune/bin/rune` and then delegates to it for the actual install.
+   `~/.rune/bin/rune` doesn't exist yet (the bash wrapper downloads the Go
+   binary, then installs).
 
-Surface the install output to the user verbatim so they see what got
-installed - this is the only point in any /rune:* skill where the user
-sees the underlying `rune install` happen.
-
-Retry the failed MCP call once. If the retry ALSO fails, surface the
-error and stop. Do NOT loop the install. The user does NOT type
-`rune install` themselves - this preflight is the only sanctioned path.
+Surface the install output to the user verbatim. If the retry ALSO fails,
+surface the error and stop — do NOT loop. The user never types `rune install`
+themselves; this recovery is the agent's only sanctioned path.
 
 ## Quick Update Mode
 
@@ -132,7 +130,7 @@ mkdir -p ~/.rune/certs && cp <user_ca_path> ~/.rune/certs/ca.pem && chmod 600 ~/
 
 If `cp` fails (file not found / permission denied), surface the error
 and ask the user for a readable path (one more `AskUserQuestion`). Common
-recovery: `sudo cp /opt/runevault/certs/ca.pem ~/.rune/ca.pem && sudo chown $USER ~/.rune/ca.pem`.
+recovery: `mkdir -p ~/.rune/certs && sudo cp /opt/runevault/certs/ca.pem ~/.rune/certs/ca.pem && sudo chown $USER ~/.rune/certs/ca.pem`.
 
 ### 4. Call `mcp__rune__configure`
 
@@ -203,7 +201,7 @@ Render based on `last_boot_error.kind`:
 | `vault_manifest`      | Vault connected but no manifest for this token. Token probably not provisioned for an agent. |
 | `vault_rate_limit`    | Token throttled. Show `hint`. Wait and retry. |
 | `vault_bad_endpoint`  | Endpoint syntax invalid. Show `hint`. Re-run `/rune:configure` with corrected format. |
-| `embedder_unreachable`| `runed` daemon not running. Show `hint`. User should run `rune install` (and start the daemon). |
+| `embedder_unreachable`| `runed` daemon not running. Show `hint`. Re-run `/rune:activate` to (re)spawn the daemon; if it persists, the agent runs the Preflight install, then `/rune:activate`. |
 | `envector_init` / `envector_index` | Envector side. Show `hint` + `detail`. |
 | `key_save` / `local_io` | Local FS issue. Show `hint` + suggest checking `~/.rune/` permissions. |
 | anything else (incl. `unknown`) | Show `kind`, `hint`, and `detail`. Suggest user share the detail with their Vault admin. |

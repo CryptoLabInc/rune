@@ -9,10 +9,11 @@ description: Encrypted organizational memory workflow for Rune with activation c
 
 ## Execution Model
 
-In v0.4 the MCP server is a single Go binary (`${CLAUDE_PLUGIN_ROOT}/bin/rune-mcp`)
-auto-spawned by the host CLI from the plugin manifest. There is no venv, no
-install script, and no `bootstrap-mcp.sh` to source. The runtime is the
-binary the CLI already launched.
+In v0.4 the MCP server is a single Go binary (`~/.rune/bin/rune-mcp`), spawned
+by the host CLI from the plugin manifest via the committed wrapper (e.g.,
+`${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server` for Claude Code) which always present at session start;
+it self-installs rune-mcp on first run, so the server comes online in-session
+with no restart. There is no venv, no install script. The runtime is the binary the CLI already launched.
 
 **Agent-specific surface** stays thin:
 - Codex: `codex mcp add/remove/list` registration actions
@@ -245,7 +246,7 @@ signal on its own.) Treat `last_boot_error` as ground truth.
    - `config_*`, `vault_*` (TLS, auth, endpoint, manifest, etc.) → re-run
      `/rune:configure` after applying the hint's fix.
    - `user_deactivated` → `/rune:activate`.
-   - `embedder_unreachable` → start `runed` (`runed start`), then `/rune:status`.
+   - `embedder_unreachable` → re-run `/rune:activate` to spawn the daemon, then `/rune:status`.
    - `envector_*` → share `detail` with the Vault admin.
    - `unknown` → show `kind` + `detail`, suggest sharing with admin.
 

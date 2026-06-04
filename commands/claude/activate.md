@@ -7,36 +7,32 @@ allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/
 
 Resume Rune from a dormant state and verify the boot loop reaches Active.
 
-The MCP server is a Go binary spawned by Claude Code from the plugin manifest's
-`${HOME}/.rune/bin/rune-mcp`. `mcp__rune__activate` runs the prereq
-checks server-side (config presence + runed socket reachability, plus a
-runed Health probe) and only triggers the boot loop if everything's ready.
+The MCP server is a Go binary at `~/.rune/bin/rune-mcp`, spawned by Claude Code
+via the plugin manifest's committed wrapper `${CLAUDE_PLUGIN_ROOT}/bin/rune
+mcp-server` (always present at session start; self-installs rune-mcp on first
+run). `mcp__rune__activate` runs the prereq checks server-side (config presence
++ runed socket reachability, plus a runed Health probe) and only triggers the
+boot loop if everything's ready.
 
-## Preflight: auto-install on first MCP call
+## Preflight: the first MCP call self-installs
 
-`mcp__rune__*` tools spawn the MCP server lazily - on a fresh
-`claude plugin install rune`, the binary the manifest points at
-(`${HOME}/.rune/bin/rune-mcp`) does not exist yet, so the very first
-MCP call below will fail with a transport / connection / spawn error.
+On a fresh `claude plugin install rune`, the first `mcp__rune__*` call spawns
+`${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server`, which self-installs rune-mcp and
+then serves — so the call is EXPECTED to succeed in-session (may be slow on a
+cold download, bounded by the manifest's spawn timeout; that is normal).
 
-When that happens, recover by running ONE of these install entry points
-via the Bash tool, in priority order — try the first applicable:
+You normally do NOT need to run anything here. ONLY if a `mcp__rune__*` call
+actually fails with a transport / connection / spawn error (e.g. the server
+shows failed in `/mcp`) — a genuinely broken bootstrap — recover by running
+ONE of these via the Bash tool, then retry the failed MCP call once:
 
-1. **`~/.rune/bin/rune install`** - when the canonical Go binary
-   already exists and is executable. One exec hop, no bash wrapper.
-   Used in steady state and on every install after the first.
+1. **`~/.rune/bin/rune install`** - canonical Go binary already exists.
 2. **`bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune install"`** - when
-   `~/.rune/bin/rune` doesn't exist yet (very first install). The
-   plugin's bash bootstrap downloads the Go binary to
-   `~/.rune/bin/rune` and then delegates to it for the actual install.
+   `~/.rune/bin/rune` doesn't exist yet (the bash wrapper downloads the Go
+   binary, then installs).
 
-Surface the install output to the user verbatim so they see what got
-installed - this is the only point in any /rune:* skill where the user
-sees the underlying `rune install` happen.
-
-Retry the failed MCP call once. If the retry ALSO fails, surface the
-error and stop. Do NOT loop the install. The user does NOT type
-`rune install` themselves - this preflight is the only sanctioned path.
+Surface the install output verbatim. If the retry ALSO fails, surface the
+error and stop — do NOT loop. The user never types `rune install` themselves.
 
 ## Steps
 
@@ -82,7 +78,7 @@ The response shape:
 - Stop. Do NOT call `mcp__rune__diagnostics`; the agent already has the answer.
 
 **`install_pending`** - the activate handler tried to auto-spawn the runed
-daemon (via `${HOME}/bin/rune runed --detach` or the
+daemon (via `${HOME}/.rune/bin/rune runed --detach` or the
 canonical equivalent) but couldn't make the socket reachable. The
 response's `hint` field already contains the specific recovery - usually
 the agent-facing form is `bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune install"`
