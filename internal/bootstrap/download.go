@@ -9,13 +9,25 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 var ErrChecksumMismatch = errors.New("checksum mismatch")
+
+// HTTP client with timeout
+var downloadClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       30 * time.Second,
+	},
+}
 
 type ProgressFunc func(downloaded, total int64)
 
@@ -29,7 +41,7 @@ func DownloadAndVerify(ctx context.Context, spec ArtifactSpec, destPath string, 
 		return fmt.Errorf("download: build request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("download: GET %s: %w", spec.URL, err)
 	}
