@@ -42,13 +42,11 @@ Feature requests should include:
    ```
 
 3. **Make your changes**
-   - Follow existing code style
+   - Follow existing code style (`gofmt -w` + `go vet ./...` should be clean)
    - Update documentation
-   - Test your changes
-     - Files must live under a `tests/` subdirectory and be named `test_*.py`
-     - Test classes must start with `Test`
-     - Test functions/methods must start with `test_`
-
+   - Test your changes:
+     - Tests live alongside the package they cover, named `*_test.go`
+     - Run with `go test ./...` (use `-race` before submitting)
    - Pass cross-agent invariant checks (see checklist below)
 
 4. **Commit your changes**
@@ -74,7 +72,7 @@ Feature requests should include:
 
 ### Prerequisites
 - Git
-- Python 3.12
+- Go 1.26.2+ (the toolchain pin is in `go.mod`)
 - Text editor (VS Code recommended)
 - An MCP-compatible agent for testing (Claude Code, Codex CLI, etc.)
 
@@ -112,8 +110,9 @@ Feature requests should include:
 
 4. **Run tests**
    ```bash
-   source .venv/bin/activate
-   python -m pytest agents/tests/ -v
+   go build ./...
+   go vet ./...
+   go test -race ./...
    ```
 
 5. **Test changes in an agent**
@@ -139,13 +138,12 @@ Feature requests should include:
 
 Use this checklist for any integration/setup/runtime change:
 
-- [ ] `scripts/bootstrap-mcp.sh` remains the single source of truth for runtime prep (venv/deps/self-heal)
-- [ ] No agent-specific script duplicates bootstrap/setup logic
+- [ ] The rune CLI (`cmd/rune`, `mcp-server` subcommand) forwards to the single rune-mcp binary — no per-agent server process
 - [ ] Agent-specific scripts stay thin adapters (registration/wiring only)
 - [ ] Codex-only commands (`codex mcp ...`) are clearly separated from cross-agent/common instructions
 - [ ] Claude/Gemini/OpenAI instructions do not include Codex-only commands
-- [ ] Non-server callers of `bootstrap-mcp.sh` use `SETUP_ONLY=1` to avoid exec-ing the MCP server process
 - [ ] `SKILL.md`, `commands/rune/*.toml`, and `AGENT_INTEGRATION.md` remain consistent on common vs agent-specific boundaries
+- [ ] The plugin manifest (`.claude-plugin/plugin.json`) spawns `${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server`
 
 ### Manual Testing Checklist
 
@@ -266,35 +264,40 @@ rune/
 ├── GEMINI.md                    # Gemini CLI context file
 ├── CONTRIBUTING.md              # This file
 ├── LICENSE                      # Apache License 2.0
-├── requirements.txt             # Python dependencies
-├── package.json                 # Package metadata (version source)
+├── go.mod / go.sum              # Go module pin (toolchain + deps)
+├── package.json                 # Package metadata (private; not the version source)
 ├── .claude-plugin/
-│   ├── plugin.json              # Claude Code plugin manifest
+│   ├── plugin.json              # Claude Code plugin manifest (spawns bin/rune mcp-server)
 │   └── marketplace.json         # Marketplace listing
-├── gemini-extension.json        # Gemini CLI extension manifest
 ├── hooks/
 │   └── hooks.json               # Gemini lifecycle hooks
-├── mcp/
-│   ├── server/
-│   │   └── server.py            # MCP server (stdio transport)
-│   └── adapter/                 # enVector SDK + Vault adapters
+├── cmd/
+│   └── rune-mcp/                # MCP server entry point (Go, stdio transport)
+├── internal/
+│   ├── mcp/                     # tool registration + handler dispatch
+│   ├── service/                 # CaptureService / RecallService / LifecycleService
+│   ├── lifecycle/               # boot loop + state machine
+│   ├── adapters/                # vault / envector / embedder / config / logio gRPC clients
+│   ├── domain/                  # schemas + typed errors (Python parity)
+│   ├── policy/                  # pure helpers (novelty, rerank, query parse)
+│   └── obs/                     # slog handler with sensitive-data redaction
 ├── agents/
-│   ├── claude/                  # Claude agent specs (.md)
+│   ├── claude/                  # Claude agent specs (.md, referenced by plugin.json)
 │   │   ├── scribe.md
 │   │   └── retriever.md
 │   ├── gemini/                  # Gemini agent specs (.md)
 │   │   ├── scribe.md
 │   │   └── retriever.md
-│   ├── common/                  # Shared Python modules
-│   ├── scribe/                  # Scribe pipeline code
-│   ├── retriever/               # Retriever pipeline code
-│   └── tests/                   # Agent tests (pytest)
+│   └── codex/                   # Codex agent spec
+│       └── scribe.md
 ├── commands/
 │   ├── claude/                  # Claude commands (.md format)
 │   └── rune/                    # Gemini commands (.toml format)
 ├── patterns/                    # Capture trigger patterns (en/ko/ja)
-├── scripts/                     # Install, configure, bootstrap scripts
-├── config/                      # Configuration templates
+├── scripts/
+│   ├── dev/v04/                 # dev-only helpers (preflight, etc.)
+│   └── ...                      # legacy install scripts (Gemini path — under review)
+├── docs/                        # architecture / migration / spec
 └── examples/                    # Usage examples
 ```
 
@@ -302,22 +305,21 @@ rune/
 
 - **CLAUDE.md**: Claude Code project guidelines
 - **GEMINI.md**: Gemini CLI context file
-- **.claude-plugin/plugin.json**: Claude Code plugin manifest
-- **gemini-extension.json**: Gemini CLI extension manifest
-- **mcp/server/server.py**: The MCP server (stdio transport)
-- **agents/common/config.py**: `LLMConfig` dataclass and config schema
-- **agents/common/llm_client.py**: Multi-provider LLM abstraction
+- **.claude-plugin/plugin.json**: Claude Code plugin manifest (spawns `${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server`)
+- **cmd/rune/**: the rune CLI — `install`, `mcp-server`, `runed`, `verify`, `version` subcommands (the MCP server binary, rune-mcp, lives in the CryptoLabInc/rune-mcp repo)
+- **internal/bootstrap/**: manifest fetch + download/verify/extract + install lock
+- **internal/supervisor/**: `rune runed --detach` userspace daemon supervisor
 
 ## Release Process
 
 Maintainers only:
 
-1. Update version in `package.json`, `.claude-plugin/plugin.json`, and `gemini-extension.json`
+1. Update version in `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (and the release tag / `main.runeVersion` ldflag; `.release-pins.yaml` pins the downstream rune-mcp + runed versions)
 2. Update CHANGELOG.md
-3. Run tests: `python -m pytest agents/tests/ -v`
-4. Create git tag: `git tag v0.2.0`
-5. Push tag: `git push origin v0.2.0`
-6. Create GitHub release with notes
+3. Run tests: `go test -race ./...`
+4. Create git tag: `git tag v0.4.0`
+5. Push tag: `git push origin v0.4.0`
+6. Create GitHub release with notes (attach platform binaries — see Task #30 for the release pipeline plan)
 
 ## Questions?
 

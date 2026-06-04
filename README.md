@@ -49,6 +49,12 @@ $ gemini extensions install https://github.com/CryptoLabInc/rune.git
 > $skill-installer install https://github.com/CryptoLabInc/rune.git
 ```
 
+> **Your next step is always `/rune:configure`.** The plugin install
+> only places a small bootstrap; the actual runtime (rune-mcp + runed
+> daemon) is downloaded the first time you run `/rune:configure`, in a
+> single flow that also collects your Vault credentials. You never need
+> to run a separate install command yourself.
+
 ### Configure
 
 ```
@@ -59,9 +65,9 @@ $ gemini extensions install https://github.com/CryptoLabInc/rune.git
 You'll need from your team admin:
 - **Vault endpoint** + **token**
 
-That's all. enVector Cloud credentials are delivered automatically via the Vault bundle.
+That's all. enVector Cloud credentials are delivered automatically via the Vault bundle. On a fresh machine, `/rune:configure` also handles binary download and daemon setup in the same step.
 
-Don't have these? See [rune-admin](https://github.com/CryptoLabInc/rune-admin) for deployment, or [examples/team-setup-example.md](examples/team-setup-example.md) for a walkthrough.
+Don't have these? See [rune-admin](https://github.com/CryptoLabInc/rune-admin) for deployment, [setup/check-prerequisites.md](setup/check-prerequisites.md) for the full prerequisite checklist, or [examples/team-setup-example.md](examples/team-setup-example.md) for a walkthrough.
 
 ### That's It
 
@@ -289,22 +295,18 @@ Then reinstall from the [Install](#install) section above.
 ## Troubleshooting
 
 ```
-/rune:status              # or: $rune status
+/rune:status              # or: $rune status — full health snapshot via diagnostics MCP tool
+/rune:reset               # or: $rune reset — clear config and return to dormant
+/rune:configure           # or: $rune configure — re-enter Vault credentials
 ```
 
-```bash
-# Check infrastructure
-cd rune && ./scripts/check-infrastructure.sh
-
-# Reset and reconfigure
-/rune:reset               # or: $rune reset
-/rune:configure           # or: $rune configure
-```
+`/rune:status` reports per-subsystem state (vault / encryption key / embedder /
+enVector reachability). Failures surface a recovery action on the same line.
 
 ## Related Projects
 
 - [Rune-Admin](https://github.com/CryptoLabInc/rune-admin) — Infrastructure deployment and admin tools
-- [pyenvector](https://socket.dev/pypi/package/pyenvector) — FHE encryption SDK
+- [envector-go-sdk](https://github.com/CryptoLabInc/envector-go-sdk) — FHE encryption SDK (Go)
 - [enVector Cloud](https://envector.io) — Encrypted vector database
 
 ## Support

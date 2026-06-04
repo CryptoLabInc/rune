@@ -1,0 +1,318 @@
+name: Release rune CLI
+
+# Workflow creates a prerelease when any `v*` tag is pushed; maintainer
+# later promotes prerelease to release via GitHub
+
+on:
+  push:
+    tags:
+      - 'v*' # trigger on version tags
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Existing git tag to build from (e.g. v0.4.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and smoke-test but skip publishing prerelease'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # softprops/action-gh-release
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest,    os: linux,   arch: amd64 }
+          - { runner: ubuntu-24.04-arm, os: linux,   arch: arm64 }
+          - { runner: macos-14,         os: darwin,  arch: arm64 }
+          # - { runner: windows-latest,   os: windows, arch: amd64 }
+    steps:
+      # Setup
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="$DISPATCH_VERSION"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building $VERSION for ${{ matrix.os }}/${{ matrix.arch }}"
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.version.outputs.version }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Build and test
+      - name: Build binary
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/manifest.json
+        run: |
+          # EXT=""
+          # if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+          # ASSET="rune-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+          ASSET="rune-${{ matrix.os }}-${{ matrix.arch }}"
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X main.runeVersion=${VERSION} -X main.manifestURL=${MANIFEST_URL}" \
+            -o "dist/${ASSET}" \
+            ./cmd/rune
+          ls -lh "dist/${ASSET}"
+
+      - name: Test
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # EXT=""
+          # if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+          # BIN="./dist/rune-${{ matrix.os }}-${{ matrix.arch }}${EXT}"
+          BIN="./dist/rune-${{ matrix.os }}-${{ matrix.arch }}"
+          chmod +x "$BIN" 2>/dev/null || true
+          OUT="$("$BIN" version)"
+          echo "$OUT"
+          case "$OUT" in
+            *"$VERSION"*) echo "test ok" ;;
+            *) echo "::error::version $VERSION not found in output: $OUT" >&2; exit 1 ;;
+          esac
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rune-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/rune-*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish prerelease
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # softprops/action-gh-release
+    steps:
+      - name: Resolve version
+        id: version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="$DISPATCH_VERSION"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.version.outputs.version }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: List and checksum
+        run: |
+          ls -lh dist/
+          (cd dist && sha256sum rune-* > checksums.txt)
+          cat dist/checksums.txt
+
+      - name: Verify pinned releases existency
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          RUNE_MCP_VERSION=$(awk '/^rune_mcp_version:/ {print $2}' .release-pins.yaml)
+          RUNED_VERSION=$(awk    '/^runed_version:/    {print $2}' .release-pins.yaml)
+          if [ -z "${RUNE_MCP_VERSION:-}" ] || [ -z "${RUNED_VERSION:-}" ]; then
+            echo "::error::missing pin in .release-pins.yaml (rune_mcp_version=${RUNE_MCP_VERSION:-}, runed_version=${RUNED_VERSION:-})" >&2
+            exit 1
+          fi
+          echo "Checking pinned releases: rune-mcp=${RUNE_MCP_VERSION}, runed=${RUNED_VERSION}"
+
+          fail=0
+          if ! gh release view "${RUNE_MCP_VERSION}" --repo CryptoLabInc/rune-mcp >/dev/null 2>&1; then
+            echo "::error::rune-mcp ${RUNE_MCP_VERSION} (pinned in .release-pins.yaml) is not published. Release it before tagging rune, or bump the pin." >&2
+            fail=1
+          fi
+          if ! gh release view "${RUNED_VERSION}" --repo CryptoLabInc/runed >/dev/null 2>&1; then
+            echo "::error::runed ${RUNED_VERSION} (pinned in .release-pins.yaml) is not published. Release it before tagging rune, or bump the pin." >&2
+            fail=1
+          fi
+          
+          [ "$fail" -eq 0 ] || exit 1
+          echo "Both pinned releases are published."
+
+      - name: Generate manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION:  ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          RUNE_MCP_VERSION=$(awk '/^rune_mcp_version:/ {print $2}' .release-pins.yaml)
+          RUNED_VERSION=$(awk    '/^runed_version:/    {print $2}' .release-pins.yaml)
+          if [ -z "${RUNE_MCP_VERSION:-}" ] || [ -z "${RUNED_VERSION:-}" ]; then
+            echo "::error::missing pin in .release-pins.yaml (rune_mcp_version=${RUNE_MCP_VERSION}, runed_version=${RUNED_VERSION})" >&2
+            exit 1
+          fi
+          echo "Pinning rune-mcp=${RUNE_MCP_VERSION}, runed=${RUNED_VERSION}"
+
+          mkdir -p _downstream/runed _downstream/rune-mcp
+
+          # runed
+          gh release download "${RUNED_VERSION}" \
+            --repo CryptoLabInc/runed \
+            --pattern '*.sha256' \
+            --dir _downstream/runed
+
+          # rune-mcp
+          gh release download "${RUNE_MCP_VERSION}" \
+            --repo CryptoLabInc/rune-mcp \
+            --pattern 'checksums.txt' \
+            --dir _downstream/rune-mcp
+
+          # Downstream assets are now named by build OS (e.g. ubuntu-2204 /
+          # mac-14) rather than GOOS — see CryptoLabInc/runed#9 and the matching
+          # rune-mcp change. Map each manifest platform's GOOS to the os-type
+          # the downstream repos emit (they build natively: linux on ubuntu,
+          # darwin on mac) and discover the exact OS version from the downloaded
+          # filenames, so a downstream runner bump needs no change here.
+          ostype_for() {
+            case "$1" in
+              linux)  echo ubuntu ;;
+              darwin) echo mac ;;
+              *) echo "::error::no os-type mapping for GOOS=$1" >&2; return 1 ;;
+            esac
+          }
+          # runed tarball basename for goos/goarch, matched from the downloaded
+          # <name>.tar.gz.sha256 files.
+          runed_tarball() {
+            local goos=$1 goarch=$2 ostype f
+            ostype=$(ostype_for "$goos") || return 1
+            f=$(cd _downstream/runed && ls "runed-${RUNED_VERSION}-${ostype}-"*"-${goarch}.tar.gz.sha256" 2>/dev/null | head -1) || true
+            if [ -z "$f" ]; then
+              echo "::error::no runed asset for ${goos}/${goarch} (expected runed-${RUNED_VERSION}-${ostype}-<ver>-${goarch}.tar.gz)" >&2
+              return 1
+            fi
+            echo "${f%.sha256}"
+          }
+          # rune-mcp asset basename for goos/goarch, matched from checksums.txt.
+          runemcp_asset() {
+            local goos=$1 goarch=$2 ostype name
+            ostype=$(ostype_for "$goos") || return 1
+            name=$(awk -v re="^rune-mcp-${ostype}-.*-${goarch}$" '$2 ~ re {print $2}' _downstream/rune-mcp/checksums.txt | head -1)
+            if [ -z "$name" ]; then
+              echo "::error::no rune-mcp asset for ${goos}/${goarch}" >&2
+              return 1
+            fi
+            echo "$name"
+          }
+          runed_sha()   { awk '{print $1}'                  "_downstream/runed/$1.sha256"; }
+          runemcp_sha() { awk -v f="$1" '$2 == f {print $1}' _downstream/rune-mcp/checksums.txt; }
+
+          # Resolve asset name + checksum once per platform.
+          RUNED_DARWIN_ARM64=$(runed_tarball darwin arm64); RUNED_DARWIN_ARM64_SHA=$(runed_sha "$RUNED_DARWIN_ARM64")
+          RUNED_LINUX_AMD64=$(runed_tarball linux amd64);   RUNED_LINUX_AMD64_SHA=$(runed_sha "$RUNED_LINUX_AMD64")
+          RUNED_LINUX_ARM64=$(runed_tarball linux arm64);   RUNED_LINUX_ARM64_SHA=$(runed_sha "$RUNED_LINUX_ARM64")
+          MCP_DARWIN_ARM64=$(runemcp_asset darwin arm64);   MCP_DARWIN_ARM64_SHA=$(runemcp_sha "$MCP_DARWIN_ARM64")
+          MCP_LINUX_AMD64=$(runemcp_asset linux amd64);     MCP_LINUX_AMD64_SHA=$(runemcp_sha "$MCP_LINUX_AMD64")
+          MCP_LINUX_ARM64=$(runemcp_asset linux arm64);     MCP_LINUX_ARM64_SHA=$(runemcp_sha "$MCP_LINUX_ARM64")
+
+          RUNED_BASE="https://github.com/CryptoLabInc/runed/releases/download/${RUNED_VERSION}"
+          MCP_BASE="https://github.com/CryptoLabInc/rune-mcp/releases/download/${RUNE_MCP_VERSION}"
+
+          mkdir -p dist
+          cat > dist/manifest.json <<EOF
+          {
+            "version": 1,
+            "rune_mcp_version": "${RUNE_MCP_VERSION}",
+            "runed_version": "${RUNED_VERSION}",
+            "platforms": {
+              "darwin-arm64": {
+                "runed": {
+                  "url":     "${RUNED_BASE}/${RUNED_DARWIN_ARM64}",
+                  "sha256":  "${RUNED_DARWIN_ARM64_SHA}",
+                  "extract": "tar.gz"
+                },
+                "rune_mcp": {
+                  "url":    "${MCP_BASE}/${MCP_DARWIN_ARM64}",
+                  "sha256": "${MCP_DARWIN_ARM64_SHA}"
+                }
+              },
+              "linux-amd64": {
+                "runed": {
+                  "url":     "${RUNED_BASE}/${RUNED_LINUX_AMD64}",
+                  "sha256":  "${RUNED_LINUX_AMD64_SHA}",
+                  "extract": "tar.gz"
+                },
+                "rune_mcp": {
+                  "url":    "${MCP_BASE}/${MCP_LINUX_AMD64}",
+                  "sha256": "${MCP_LINUX_AMD64_SHA}"
+                }
+              },
+              "linux-arm64": {
+                "runed": {
+                  "url":     "${RUNED_BASE}/${RUNED_LINUX_ARM64}",
+                  "sha256":  "${RUNED_LINUX_ARM64_SHA}",
+                  "extract": "tar.gz"
+                },
+                "rune_mcp": {
+                  "url":    "${MCP_BASE}/${MCP_LINUX_ARM64}",
+                  "sha256": "${MCP_LINUX_ARM64_SHA}"
+                }
+              }
+            }
+          }
+          EOF
+
+          # Validate JSON
+          jq . dist/manifest.json > /dev/null
+          cat dist/manifest.json
+
+      - name: Publish prerelease
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: rune CLI ${{ steps.version.outputs.version }}
+          prerelease: true
+          files: |
+            dist/rune-linux-amd64
+            dist/rune-linux-arm64
+            dist/rune-darwin-arm64
+            # dist/rune-windows-amd64.exe
+            dist/checksums.txt
+            dist/manifest.json
+          fail_on_unmatched_files: true
+          generate_release_notes: true

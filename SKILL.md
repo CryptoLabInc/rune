@@ -7,19 +7,20 @@ description: Encrypted organizational memory workflow for Rune with activation c
 
 **Context**: This skill provides encrypted organizational memory capabilities using Fully Homomorphic Encryption (FHE). It allows teams to capture, store, and retrieve institutional knowledge while maintaining zero-knowledge privacy. Works with Claude Code, Codex CLI, Gemini CLI, and any MCP-compatible agent.
 
-## Execution Model (Single Source of Truth)
+## Execution Model
 
-**Cross-agent invariant**:
-- `scripts/bootstrap-mcp.sh` is the **single source of truth** for local runtime preparation (venv, deps, self-healing).
-- All agent integrations must reuse this bootstrap flow. Do not duplicate dependency/setup logic in agent-specific scripts.
+In v0.4 the MCP server is a single Go binary (`~/.rune/bin/rune-mcp`), spawned
+by the host CLI from the plugin manifest via the committed wrapper (e.g.,
+`${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server` for Claude Code) which always present at session start;
+it self-installs rune-mcp on first run, so the server comes online in-session
+with no restart. There is no venv, no install script. The runtime is the binary the CLI already launched.
 
-**Agent-specific boundary**:
-- **Common (all agents)**: plugin root detection, runtime bootstrap, local MCP server readiness checks.
-- **Agent-specific (thin adapter only)**:
-  - Codex: `codex mcp add/remove/list` registration actions
-  - Claude/Gemini/others: their native MCP registration mechanism
+**Agent-specific surface** stays thin:
+- Codex: `codex mcp add/remove/list` registration actions
+- Claude / Gemini / others: each CLI's native plugin / extension flow
 
-Keep agent-specific instructions clearly labeled and never mix Codex-only commands into cross-agent/common instructions.
+Keep agent-specific instructions clearly labeled and never mix Codex-only
+commands into cross-agent/common instructions.
 
 ## Activation State
 
@@ -29,23 +30,12 @@ Keep agent-specific instructions clearly labeled and never mix Codex-only comman
 
 **BEFORE doing anything, run this check:**
 
-0. **Local Runtime Check (No Vault network calls)**:
-   - Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
-     1. `$RUNE_PLUGIN_ROOT` environment variable (if set)
-     2. `~/.claude/plugins/cache/*/rune/*/scripts/bootstrap-mcp.sh`
-     3. `~/.codex/skills/rune/scripts/bootstrap-mcp.sh`
-     4. Current working directory and its parent directories
-   - Ensure runtime via:
-     - `SETUP_ONLY=1 scripts/bootstrap-mcp.sh`
-   - If the runtime/bootstrap step fails, treat as **Dormant State** and show setup guidance.
-
 1. **Config File Check**: Does `~/.rune/config.json` exist?
    - NO → **Go to Dormant State**
    - YES → Continue to step 2
 
 2. **Config Validation**: Does config contain all required fields?
    - `vault.endpoint` and `vault.token`
-   - `envector.endpoint` and `envector.api_key`
    - `state` is set to `"active"`
    - NO → **Go to Dormant State**
    - YES → Continue to step 3
@@ -54,7 +44,12 @@ Keep agent-specific instructions clearly labeled and never mix Codex-only comman
    - `state` is `"active"` → **Go to Active State**
    - Otherwise → **Go to Dormant State**
 
-**IMPORTANT**: Do NOT attempt to ping Vault or make network requests during activation check. This wastes tokens. Only local runtime/config checks are allowed.
+**Note**: enVector credentials are NOT in `~/.rune/config.json`. They are
+delivered via the Vault bundle at runtime when the boot loop dials Vault.
+
+**IMPORTANT**: Do NOT attempt to ping Vault or make network requests during
+activation check. This wastes tokens. The MCP server runs its own boot
+loop; the activation check is purely a local config inspection.
 
 ### If Active ✅
 - All functionality enabled
@@ -69,9 +64,10 @@ Keep agent-specific instructions clearly labeled and never mix Codex-only comman
 - **Do NOT waste tokens on failed operations**
 - Show setup instructions when `/rune` commands (or `$rune` for Codex CLI) are used
 - Prompt user to:
-  1. Check infrastructure: `scripts/check-infrastructure.sh`
-  2. Configure: `/rune:configure` (or `$rune configure` for Codex CLI)
-  3. Start MCP servers: `scripts/start-mcp-servers.sh`
+  1. Configure: `/rune:configure` (or `$rune configure` for Codex CLI) —
+     this writes `~/.rune/config.json` and triggers the boot loop.
+  2. Verify health: `/rune:status` (or `$rune status` for Codex CLI) —
+     surfaces per-subsystem state via the `diagnostics` MCP tool.
 
 ### Fail-Safe Behavior
 If in Active state but operations fail:
@@ -113,14 +109,17 @@ If in Active state but operations fail:
 
    Note: enVector credentials are delivered automatically via the Vault bundle — no user input needed.
 
-4. **Validate infrastructure** (run `scripts/check-infrastructure.sh`)
-   - If validation fails: Create config with `state: "dormant"`, warn user
-   - If validation passes: Continue to step 5
-5. Create `~/.rune/config.json` with proper structure
-6. Set state based on validation:
-   - Infrastructure ready: `state: "active"`
-   - Infrastructure not ready: `state: "dormant"`
-7. Confirm configuration and show next steps if dormant
+4. Create `~/.rune/config.json` with `state: "active"` and the values
+   above (`mkdir -p ~/.rune && chmod 700 ~/.rune`, then `chmod 600` the
+   file).
+5. Call the `reload_pipelines` MCP tool. The MCP server's boot loop
+   dials Vault, fetches the agent manifest (EncKey + envector
+   creds), connects to enVector, and transitions to Active.
+6. Confirm health by calling `diagnostics` and applying the
+   **Boot Failure — Fast-Fail Rule** (see section below). If
+   `vault.last_boot_error` is present, surface its `hint` verbatim
+   and stop — do not retry, do not probe with shell tools. Otherwise
+   render the per-subsystem snapshot.
 
 ### `/rune:status`
 (or `$rune status` for Codex CLI)
@@ -128,33 +127,30 @@ If in Active state but operations fail:
 **Purpose**: Check plugin activation status and infrastructure health
 
 **Steps**:
-1. Check if config exists
-2. Show current state (Active/Dormant)
-3. Run infrastructure checks:
-   - Config file: ✓/✗
-   - Vault Endpoint configured: ✓/✗
-   - enVector endpoint configured: ✓/✗
-   - MCP server logs recent: ✓/✗
-   - Virtual environment: ✓/✗
+1. Read `~/.rune/config.json`
+2. Call the `diagnostics` MCP tool (read-only; safe before Active)
+3. Render the per-subsystem snapshot
 
 **Response Format**:
 ```
 Rune Plugin Status
 ==================
-State: Active ✅ (or Dormant ⏸️)
+State: Active ✅ (or Dormant ⏸️ — reason)
 
 Configuration:
   ✓ Config file: ~/.rune/config.json
   ✓ Vault Endpoint: configured
-  ✓ enVector: configured
 
-Infrastructure:
-  ✓ Python venv: /path/to/.venv
-  ✗ MCP servers: Not running (last log: 2 days ago)
+System Health (from diagnostics):
+  ✓ Vault          : reachable
+  ✓ Encryption Key : loaded (key_id: <id>)
+  ✓ Agent DEK      : loaded
+  ✓ Embedder       : <model> (<mode>, dim=<vector_dim>)
+  ✓ enVector Cloud : reachable (<latency>ms)
 
 Recommendations:
-  - Start MCP servers: scripts/start-mcp-servers.sh
-  - Check full status: scripts/check-infrastructure.sh
+  - If Dormant: /rune:configure to (re)trigger the boot loop
+  - If a subsystem failed: surface the recovery action on its row
 ```
 
 ### `/rune:capture <context>`
@@ -210,19 +206,17 @@ Recommendations:
 1. Check if config exists
    - NO → Redirect to `/rune:configure` (or `$rune configure` for Codex CLI)
    - YES → Continue
-2. Run full infrastructure validation:
-   - Check Vault connectivity (curl vault-url/health)
-   - Check MCP server processes
-   - Check Python environment
-3. If all checks pass:
-   - Update config.json `state` to `"active"`
-   - Notify: "Plugin activated ✅"
-4. If checks fail:
-   - Keep state as `"dormant"`
-   - Show detailed error report
-   - Suggest: `/rune:status` (or `$rune status` for Codex CLI) for more info
-
-**Important**: This is the ONLY command that makes network requests to validate infrastructure.
+2. If `state` is already `"active"`, skip to step 4 (just verify health).
+3. If `state` is `"dormant"`, set it to `"active"` and clear any
+   `dormant_reason` / `dormant_since` fields.
+4. Call the `reload_pipelines` MCP tool. From a terminal Dormant the
+   boot loop is re-spawned; from Active it is a no-op.
+5. Call `diagnostics` and apply the **Boot Failure — Fast-Fail Rule**
+   (section below).
+6. If `vault.last_boot_error` is present: surface its `hint` verbatim,
+   suggest the matching recovery action, and stop. Do NOT loop on
+   `reload_pipelines` or probe with shell tools — the classifier has
+   already done that work. Otherwise render the per-subsystem snapshot.
 
 ### `/rune:reset`
 (or `$rune reset` for Codex CLI)
@@ -231,10 +225,42 @@ Recommendations:
 
 **Steps**:
 1. Confirm with user
-2. Stop MCP servers if running
-3. Delete `~/.rune/config.json`
-4. Set state to dormant
-5. Show reconfiguration instructions
+2. Delete `~/.rune/config.json` (the MCP server stays alive; it transitions
+   to Dormant on the next reload because no config means no Vault dial)
+3. Show reconfiguration instructions
+
+## Boot Failure — Fast-Fail Rule
+
+When `diagnostics.vault.last_boot_error` is present, that field is the boot
+loop's authoritative root-cause verdict (produced from the underlying
+gRPC/TLS/DNS error). It is set on every failed boot attempt and cleared only
+on success, so its presence — regardless of `state` — means boot is currently
+failing. (`state` is the persisted config value; it stays `"active"` through
+transient retries like an unreachable Vault, so it is not a reliable failure
+signal on its own.) Treat `last_boot_error` as ground truth.
+
+**Do this and stop:**
+1. Show `vault.last_boot_error.hint` to the user **verbatim** — it already
+   names the specific cause and the fix.
+2. Suggest one next action keyed off `kind`:
+   - `config_*`, `vault_*` (TLS, auth, endpoint, manifest, etc.) → re-run
+     `/rune:configure` after applying the hint's fix.
+   - `user_deactivated` → `/rune:activate`.
+   - `embedder_unreachable` → re-run `/rune:activate` to spawn the daemon, then `/rune:status`.
+   - `envector_*` → share `detail` with the Vault admin.
+   - `unknown` → show `kind` + `detail`, suggest sharing with admin.
+
+**Do NOT:** retry `reload_pipelines`, poll `diagnostics` in a loop, or run
+shell probes (`openssl`, `nc`, `curl`, `dig`, etc.). The classifier already
+inspected the underlying error server-side — manual probing only burns
+tokens without changing the conclusion. The per-`kind` reference table
+lives in `commands/claude/configure.md` for the rare case the hint string
+needs supplementation.
+
+**Fallback** (older rune-mcp binary without `last_boot_error`): use
+`vault.error`, `embedding.health_error`, `envector.error`, and the
+`dormant_reason` translation in `/rune:status`. Still: do not investigate
+further, surface what you have and stop.
 
 ## Automatic Behavior (When Active)
 
@@ -287,8 +313,6 @@ When Rune is active, proactively capture significant decisions when you detect a
 - "The key insight is..."
 - "Based on [data/research/testing]..."
 
-**Full Pattern Reference**: See [patterns/capture-triggers.md](patterns/capture-triggers.md) for 200+ comprehensive trigger phrases organized by role and domain.
-
 **Significance Threshold**: 0.7 (captures meaningful decisions, filters trivial content)
 
 **Automatic Redaction**: Always redact API keys, passwords, tokens, PII, and sensitive data before capture.
@@ -312,8 +336,6 @@ When users ask questions about past decisions, automatically search organization
 - "What's our approach to..."
 - "What were the trade-offs..."
 - "Who decided on..."
-
-**Full Pattern Reference**: See [patterns/retrieval-patterns.md](patterns/retrieval-patterns.md) for 150+ comprehensive query patterns organized by intent and domain.
 
 **Search Strategy**: Semantic similarity search on FHE-encrypted vectors, ranked by relevance and recency.
 

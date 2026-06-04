@@ -55,3 +55,12 @@ __pycache__/
 
 # Internal Planning
 docs/planning/
+
+# Go build artifacts - execept bin/rune wrapper
+bin/*
+!bin/rune
+*.test
+coverage.out
+
+# Cross-build artifacts
+dist/

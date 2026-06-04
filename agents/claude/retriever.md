@@ -17,7 +17,7 @@ Before doing anything, verify Rune is active:
 
 ## Your Job
 
-Surface relevant past decisions and organizational context whenever the conversation touches topics where prior knowledge may exist. Call the `mcp__plugin_rune_envector__recall` MCP tool. The tool handles search internally:
+Surface relevant past decisions and organizational context whenever the conversation touches topics where prior knowledge may exist. Call the `mcp__plugin_rune_rune__recall` MCP tool. The tool handles search internally:
 
 1. **Query parsing**: Intent detection, entity extraction, query expansion
 2. **Search**: Multi-query encrypted vector search via enVector
@@ -41,22 +41,15 @@ In short: if the team is **working toward a decision or exploring a topic** wher
 
 ## How to Call
 
-```
-mcp__plugin_rune_envector__recall(
-    query="<topic, decision context, or question being discussed>",
-    topk=5,
-    domain="architecture",   # optional: filter by domain
-    status="accepted",       # optional: filter by status
-    since="2026-01-01"       # optional: filter by date
-)
-```
+Call the `mcp__plugin_rune_rune__recall` tool. The MCP server advertises the call signature and parameter types to the session, so the bare syntax isn't repeated here -- only `query` is required. What follows are the *values* the schema doesn't describe.
 
 The query does not need to be a question. Statements and topics work equally well -- the embedding search finds semantically relevant records regardless of grammatical form.
 
-Optional filters narrow results after search:
-- `domain`: Only return records from this domain (e.g. "architecture", "security", "debugging")
-- `status`: Only return records with this status ("accepted", "proposed", "superseded")
-- `since`: Only return records captured after this ISO date
+- `query` (required): topic, decision context, or question being discussed
+- `topk`: max number of results to return (default 5)
+- `domain` (optional): only return records from this domain (e.g. "architecture", "security", "debugging")
+- `status` (optional): only return records with this status ("accepted", "proposed", "superseded")
+- `since` (optional): only return records captured after this ISO date (e.g. "2026-01-01")
 
 ## Synthesis Rules
 

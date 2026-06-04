@@ -1,7 +1,7 @@
 {
   "name": "rune",
   "description": "FHE-encrypted organizational memory for teams. Capture and retrieve institutional knowledge with zero-knowledge privacy.",
-  "version": "0.3.1",
+  "version": "0.4.0-dev",
   "author": {
     "name": "Sunchul Jung",
     "email": "zotanika@cryptolab.co.kr"
@@ -12,13 +12,11 @@
     "./agents/claude/retriever.md"
   ],
   "mcpServers": {
-    "envector": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap-mcp.sh",
-      "env": {
-        "ENVECTOR_CONFIG": "${HOME}/.rune/config.json",
-        "ENVECTOR_AUTO_KEY_SETUP": "false"
-      },
-      "description": "enVector MCP server for encrypted vector operations"
+    "rune": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/rune",
+      "args": ["mcp-server"],
+      "timeout": 30000,
+      "description": "Rune MCP server (talks to Vault + embedder + enVector). The command is the plugin's bash wrapper, which always exists at session start; on first run it self-install rune-mcp, then exec - MCP server comes online in the same session with no restart."
     }
   }
 }

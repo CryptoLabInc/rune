@@ -1,19 +1,10 @@
+# TODO(v0.4 migration): v0.3-stale, bootstrap-mcp.sh runtime block removed (script deleted); rest still uses envector.* fields + python mcp check.
+# Regenerate from commands/claude/activate.md before re-enabling Codex/Gemini.
 description = "Activate Rune by validating infrastructure and setting state to active"
 prompt = """
 You are activating Rune, an FHE-encrypted organizational memory system.
 
 Follow these steps:
-
-0. Ensure local runtime first (cross-agent common step):
-   - Detect plugin root by locating `scripts/bootstrap-mcp.sh`. Search in order:
-     1. `$RUNE_PLUGIN_ROOT` (if set)
-     2. The agent's own plugin/extension installation directory (e.g., `~/.gemini/extensions/*/rune/*/`, `~/.claude/plugins/cache/*/rune/*/`, or `~/.codex/skills/rune/`)
-     3. Current working directory and its parent directories (project root)
-   - Run `SETUP_ONLY=1 <plugin_root>/scripts/bootstrap-mcp.sh`.
-   - If needed, run `<plugin_root>/scripts/start-mcp-servers.sh`.
-
-Codex only:
-- If activation fails because Codex MCP registration is missing, run/suggest `<plugin_root>/scripts/install-codex.sh` and retry.
 
 1. Read `~/.rune/config.json`. If it does not exist, respond:
    "Not configured. Run `/rune:configure` first." and stop.

@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# bin/rune - Rune plugin bootstrap entrypoint at ${CLAUDE_PLUGIN_ROOT}/bin/rune
+#
+# Responsibility: ensure the rune CLI Go binary exists at
+# ~/.rune/bin/rune (the canonical install location)
+#
+# Subcommand surface:
+#   - When ~/.rune/bin/rune already exists: delegates ALL subcommands
+#     unchanged (safety guard)
+#   - When ~/.rune/bin/rune is missing: `install` and `mcp-server` are
+#     accepted as bootstrap entry points (mcp-server self-installs the
+#     CLI + rune-mcp first, so a fresh plugin install boots without a
+#     manual /mcp reconnect or session restart)
+#
+# Windows support: this wrapper is bash-only. Native Windows shells
+# (PowerShell / cmd) cannot execute this. Windows users must invoke it
+# from WSL or Git Bash, where `uname -s` returns MSYS_NT-* or MINGW64_NT-*
+set -euo pipefail
+
+RUNE_HOME="${RUNE_HOME:-$HOME/.rune}"
+TARGET="$RUNE_HOME/bin/rune"
+
+# Delegate to ~/.rune/bin/rune immediately
+if [ -x "$TARGET" ]; then
+  exec "$TARGET" "$@"
+fi
+
+# Bootstrap path (~/.rune/bin/rune missing)
+# `mcp-server` is accepted here too (not just `install`): it is the plugin
+# manifest's spawn-time entry point, so a fresh install must self-heal
+# instead of failing the MCP spawn (which would force a manual /mcp reconnect).
+case "${1:-}" in
+  install|mcp-server)
+    ;;
+  *)
+    echo "rune: rune is not fully configured yet." >&2
+    echo "       Running /rune:configure first." >&2
+    exit 127
+    ;;
+esac
+
+# Concurrency-safe CLI download
+mkdir -p "$RUNE_HOME"
+LOCK_DIR="$RUNE_HOME/bootstrap.lock.d"
+TMP=""
+SUMS=""
+cleanup() {
+  [ -n "$TMP" ] && rm -f "$TMP"
+  [ -n "$SUMS" ] && rm -f "$SUMS"
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+waited=0
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do # another session hold lock
+  if [ -x "$TARGET" ]; then
+    exec "$TARGET" "$@"   # bootstrap finished
+  fi
+
+  sleep 1
+  waited=$((waited + 1))
+  if [ "$waited" -ge 120 ]; then
+    echo "rune: bootstrap lock held >120s, reclaiming" >&2
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+    waited=0
+  fi
+done
+
+# Check error
+trap cleanup EXIT INT TERM
+
+if [ -x "$TARGET" ]; then
+  cleanup
+  trap - EXIT INT TERM
+  exec "$TARGET" "$@"
+fi
+
+# Lazy version evaluation
+# Priority: RUNE_VERSION > latest release (including pre-release for now)
+# TODO: switch to .../rune/releases/latest
+RUNE_VERSION="${RUNE_VERSION:-}"
+if [ -z "$RUNE_VERSION" ]; then
+  echo "rune: resolving latest release..." >&2
+  api="https://api.github.com/repos/CryptoLabInc/rune/releases?per_page=1"
+
+  # Use token if exist
+  token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+  if [ -n "$token" ]; then
+    body="$(curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
+      --header "Authorization: Bearer $token" "$api" || true)"
+  else
+    body="$(curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 "$api" || true)"
+  fi
+
+  RUNE_VERSION="$(printf '%s' "$body" \
+    | grep -m1 '"tag_name"' \
+    | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/' \
+    || true)"
+fi
+
+if [ -z "$RUNE_VERSION" ]; then
+  echo "rune: cannot determine the latest release" >&2
+  echo "      Pin it explicitly, e.g.: RUNE_VERSION=v0.4.0 ${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install" >&2
+  exit 1
+fi
+
+# Map (OS, arch) to release asset name
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)         ASSET="rune-linux-amd64"        ;;
+  Linux-aarch64)        ASSET="rune-linux-arm64"        ;;
+  Darwin-arm64)         ASSET="rune-darwin-arm64"       ;;
+  MINGW64_NT-*-x86_64)  ASSET="rune-windows-amd64.exe"  ;;
+  MSYS_NT-*-x86_64)     ASSET="rune-windows-amd64.exe"  ;;
+  *)
+    echo "rune: unsupported platform $(uname -s)-$(uname -m)" >&2
+    echo "      Supported: Linux x86_64/aarch64, macOS x86_64/arm64, Windows x86_64 via WSL/Git Bash" >&2
+    exit 1
+    ;;
+esac
+
+echo "rune: bootstrapping CLI ($ASSET $RUNE_VERSION) to $TARGET" >&2
+
+RELEASE_BASE="https://github.com/CryptoLabInc/rune/releases/download/$RUNE_VERSION"
+mkdir -p "$(dirname "$TARGET")"
+
+# Leave TMP on the same filesystem as TARGET
+TMP="$(mktemp "$(dirname "$TARGET")/.rune-bootstrap-XXXXXX")"
+SUMS="$(mktemp -t rune-bootstrap-sums-XXXXXX)"
+
+curl --fail --silent --show-error --location --connect-timeout 10 --max-time 120 "$RELEASE_BASE/$ASSET"        -o "$TMP"
+curl --fail --silent --show-error --location --connect-timeout 10 --max-time 30  "$RELEASE_BASE/checksums.txt" -o "$SUMS"
+
+EXPECTED="$(grep " $ASSET\$" "$SUMS" | cut -d' ' -f1)"
+if [ -z "$EXPECTED" ]; then
+  echo "rune: $ASSET not listed in checksums.txt for $RUNE_VERSION" >&2
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  ACTUAL="$(sha256sum "$TMP" | cut -d' ' -f1)"
+else
+  ACTUAL="$(shasum -a 256 "$TMP" | cut -d' ' -f1)"
+fi
+
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+  echo "rune: checksum mismatch for $ASSET" >&2
+  echo "      expected: $EXPECTED" >&2
+  echo "      actual:   $ACTUAL" >&2
+  exit 1
+fi
+
+# Atomic publish
+chmod +x "$TMP"
+mv -f "$TMP" "$TARGET"
+TMP=""
+
+# Delegate to the freshly-installed Go binary
+cleanup
+trap - EXIT INT TERM
+exec "$TARGET" "$@"
