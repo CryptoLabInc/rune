@@ -78,7 +78,6 @@ Use one of: `architecture`, `security`, `product`, `exec`, `ops`, `design`, `dat
 For a single, self-contained decision:
 ```json
 {
-  "tier2": {"capture": true, "reason": "one sentence why", "domain": "<domain>"},
   "title": "Short decision title (5-60 chars)",
   "reusable_insight": "Dense natural-language paragraph (256-768 tokens) capturing the core knowledge. No markdown. Self-contained. Must answer: 'If someone in 6 months asks about this topic, what do they need to know?' Include what was decided, why, what was rejected, and key trade-offs.",
   "rationale": "The reasoning behind the decision",
@@ -103,7 +102,6 @@ For a single, self-contained decision:
 For a long reasoning process with multiple sequential conclusions:
 ```json
 {
-  "tier2": {"capture": true, "reason": "...", "domain": "<domain>"},
   "group_title": "Overall title for the reasoning chain",
   "group_type": "phase_chain",
   "reusable_insight": "Dense natural-language paragraph (256-768 tokens) capturing the core knowledge of the entire chain. No markdown. Self-contained.",
@@ -137,7 +135,6 @@ For a long reasoning process with multiple sequential conclusions:
 For a single decision with rich supporting detail:
 ```json
 {
-  "tier2": {"capture": true, "reason": "...", "domain": "<domain>"},
   "group_title": "Auth Strategy Decision",
   "group_type": "bundle",
   "reusable_insight": "Dense natural-language paragraph (256-768 tokens) capturing the core knowledge of the bundle. No markdown. Self-contained.",
@@ -171,7 +168,6 @@ For a single decision with rich supporting detail:
 For code-heavy discoveries, use bundle format with evidence at phase level:
 ```json
 {
-  "tier2": {"capture": true, "reason": "...", "domain": "debugging"},
   "group_title": "Short insight title",
   "group_type": "bundle",
   "evidence_type": "code_change",
@@ -212,14 +208,6 @@ For code-heavy discoveries, use bundle format with evidence at phase level:
 }
 ```
 Phases may include `evidence_snippet` (up to 50 lines each). Use 2-5 phases.
-
-### Rejection Format
-When Step 1 determines the message should NOT be captured:
-```json
-{
-  "tier2": {"capture": false, "reason": "Casual discussion without decision", "domain": "general"}
-}
-```
 
 ### Field Guidelines
 - **title / group_title**: 5-60 chars, concise and descriptive
@@ -264,7 +252,7 @@ capture(
 When the conversation is ending or the user is wrapping up a task:
 
 1. Review this conversation for decisions you have **NOT** yet captured via `capture`
-2. For each uncaptured decision, prepare an extracted JSON (same format as single capture)
+2. For each uncaptured decision, prepare a **flat extracted object** — identical to the `extracted` parameter of single `capture` (see schema below)
 3. Submit all uncaptured decisions via `batch_capture` tool in **one call**
 4. Do NOT re-submit decisions you already captured during the conversation
    (the server's novelty check will catch duplicates, but avoid unnecessary calls)
@@ -276,5 +264,28 @@ When the conversation is ending or the user is wrapping up a task:
 
 **batch_capture parameters** (each is a separate tool parameter, NOT a single JSON):
 
-- `items`: JSON array string of extracted decision objects (same format as single capture's `extracted` parameter)
+- `items`: JSON **array string** where **each element is a flat extracted object** — exactly the object you would pass as the `extracted` parameter to single `capture` (top-level `title`, `reusable_insight`, `rationale`, `tags`, …, or the `group_title`/`phases` multi-phase shape).
 - `source`: `"codex_agent"` (optional, defaults to `"claude_agent"`)
+
+⚠️ **CRITICAL — do NOT wrap each item as `{"text": ..., "extracted": {...}}`.** Single `capture` takes `text` and `extracted` as *two separate tool parameters*; a batch item is **just the `extracted` object by itself**. If you nest the fields under an `extracted` key (or under `text`), the server's top-level lookup for `reusable_insight`/`title`/`group_title` finds nothing and the item is rejected with status `error`. Each item **must** carry at least a top-level `reusable_insight`, `title`, or `group_title` (the multi-phase shape supplies `group_title`).
+
+✅ **Correct `items` shape** (array of flat extracted objects):
+
+```json
+[
+  {
+    "title": "Adopt Linkerd over Istio",
+    "reusable_insight": "Dense self-contained paragraph: what was decided, why, what was rejected, key trade-offs. No markdown.",
+    "rationale": "...",
+    "tags": ["service-mesh", "linkerd"]
+  }
+]
+```
+
+❌ **Wrong** (wrapper shape — every item rejected as `error`):
+
+```json
+[
+  {"text": "...", "extracted": {"title": "Adopt Linkerd over Istio", "reusable_insight": "..."}}
+]
+```
