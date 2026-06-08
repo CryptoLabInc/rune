@@ -1,3 +1,0 @@
-# Benchmark reports are generated, not committed
-*.json
-!.gitignore
