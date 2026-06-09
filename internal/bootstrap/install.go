@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"slices"
 	"time"
 )
+
+var ErrInstallInProgress = errors.New("install: another install in progress")
 
 type InstallOptions struct {
 	ManifestURL string

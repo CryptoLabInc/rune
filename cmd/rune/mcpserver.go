@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,9 +42,16 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 			},
 		})
 		if instErr != nil {
+			// If error is not ErrInstalINProgress, it is unavoidable error
+			if !errors.Is(instErr, bootstrap.ErrInstallInProgress) {
+				fmt.Fprintf(stderr, "rune: cannot install rune-mcp: %v\n", instErr)
+				return 1
+			}
+
+			// Another session hold lock
 			if !waitForFile(healCtx, paths.RuneMCPBinary, mcpSelfhealBudget) {
-				fmt.Fprintf(stderr, "rune: failed to install rune-mcp within %s: %v\n", mcpSelfhealBudget, instErr)
-				fmt.Fprintln(stderr, "     another session may still be installing it; reconnect via /mcp once it completes")
+				fmt.Fprintf(stderr, "rune: rune-mcp install still in progress after %s: %v\n", mcpSelfhealBudget, instErr)
+				fmt.Fprintln(stderr, "     another session is installing it; reconnect via /mcp once it completes")
 				return 1
 			}
 

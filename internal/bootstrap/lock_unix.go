@@ -34,15 +34,16 @@ func acquireInstallLock(ctx context.Context, lockPath string, timeout time.Durat
 			_ = f.Close()
 			return nil, fmt.Errorf("flock %s: %w", lockPath, err)
 		}
+
 		if !time.Now().Before(deadline) {
 			_ = f.Close()
-			return nil, fmt.Errorf("install lock %s: another install in progress (waited %s)", lockPath, timeout)
+			return nil, fmt.Errorf("%w: lock %s held (waited %s)", ErrInstallInProgress, lockPath, timeout)
 		}
 
 		select {
 		case <-ctx.Done():
 			_ = f.Close()
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("%w: %w", ErrInstallInProgress, ctx.Err())
 		case <-time.After(installLockPollInterval):
 		}
 	}
