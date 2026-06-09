@@ -1,13 +1,13 @@
 ---
 description: Configure Rune — collect Vault credentials and write ~/.rune/config.json
-allowed-tools: Bash(cp:*), Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), Read, AskUserQuestion, mcp__rune__configure, mcp__rune__activate, mcp__rune__diagnostics
+allowed-tools: Bash(cp:*), Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), Read, AskUserQuestion, mcp__plugin_rune_rune__configure, mcp__plugin_rune_rune__activate, mcp__plugin_rune_rune__diagnostics
 ---
 
 # /rune:configure — Setup & Configuration
 
 Single entry after `claude plugin install rune`. Collects Vault credentials,
-calls `mcp__rune__configure` (atomic 0600 write + soft Vault probe), and
-hands off to `mcp__rune__activate` to bring pipelines online.
+calls `mcp__plugin_rune_rune__configure` (atomic 0600 write + soft Vault probe), and
+hands off to `mcp__plugin_rune_rune__activate` to bring pipelines online.
 
 The MCP server is a Go binary at `~/.rune/bin/rune-mcp`. The plugin manifest
 spawns it via the committed bash wrapper `${CLAUDE_PLUGIN_ROOT}/bin/rune
@@ -17,13 +17,13 @@ server comes online in the SAME session, with no restart.
 
 ## Preflight: the first MCP call self-installs
 
-On a fresh `claude plugin install rune`, the first `mcp__rune__*` call spawns
+On a fresh `claude plugin install rune`, the first `mcp__plugin_rune_rune__*` call spawns
 `${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server`, which self-installs rune-mcp
 (downloading the CLI + rune-mcp if needed) and then serves — so the call is
 EXPECTED to succeed in-session. On a cold download it may be slow (bounded by
 the manifest's spawn timeout); that is normal, not an error.
 
-You normally do NOT need to run anything here. ONLY if a `mcp__rune__*` call
+You normally do NOT need to run anything here. ONLY if a `mcp__plugin_rune_rune__*` call
 actually fails with a transport / connection / spawn error (e.g. the server
 shows failed in `/mcp`) — a genuinely broken bootstrap — recover by running
 ONE of these via the Bash tool, then retry the failed MCP call once:
@@ -47,10 +47,10 @@ If $ARGUMENTS contains any of: `--vault-token`, `--vault-endpoint`:
 2. Merge the partial update into the existing values:
    - `--vault-token <value>`: use as the new `token`, keep existing `endpoint`/`ca_cert`/`tls_disable`.
    - `--vault-endpoint <value>`: auto-prepend `tcp://` if no scheme, keep existing `token`/`ca_cert`/`tls_disable`.
-3. Call `mcp__rune__configure` with the merged values. Server-side
+3. Call `mcp__plugin_rune_rune__configure` with the merged values. Server-side
    handles atomic write + 0600 perms + `metadata.lastUpdated` refresh +
    the soft Vault probe.
-4. Call `mcp__rune__activate` to apply.
+4. Call `mcp__plugin_rune_rune__activate` to apply.
 5. Render: `"Updated [field]. Use /rune:status to verify."`
 
 Skip all steps below.
@@ -71,7 +71,7 @@ to do so.
 - File present: mask the token (first 8 chars + "***") and show the
   current `endpoint`, `ca_cert`, `tls_disable`, `state`, masked token.
   Then issue a single `AskUserQuestion("Reconfigure these values?")`:
-    - User declines: call `mcp__rune__activate` and stop (just bring
+    - User declines: call `mcp__plugin_rune_rune__activate` and stop (just bring
       the existing config online).
     - User confirms: continue to Step 2 with the existing values as
       defaults the user can override.
@@ -108,7 +108,7 @@ Otherwise skip the follow-up.
 
 **On any "I don't have it yet" answer**: stop the flow immediately.
 Tell the user exactly what to request from their Vault admin (endpoint / `evt_...` token / `ca.pem`),
-point them at `setup/check-prerequisites.md`, and exit **without writing any files** - do not call `mcp__rune__configure`.
+point them at `setup/check-prerequisites.md`, and exit **without writing any files** - do not call `mcp__plugin_rune_rune__configure`.
 
 Resulting argument mapping for the configure call:
 
@@ -132,7 +132,7 @@ If `cp` fails (file not found / permission denied), surface the error
 and ask the user for a readable path (one more `AskUserQuestion`). Common
 recovery: `mkdir -p ~/.rune/certs && sudo cp /opt/runevault/certs/ca.pem ~/.rune/certs/ca.pem && sudo chown $USER ~/.rune/certs/ca.pem`.
 
-### 4. Call `mcp__rune__configure`
+### 4. Call `mcp__plugin_rune_rune__configure`
 
 ```jsonc
 {
@@ -166,13 +166,13 @@ Response:
 ### 5. Decide what to do next based on the probe
 
 **`vault_reachable: true`** - credentials look good. Call
-`mcp__rune__activate` to bring pipelines up. Proceed to Step 6.
+`mcp__plugin_rune_rune__activate` to bring pipelines up. Proceed to Step 6.
 
 **`vault_reachable: false`** - early warning. The file IS written and
 `state` IS active, but the probe couldn't dial Vault. Two ways to proceed:
 
   - **Common case (transient / first-time):** still call
-    `mcp__rune__activate`. The boot loop has retries with backoff,
+    `mcp__plugin_rune_rune__activate`. The boot loop has retries with backoff,
     and the classified `last_boot_error` it produces will be richer than
     the probe error.
   - **Obvious typo case** (`probe_error` contains "no such host" /
@@ -215,7 +215,7 @@ classifier has already done that work server-side.
 ### 7. Completion Summary (success path)
 
 When `activate.status == "active"`, optionally call
-`mcp__rune__diagnostics` once for the rich per-subsystem snapshot and
+`mcp__plugin_rune_rune__diagnostics` once for the rich per-subsystem snapshot and
 render:
 
 ```

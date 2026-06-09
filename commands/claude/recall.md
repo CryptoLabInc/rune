@@ -1,6 +1,6 @@
 ---
 description: Search organizational memory for past decisions and context
-allowed-tools: Bash(cat ~/.rune/*), Read, mcp__rune__*
+allowed-tools: Bash(cat ~/.rune/*), Read, mcp__plugin_rune_rune__*
 ---
 
 # /rune:recall — Search Memory

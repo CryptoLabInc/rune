@@ -1,6 +1,6 @@
 ---
 description: Capture organizational context to encrypted memory
-allowed-tools: Bash(cat ~/.rune/*), Read, mcp__rune__*
+allowed-tools: Bash(cat ~/.rune/*), Read, mcp__plugin_rune_rune__*
 ---
 
 # /rune:capture — Store Context

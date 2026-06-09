@@ -1,6 +1,6 @@
 ---
 description: Activate Rune (resume from dormant) and verify pipelines come up healthy
-allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__rune__activate, mcp__rune__diagnostics, mcp__rune__vault_status
+allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__plugin_rune_rune__activate, mcp__plugin_rune_rune__diagnostics, mcp__plugin_rune_rune__vault_status
 ---
 
 # /rune:activate — Activate Plugin
@@ -10,18 +10,18 @@ Resume Rune from a dormant state and verify the boot loop reaches Active.
 The MCP server is a Go binary at `~/.rune/bin/rune-mcp`, spawned by Claude Code
 via the plugin manifest's committed wrapper `${CLAUDE_PLUGIN_ROOT}/bin/rune
 mcp-server` (always present at session start; self-installs rune-mcp on first
-run). `mcp__rune__activate` runs the prereq checks server-side (config presence
+run). `mcp__plugin_rune_rune__activate` runs the prereq checks server-side (config presence
 + runed socket reachability, plus a runed Health probe) and only triggers the
 boot loop if everything's ready.
 
 ## Preflight: the first MCP call self-installs
 
-On a fresh `claude plugin install rune`, the first `mcp__rune__*` call spawns
+On a fresh `claude plugin install rune`, the first `mcp__plugin_rune_rune__*` call spawns
 `${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server`, which self-installs rune-mcp and
 then serves — so the call is EXPECTED to succeed in-session (may be slow on a
 cold download, bounded by the manifest's spawn timeout; that is normal).
 
-You normally do NOT need to run anything here. ONLY if a `mcp__rune__*` call
+You normally do NOT need to run anything here. ONLY if a `mcp__plugin_rune_rune__*` call
 actually fails with a transport / connection / spawn error (e.g. the server
 shows failed in `/mcp`) — a genuinely broken bootstrap — recover by running
 ONE of these via the Bash tool, then retry the failed MCP call once:
@@ -36,7 +36,7 @@ error and stop — do NOT loop. The user never types `rune install` themselves.
 
 ## Steps
 
-### 1. Call `mcp__rune__activate`
+### 1. Call `mcp__plugin_rune_rune__activate`
 
 That's it - no Read, no Edit, no manual state inspection. The MCP tool
 performs:
@@ -75,7 +75,7 @@ The response shape:
 **`configure_required`** - Vault credentials missing.
 - Render: `"Rune is not yet configured. Run /rune:configure to set Vault credentials."`
 - Use the `hint` verbatim - it already names the exact next step.
-- Stop. Do NOT call `mcp__rune__diagnostics`; the agent already has the answer.
+- Stop. Do NOT call `mcp__plugin_rune_rune__diagnostics`; the agent already has the answer.
 
 **`install_pending`** - the activate handler tried to auto-spawn the runed
 daemon (via `${HOME}/.rune/bin/rune runed --detach` or the
@@ -103,7 +103,7 @@ it can serve embeddings.
   already started a background watcher that polls runed's health and
   will complete activation.
   Suggest:
-  - To check progress (optional): invoke `/rune:diagnostics`
+  - To check progress (optional): invoke `/rune:status`
     and check `embedding.phase` / `embedding.bytes_done` /
     `embedding.bytes_total`. The bootstrap fields are populated there
     while runed is `LOADING`; once they go to zero and `embedding.status`
@@ -114,7 +114,7 @@ it can serve embeddings.
 - Stop. DO NOT poll automatically; DO NOT re-run `/rune:activate`.
 
 **`active`** — happy path. Pipelines initialized, ready to capture/recall.
-- Optionally call `mcp__rune__diagnostics` ONCE to render the
+- Optionally call `mcp__plugin_rune_rune__diagnostics` ONCE to render the
   per-subsystem summary below. Skip if you only need to confirm activation;
   `response.reload.state == "active"` is authoritative.
 
@@ -130,7 +130,7 @@ it can serve embeddings.
 
 ### 3. Render success snapshot (active path only)
 
-When `status == "active"`, call `mcp__rune__diagnostics` once and
+When `status == "active"`, call `mcp__plugin_rune_rune__diagnostics` once and
 render the per-subsystem report (use ✓ for healthy, ✗ for failures with
 the specific error on the same line):
 
