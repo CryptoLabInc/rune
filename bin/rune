@@ -44,30 +44,135 @@ mkdir -p "$RUNE_HOME"
 LOCK_DIR="$RUNE_HOME/bootstrap.lock.d"
 TMP=""
 SUMS=""
+OWNER_TOKEN=""
 cleanup() {
   [ -n "$TMP" ] && rm -f "$TMP"
   [ -n "$SUMS" ] && rm -f "$SUMS"
-  rmdir "$LOCK_DIR" 2>/dev/null || true
+  # Release lock after checking token is valid or not
+  if [ -n "$OWNER_TOKEN" ] && [ "$(cat "$LOCK_DIR/owner" 2>/dev/null || true)" = "$OWNER_TOKEN" ]; then
+    rm -f "$LOCK_DIR/owner" 2>/dev/null || true
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+
+# Network time budget
+# - `mcp-server`: MCP entryponit run by Claude Code session with ~30s timeout.
+#                 SIGKILL after timeout skip cleanup which leave unreleased bootstrap lock;
+#                 so overall time should be less than 30s.
+#                 Worst case: API resolve up to 7s + binary download up to 13s + checksum up to 7s
+# - other: matched with each downloaded binaries' deadline
+if [ "${1:-}" = mcp-server ]; then
+  NET_RETRY=3; NET_RETRY_DELAY=1; NET_RETRY_MAXTIME=3
+  NET_API_MAXTIME=4; NET_BIN_MAXTIME=10; NET_CHECKSUM_MAXTIME=4
+else
+  NET_RETRY=3; NET_RETRY_DELAY=2; NET_RETRY_MAXTIME=60
+  NET_API_MAXTIME=20; NET_BIN_MAXTIME=120; NET_CHECKSUM_MAXTIME=30
+fi
+
+# --retry rides out transient GitHub CDN failures (504, timeouts) instead
+# of aborting the whole bootstrap on the first blip.
+# Caller add NET_{API|BIN|CHECKSUM}_MAXTIME properly on each step
+fetch() {
+  curl --fail --silent --show-error --location --connect-timeout 5 \
+       --retry "$NET_RETRY" --retry-delay "$NET_RETRY_DELAY" \
+       --retry-max-time "$NET_RETRY_MAXTIME" "$@"
+}
+
+# Lock waiting budget to exit before Claude code MCP spawn timeout (~30s)
+LOCK_WAIT_BUDGET="${RUNE_LOCK_WAIT_BUDGET:-20}"
+# Lock's wall-clock age to prevent alive but stucked holder
+# Worst case: NET_RETRY_MAXTIME + NET_{API|BIN|CHECKSUM}_MAXTIME (about 350s) when !mcp-server
+LOCK_STALE_AFTER="${RUNE_LOCK_STALE_AFTER:-360}"
+
+# Atomically take stale lock and remove it
+clear_stale_lock() {
+  if mv "$LOCK_DIR" "$LOCK_DIR.reclaim.$$" 2>/dev/null; then
+    rm -rf "$LOCK_DIR.reclaim.$$" 2>/dev/null || true
+  fi
+  return 0
 }
 
 waited=0
-while ! mkdir "$LOCK_DIR" 2>/dev/null; do # another session hold lock
+wait_count=0
+while true; do
+  # Claim lock atomically
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    OWNER_TOKEN="$$ $(date +%s)" # "<pid> <timestamp>"
+    if ( set -C; printf '%s\n' "$OWNER_TOKEN" > "$LOCK_DIR/owner" ) 2>/dev/null; then
+      trap cleanup EXIT INT TERM
+      # Double-check if mkdir -> write gap affect lock
+      if [ "$(cat "$LOCK_DIR/owner" 2>/dev/null || true)" = "$OWNER_TOKEN" ]; then
+        break
+      fi
+      trap - EXIT INT TERM
+      OWNER_TOKEN=""
+      continue
+    fi
+
+    OWNER_TOKEN=""
+    if [ ! -d "$LOCK_DIR" ]; then
+      continue   # lock is cleared, retry claim
+    fi
+
+    # Real write error (disk full, permission, or others)
+    if [ ! -e "$LOCK_DIR/owner" ]; then
+      echo "rune: cannot record install bootstrap lock owner (file write failed)" >&2
+      exit 1
+    fi
+  fi
+
+  # Wait for another process as we failed to claim lokc
   if [ -x "$TARGET" ]; then
     exec "$TARGET" "$@"   # bootstrap finished
   fi
 
+  # Validate owner
+  owner="$(cat "$LOCK_DIR/owner" 2>/dev/null || true)"
+  pid="${owner%% *}"
+  case "$owner" in
+    *" "*) ts="${owner##* }" ;;
+    *)     ts="" ;;
+  esac
+
+  if [ -z "$owner" ]; then
+    # Dir is created but no owner yet; holder in the middle of claim or died
+    wait_count=$((wait_count + 1))
+    if [ "$wait_count" -ge 5 ]; then
+      echo "rune: bootstrap lock not claimed for ${wait_count}s; reclaiming" >&2
+      clear_stale_lock; wait_count=0; continue
+    fi
+  else
+    wait_count=0
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      # Holder process not found; lock is leaked
+      echo "rune: bootstrap lock holder (pid $pid) is not found; reclaiming" >&2
+      clear_stale_lock; continue
+    fi
+
+    # Check wall-clock age
+    case "$ts" in
+      ''|*[!0-9]*) age=0 ;;
+      *)           age=$(( $(date +%s) - ts )) ;;
+    esac
+
+    if [ "$age" -ge "$LOCK_STALE_AFTER" ]; then
+      echo "rune: bootstrap lock stale (${age}s); reclaiming" >&2
+      clear_stale_lock; continue
+    fi
+
+    if [ "$waited" -ge "$LOCK_WAIT_BUDGET" ]; then
+      echo "rune: another rune bootstrap is in progress over MCP spawn budget." >&2
+      echo "      Retry in a moment, or run it out-of-band:" >&2
+      echo "        bash -c \"\${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install\"" >&2
+      exit 1
+    fi
+  fi
+
   sleep 1
   waited=$((waited + 1))
-  if [ "$waited" -ge 120 ]; then
-    echo "rune: bootstrap lock held >120s, reclaiming" >&2
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-    waited=0
-  fi
 done
 
-# Check error
-trap cleanup EXIT INT TERM
-
+# Double-check: install is completed right before we won the lock
 if [ -x "$TARGET" ]; then
   cleanup
   trap - EXIT INT TERM
@@ -85,12 +190,9 @@ if [ -z "$RUNE_VERSION" ]; then
   # Use token if exist
   token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
   if [ -n "$token" ]; then
-    body="$(curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
-      --retry 3 --retry-delay 2 \
-      --header "Authorization: Bearer $token" "$api" || true)"
+    body="$(fetch --max-time "$NET_API_MAXTIME" --header "Authorization: Bearer $token" "$api" || true)"
   else
-    body="$(curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
-      --retry 3 --retry-delay 2 "$api" || true)"
+    body="$(fetch --max-time "$NET_API_MAXTIME" "$api" || true)"
   fi
 
   RUNE_VERSION="$(printf '%s' "$body" \
@@ -128,12 +230,22 @@ mkdir -p "$(dirname "$TARGET")"
 TMP="$(mktemp "$(dirname "$TARGET")/.rune-bootstrap-XXXXXX")"
 SUMS="$(mktemp -t rune-bootstrap-sums-XXXXXX)"
 
-# --retry rides out transient GitHub CDN failures (504, timeouts) instead
-# of aborting the whole bootstrap on the first blip.
-curl --fail --silent --show-error --location --connect-timeout 10 --max-time 120 --retry 3 --retry-delay 2 "$RELEASE_BASE/$ASSET"        -o "$TMP"
-curl --fail --silent --show-error --location --connect-timeout 10 --max-time 30  --retry 3 --retry-delay 2 "$RELEASE_BASE/checksums.txt" -o "$SUMS"
+if ! fetch --max-time "$NET_BIN_MAXTIME" "$RELEASE_BASE/$ASSET" -o "$TMP"; then
+  echo "rune: could not download $ASSET ($RUNE_VERSION) after retries." >&2
+  echo "      The release endpoint may be slow or temporarily unavailable (e.g. HTTP 504)." >&2
+  echo "      Recover out-of-band, then reconnect /mcp:" >&2
+  echo "        bash -c \"\${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install\"" >&2
+  exit 1
+fi
+if ! fetch --max-time "$NET_CHECKSUM_MAXTIME" "$RELEASE_BASE/checksums.txt" -o "$SUMS"; then
+  echo "rune: could not download checksums.txt ($RUNE_VERSION) after retries." >&2
+  echo "      The release endpoint may be slow or temporarily unavailable (e.g. HTTP 504)." >&2
+  echo "      Recover out-of-band, then reconnect /mcp:" >&2
+  echo "        bash -c \"\${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install\"" >&2
+  exit 1
+fi
 
-EXPECTED="$(grep " $ASSET\$" "$SUMS" | cut -d' ' -f1)"
+EXPECTED="$(grep " $ASSET\$" "$SUMS" | cut -d' ' -f1 || true)"
 if [ -z "$EXPECTED" ]; then
   echo "rune: $ASSET not listed in checksums.txt for $RUNE_VERSION" >&2
   exit 1
