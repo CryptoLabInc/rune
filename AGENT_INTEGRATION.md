@@ -1,19 +1,23 @@
 # Agent Integration Guide
 
 Rune works with all major AI agents via native MCP (Model Context Protocol)
-support. In v0.4 the MCP server is a single Go binary
-(`bin/rune-mcp`) that the host CLI auto-spawns over stdio — no Python
-runtime, no `pip install`, no manual `mcp add` for the supported CLIs.
+support. In v0.4 the MCP server is a single Go binary (`rune-mcp`) that the
+host CLI auto-spawns over stdio through the committed bash wrapper
+`bin/rune mcp-server` — no Python runtime, no `pip install`, no manual
+`mcp add` for the supported CLIs.
 
 ## Integration Principles
 
 ### Cross-agent common (single source of truth)
-- The Go binary at `cmd/rune-mcp/` is the only MCP server entry point.
-  Plugin / extension manifests point each CLI at the same binary.
-- Runtime preparation happens at install time (the binary is already
-  built and shipped with the plugin tarball — see Task #30 for the
-  release pipeline). Nothing needs to be (re)bootstrapped at session
-  start.
+- The CLI entry point is `cmd/rune/` (the `rune` binary). Plugin /
+  extension manifests point each CLI at the committed bash wrapper
+  `bin/rune` invoked as `rune mcp-server`, which execs the downloaded
+  `rune-mcp` MCP server.
+- Runtime preparation happens on the first MCP spawn, not at plugin
+  install: the wrapper self-installs the `rune` CLI and downloads the
+  pinned `rune-mcp` binary (per `.release-pins.yaml`) into `~/.rune/bin/`,
+  then execs it — so the server comes online in the same session with no
+  manual `/mcp` reconnect or restart.
 
 ### Agent-specific adapters (thin layer only)
 - Codex-only tasks: `codex mcp add/remove/list` registration flows
@@ -48,10 +52,12 @@ $ claude plugin install rune
 > /plugin install rune
 ```
 
-The plugin manifest (`.claude-plugin/plugin.json`) declares the binary
-path; Claude Code spawns `${CLAUDE_PLUGIN_ROOT}/bin/rune-mcp` via stdio
-on session start. enVector Cloud credentials are delivered automatically
-via the Vault bundle — you never set `ENVECTOR_*` env vars directly.
+The plugin manifest (`.claude-plugin/plugin.json`) declares the wrapper
+path; Claude Code spawns `${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server` via
+stdio on session start (on a fresh install the wrapper self-installs
+rune-mcp first, then execs it). enVector Cloud credentials are delivered
+automatically via the Vault bundle — you never set `ENVECTOR_*` env vars
+directly.
 
 ### Configure credentials
 
