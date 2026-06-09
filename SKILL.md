@@ -109,12 +109,15 @@ If in Active state but operations fail:
 
    Note: enVector credentials are delivered automatically via the Vault bundle — no user input needed.
 
-4. Create `~/.rune/config.json` with `state: "active"` and the values
-   above (`mkdir -p ~/.rune && chmod 700 ~/.rune`, then `chmod 600` the
-   file).
-5. Call the `reload_pipelines` MCP tool. The MCP server's boot loop
-   dials Vault, fetches the agent manifest (EncKey + envector
-   creds), connects to enVector, and transitions to Active.
+4. Call the `configure` MCP tool with the collected values
+   (`endpoint`, `token`, `ca_cert_path`, `tls_disable`). The server does
+   the atomic 0600 write to `~/.rune/config.json`, sets `state: "active"`,
+   refreshes `metadata.lastUpdated`, and runs a best-effort Vault probe.
+   The agent never writes the config file itself.
+5. Call the `activate` MCP tool to bring pipelines online. It runs the
+   prereq checks server-side and drives the boot loop: dials Vault,
+   fetches the agent manifest (EncKey + enVector creds), connects to
+   enVector, and transitions to Active.
 6. Confirm health by calling `diagnostics` and applying the
    **Boot Failure — Fast-Fail Rule** (see section below). If
    `vault.last_boot_error` is present, surface its `hint` verbatim
@@ -195,7 +198,7 @@ Recommendations:
 
 **Note**: In most cases, simply asking naturally ("Why did we choose PostgreSQL?") triggers Retriever automatically — no command needed.
 
-### `/rune:activate` (or `/rune:wakeup`)
+### `/rune:activate`
 (or `$rune activate` for Codex CLI)
 
 **Purpose**: Attempt to activate plugin after infrastructure is ready
@@ -203,20 +206,29 @@ Recommendations:
 **Use Case**: Infrastructure was not ready during configure, but now it's deployed and running.
 
 **Steps**:
-1. Check if config exists
-   - NO → Redirect to `/rune:configure` (or `$rune configure` for Codex CLI)
-   - YES → Continue
-2. If `state` is already `"active"`, skip to step 4 (just verify health).
-3. If `state` is `"dormant"`, set it to `"active"` and clear any
-   `dormant_reason` / `dormant_since` fields.
-4. Call the `reload_pipelines` MCP tool. From a terminal Dormant the
-   boot loop is re-spawned; from Active it is a no-op.
-5. Call `diagnostics` and apply the **Boot Failure — Fast-Fail Rule**
-   (section below).
-6. If `vault.last_boot_error` is present: surface its `hint` verbatim,
-   suggest the matching recovery action, and stop. Do NOT loop on
-   `reload_pipelines` or probe with shell tools — the classifier has
-   already done that work. Otherwise render the per-subsystem snapshot.
+1. Call the `activate` MCP tool — no Read, no Edit, no manual state
+   inspection. It runs the prereq checks server-side (config present,
+   runed socket reachable + Health probe) and only triggers the boot
+   loop when everything is ready. It returns a `status`:
+   `configure_required` | `install_pending` | `waiting_for_bootstrap` |
+   `active` | `waiting_for_vault` | `dormant`.
+2. Branch on `status`:
+   - `configure_required` → redirect to `/rune:configure`; use the `hint`
+     verbatim and stop.
+   - `install_pending` → invoke the recovery in `hint` (the agent runs
+     `rune install`, never the user), then retry `/rune:activate` once.
+   - `waiting_for_bootstrap` → runed is still downloading llama-server /
+     the embedding model; summarize `.bootstrap` progress, tell the user
+     no further action is needed, and stop (do NOT poll).
+   - `active` → optionally call `diagnostics` once and render the
+     per-subsystem snapshot.
+   - `waiting_for_vault` / `dormant` → apply the **Boot Failure —
+     Fast-Fail Rule** (below): surface `reload.last_boot_error.hint`
+     verbatim, suggest one recovery, and stop.
+
+(Older rune-mcp binaries without the `activate` tool fall back to the
+legacy flow: set `state: "active"`, call `reload_pipelines` directly, and
+branch on `diagnostics.vault.last_boot_error`.)
 
 ### `/rune:reset`
 (or `$rune reset` for Codex CLI)
