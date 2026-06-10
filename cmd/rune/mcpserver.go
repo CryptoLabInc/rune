@@ -42,7 +42,7 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 			},
 		})
 		if instErr != nil {
-			// If error is not ErrInstalINProgress, it is unavoidable error
+			// If error is not ErrInstallInProgress, it is unavoidable error
 			if !errors.Is(instErr, bootstrap.ErrInstallInProgress) {
 				fmt.Fprintf(stderr, "rune: cannot install rune-mcp: %v\n", instErr)
 				return 1
