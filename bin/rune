@@ -56,7 +56,7 @@ cleanup() {
 }
 
 # Network time budget
-# - `mcp-server`: MCP entryponit run by Claude Code session with ~30s timeout.
+# - `mcp-server`: MCP entrypoint run by Claude Code session with ~30s timeout.
 #                 SIGKILL after timeout skip cleanup which leave unreleased bootstrap lock;
 #                 so overall time should be less than 30s.
 #                 Worst case: API resolve up to 7s + binary download up to 13s + checksum up to 7s
@@ -69,8 +69,8 @@ else
   NET_API_MAXTIME=20; NET_BIN_MAXTIME=120; NET_CHECKSUM_MAXTIME=30
 fi
 
-# --retry rides out transient GitHub CDN failures (504, timeouts) instead
-# of aborting the whole bootstrap on the first blip.
+# retries fast transient errors such as Github CDN failures (504, timeouts) only;
+# slow/hung requests are intentionally not retried to stay within the spawn budget.
 # Caller add NET_{API|BIN|CHECKSUM}_MAXTIME properly on each step
 fetch() {
   curl --fail --silent --show-error --location --connect-timeout 5 \
@@ -80,7 +80,7 @@ fetch() {
 
 # Lock waiting budget to exit before Claude code MCP spawn timeout (~30s)
 LOCK_WAIT_BUDGET="${RUNE_LOCK_WAIT_BUDGET:-20}"
-# Lock's wall-clock age to prevent alive but stucked holder
+# Lock's wall-clock age to prevent alive but stuck holder
 # Worst case: NET_RETRY_MAXTIME + NET_{API|BIN|CHECKSUM}_MAXTIME (about 350s) when !mcp-server
 LOCK_STALE_AFTER="${RUNE_LOCK_STALE_AFTER:-360}"
 
@@ -121,7 +121,7 @@ while true; do
     fi
   fi
 
-  # Wait for another process as we failed to claim lokc
+  # Wait for another process as we failed to claim lock
   if [ -x "$TARGET" ]; then
     exec "$TARGET" "$@"   # bootstrap finished
   fi
