@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 )
@@ -20,8 +21,21 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 2
 	}
 
+	// Check RUNE_MANIFEST before fail
 	if *manifest == "" {
-		fmt.Fprintln(stderr, "rune install: no manifest URL configured (set --manifest-url or RUNE_MANIFEST)")
+		if env := os.Getenv("RUNE_MANIFEST"); env != "" {
+			*manifest = env
+		}
+	}
+
+	if *manifest == "" {
+		const msg = "no manifest URL configured (set --manifest-url or RUNE_MANIFEST)"
+		if *jsonOut {
+			_ = json.NewEncoder(stdout).Encode(jsonEvent{Event: "summary", Error: msg})
+		} else {
+			fmt.Fprintln(stderr, "rune install: "+msg)
+		}
+
 		return 2
 	}
 
