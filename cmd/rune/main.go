@@ -59,7 +59,7 @@ func main() {
 	case "install":
 		os.Exit(runInstall(ctx, args, os.Stdout, os.Stderr))
 	case "verify":
-		os.Exit(runVerify(ctx, args, os.Stdout))
+		os.Exit(runVerify(ctx, args, os.Stdout, os.Stderr))
 	case "version":
 		os.Exit(runVersion(os.Stdout))
 	case "mcp-server":
