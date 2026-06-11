@@ -10,9 +10,9 @@ import (
 	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 )
 
-func runVerify(ctx context.Context, args []string, stdout io.Writer) int {
+func runVerify(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
-	fs.SetOutput(stdout)
+	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON instead of human-readable text")
 	if err := fs.Parse(args); err != nil {
 		return 2
