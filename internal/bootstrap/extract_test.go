@@ -108,3 +108,43 @@ func TestExtractTarball_RejectsAbsolutePath(t *testing.T) {
 		t.Fatal("expected error for absolute entry path, got nil")
 	}
 }
+
+func TestExtractTarball_SkipSymlink(t *testing.T) {
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "symlink.tar.gz")
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	reg := []byte("REAL")
+
+	if err := tw.WriteHeader(&tar.Header{Name: "runed", Mode: 0o755, Size: int64(len(reg)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatalf("tar header (reg): %v", err)
+	}
+	if _, err := tw.Write(reg); err != nil {
+		t.Fatalf("tar write: %v", err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "malicious", Linkname: "/etc/passwd", Typeflag: tar.TypeSymlink}); err != nil {
+		t.Fatalf("tar header (symlink): %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("tar close: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("gz close: %v", err)
+	}
+	if err := os.WriteFile(tarPath, buf.Bytes(), 0o600); err != nil {
+		t.Fatalf("write tarball: %v", err)
+	}
+
+	dest := filepath.Join(dir, "out")
+	if err := ExtractTarball(tarPath, dest); err != nil {
+		t.Fatalf("ExtractTarball should skip symlinks without error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "runed")); err != nil {
+		t.Errorf("regular file should still extract alongside a skipped symlink: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dest, "malicious")); !os.IsNotExist(err) {
+		t.Errorf("symlink entry must be skipped, not created; lstat err=%v", err)
+	}
+}

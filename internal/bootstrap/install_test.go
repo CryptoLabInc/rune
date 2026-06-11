@@ -204,3 +204,76 @@ func TestInstall_ChecksumMismatch_PartialFailure(t *testing.T) {
 		t.Errorf("rune-mcp should not exist after checksum failure (err=%v)", err)
 	}
 }
+
+func tarGz(t *testing.T, name string, body []byte) []byte {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "artifact.tar.gz")
+
+	makeTarball(t, p, map[string]struct {
+		body []byte
+		mode int64
+	}{
+		name: {body: body, mode: 0o755},
+	})
+
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read tarball: %v", err)
+	}
+
+	return b
+}
+
+func TestInstall_TarballExtract(t *testing.T) {
+	setRealms(t)
+	paths, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	runedTar := tarGz(t, filepath.Base(paths.RunedBinary), []byte("RUNED"))
+	mcpTar := tarGz(t, filepath.Base(paths.RuneMCPBinary), []byte("RUNE-MCP"))
+
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		m := map[string]any{
+			"version":          1,
+			"rune_mcp_version": "v0.1.0-test",
+			"runed_version":    "v0.1.0-test",
+			"platforms": map[string]any{
+				PlatformTuple(): map[string]any{
+					"runed":    map[string]any{"url": srv.URL + "/runed.tar.gz", "sha256": sha256Hex(runedTar), "size": len(runedTar), "extract": "tar.gz"},
+					"rune_mcp": map[string]any{"url": srv.URL + "/rune-mcp.tar.gz", "sha256": sha256Hex(mcpTar), "size": len(mcpTar), "extract": "tar.gz"},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(m)
+	})
+	mux.HandleFunc("/runed.tar.gz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(runedTar) })
+	mux.HandleFunc("/rune-mcp.tar.gz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(mcpTar) })
+
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: srv.URL + "/manifest.json"})
+	if err != nil {
+		t.Fatalf("Install (tar.gz): %v", err)
+	}
+	if !r.OK {
+		t.Errorf("Result.OK = false, want true (r=%+v)", r)
+	}
+
+	for _, p := range []string{paths.RunedBinary, paths.RuneMCPBinary} {
+		info, statErr := os.Stat(p)
+		if statErr != nil {
+			t.Errorf("extracted binary missing at %s: %v", p, statErr)
+			continue
+		}
+		if info.Mode().Perm()&0o100 == 0 {
+			t.Errorf("%s is not executable: mode=%v", p, info.Mode())
+		}
+	}
+}
