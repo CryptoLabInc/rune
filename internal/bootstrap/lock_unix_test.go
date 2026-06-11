@@ -39,6 +39,9 @@ func TestAcquireInstallLock_TimeOut(t *testing.T) {
 	if !strings.Contains(err.Error(), "another install in progress") {
 		t.Errorf("error should mention 'another install in progress'; got %v", err)
 	}
+	if !errors.Is(err, ErrInstallInProgress) {
+		t.Errorf("timeout error should wrap ErrInstallInProgress; got %v", err)
+	}
 
 	if elapsed < 80*time.Millisecond {
 		t.Errorf("returned too quickly: %s", elapsed)
@@ -79,6 +82,9 @@ func TestAcquireInstallLock_CtxCancel(t *testing.T) {
 	}
 	if !errors.Is(gotErr, context.Canceled) {
 		t.Errorf("want context.Canceled, got %v", gotErr)
+	}
+	if !errors.Is(gotErr, ErrInstallInProgress) {
+		t.Errorf("context cancelled during waiting lock should be wrapped with ErrInstallInProgress; got %v", gotErr)
 	}
 	if elapsed > 1*time.Second {
 		t.Errorf("ctx cancel should be honored quickly; took %s", elapsed)
