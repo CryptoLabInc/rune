@@ -56,6 +56,10 @@ func fakeRuned(behavior string) {
 			os.Exit(1)
 		}
 		os.Exit(0)
+	case "ignore_sigterm": // deligate SIGTERM to SIGKILL
+		signal.Ignore(syscall.SIGTERM, syscall.SIGINT)
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
 	default:
 		os.Exit(99)
 	}
@@ -153,5 +157,36 @@ func TestWatcher_ContextCancelTriggersShutdown(t *testing.T) {
 
 	if v := watcherErr.Load(); v != nil {
 		t.Errorf("runWatcher returned %v; want nil on graceful shutdown", v)
+	}
+}
+
+func TestWatcher_EscalateSIGKILL(t *testing.T) {
+	t.Setenv(fakeRunedEnv, "ignore_sigterm")
+	cfg := testWatcherConfig(t)
+	cfg.ShutdownGrace = 300 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runWatcher(ctx, cfg) }()
+
+	time.Sleep(400 * time.Millisecond)
+	start := time.Now()
+	cancel()
+
+	select {
+	case err := <-done:
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Errorf("runWatcher = %v; want nil after SIGKILL escalation", err)
+		}
+
+		if elapsed < cfg.ShutdownGrace {
+			t.Errorf("returned in %s (< grace %s); SIGTERM should have been ignored", elapsed, cfg.ShutdownGrace)
+		}
+		if elapsed > cfg.ShutdownGrace+3*time.Second {
+			t.Errorf("escalation too slow: %s", elapsed)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("runWatcher hung - SIGKILL escalation did not fire")
 	}
 }
