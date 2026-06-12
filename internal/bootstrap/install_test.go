@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -224,15 +225,8 @@ func tarGz(t *testing.T, name string, body []byte) []byte {
 	return b
 }
 
-func TestInstall_TarballExtract(t *testing.T) {
-	setRealms(t)
-	paths, err := Resolve()
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-
-	runedTar := tarGz(t, filepath.Base(paths.RunedBinary), []byte("RUNED"))
-	mcpTar := tarGz(t, filepath.Base(paths.RuneMCPBinary), []byte("RUNE-MCP"))
+func tarballManifestServer(t *testing.T, runedTar, mcpTar []byte) string {
+	t.Helper()
 
 	var srv *httptest.Server
 	mux := http.NewServeMux()
@@ -258,7 +252,20 @@ func TestInstall_TarballExtract(t *testing.T) {
 	srv = httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	r, err := Install(context.Background(), InstallOptions{ManifestURL: srv.URL + "/manifest.json"})
+	return srv.URL + "/manifest.json"
+}
+
+func TestInstall_TarballExtract(t *testing.T) {
+	setRealms(t)
+	paths, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	runedTar := tarGz(t, filepath.Base(paths.RunedBinary), []byte("RUNED"))
+	mcpTar := tarGz(t, filepath.Base(paths.RuneMCPBinary), []byte("RUNE-MCP"))
+
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: tarballManifestServer(t, runedTar, mcpTar)})
 	if err != nil {
 		t.Fatalf("Install (tar.gz): %v", err)
 	}
@@ -275,5 +282,61 @@ func TestInstall_TarballExtract(t *testing.T) {
 		if info.Mode().Perm()&0o100 == 0 {
 			t.Errorf("%s is not executable: mode=%v", p, info.Mode())
 		}
+	}
+}
+
+func TestInstall_TarballMissingExpectedFile(t *testing.T) {
+	setRealms(t)
+	paths, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	runedTar := tarGz(t, filepath.Base(paths.RunedBinary), []byte("RUNED"))
+	mcpTar := tarGz(t, "not-rune-mcp", []byte("WRONG-NAME")) // valid archive but wrong entry
+
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: tarballManifestServer(t, runedTar, mcpTar)})
+	if err == nil {
+		t.Fatal("expected error when the tarball lacks the expected file")
+	}
+	if !strings.Contains(err.Error(), "did not have expected file") {
+		t.Errorf("err = %v, want 'did not have expected file'", err)
+	}
+	if r.Status != "partial" {
+		t.Errorf("Status=%q, want partial", r.Status)
+	}
+	if r.Failed[StepRuneMCP] == "" {
+		t.Errorf("Failed missing %s: %+v", StepRuneMCP, r.Failed)
+	}
+	if fileExists(paths.RuneMCPBinary) {
+		t.Errorf("%s should not exist when the tarball lacks it", paths.RuneMCPBinary)
+	}
+}
+
+func TestInstall_CorruptTarball(t *testing.T) {
+	setRealms(t)
+	paths, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	runedTar := tarGz(t, filepath.Base(paths.RunedBinary), []byte("RUNED"))
+	corrupt := []byte("this is not a gzip stream") // SHA and size are matched but broken tarball
+
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: tarballManifestServer(t, runedTar, corrupt)})
+	if err == nil {
+		t.Fatal("expected extract error for a corrupt gzip body")
+	}
+	if !strings.Contains(err.Error(), "extract") {
+		t.Errorf("err = %v, want an extract failure", err)
+	}
+	if r.Status != "partial" {
+		t.Errorf("Status=%q, want partial", r.Status)
+	}
+	if r.Failed[StepRuneMCP] == "" {
+		t.Errorf("Failed missing %s: %+v", StepRuneMCP, r.Failed)
+	}
+	if fileExists(paths.RuneMCPBinary) {
+		t.Errorf("%s should not exist after a failed extract", paths.RuneMCPBinary)
 	}
 }

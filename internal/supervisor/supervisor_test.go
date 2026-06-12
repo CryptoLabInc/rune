@@ -190,3 +190,32 @@ func TestWatcher_EscalateSIGKILL(t *testing.T) {
 		t.Fatal("runWatcher hung - SIGKILL escalation did not fire")
 	}
 }
+
+func TestWatcher_ForwardSignalToChild(t *testing.T) {
+	t.Setenv(fakeRunedEnv, "sleep")
+	cfg := testWatcherConfig(t)
+	cfg.ShutdownGrace = 2 * time.Second
+
+	done := make(chan error, 1)
+	go func() { done <- runWatcher(context.Background(), cfg) }()
+
+	time.Sleep(400 * time.Millisecond)
+
+	start := time.Now()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatalf("send SIGTERM: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("runWatcher = %v; want nil when SIGTERM is forwarded and the child exit 0", err)
+		}
+
+		if elapsed := time.Since(start); elapsed >= cfg.ShutdownGrace {
+			t.Errorf("took %s (>= grace %s); child should exit by forwarded SIGTERM", elapsed, cfg.ShutdownGrace)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runWatcher did not return after SIGTERM - signal not forwarded")
+	}
+}
