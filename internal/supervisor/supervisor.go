@@ -107,6 +107,37 @@ func runWatcher(ctx context.Context, cfg Config) error {
 	var crashes []time.Time
 	backoffIdx := 0
 
+	recordCrash := func(now time.Time) (int, bool) {
+		crashes = append(crashes, now)
+		cutoff := now.Add(-cfg.MaxCrashWindow) // crash older than 'now - cfg.MaxCrashWindow' is considered expired
+		i := 0
+
+		for i < len(crashes) && crashes[i].Before(cutoff) {
+			i++
+		}
+		crashes = crashes[i:] // sliding-window
+
+		return len(crashes), len(crashes) >= cfg.MaxCrashes
+	}
+
+	// sleepBackoff waits the next backoff step; false means shutdown was
+	// requested while waiting.
+	sleepBackoff := func(crashCount int) bool {
+		wait := cfg.BackoffSchedule[min(backoffIdx, len(cfg.BackoffSchedule)-1)]
+		backoffIdx++
+
+		fmt.Fprintf(os.Stderr, "supervisor: backing off %s before restart (crash %d of max %d in %s window)\n", wait, crashCount, cfg.MaxCrashes, cfg.MaxCrashWindow)
+
+		select {
+		case <-time.After(wait): // wait next backoff
+			return true
+		case <-ctx.Done(): // shutdown requested
+			return false
+		case <-sigCh: // shutdown requested
+			return false
+		}
+	}
+
 	for {
 		cmd := exec.Command(cfg.RunedBinary, cfg.RunedArgs...)
 		cmd.Stdin = nil
@@ -115,8 +146,20 @@ func runWatcher(ctx context.Context, cfg Config) error {
 
 		fmt.Fprintf(os.Stderr, "supervisor: starting %s %v\n", cfg.RunedBinary, cfg.RunedArgs)
 		started := time.Now()
+
+		// Share crash budget rather than end up supervision for retriable error
 		if err := cmd.Start(); err != nil {
-			return fmt.Errorf("supervisor: start %s: %w", cfg.RunedBinary, err)
+			fmt.Fprintf(os.Stderr, "supervisor: start %s: %v\n", cfg.RunedBinary, err)
+
+			count, giveUp := recordCrash(time.Now())
+			if giveUp {
+				return fmt.Errorf("supervisor: start %s: %w (%d failures within %s - giving up)", cfg.RunedBinary, err, count, cfg.MaxCrashWindow)
+			}
+			if !sleepBackoff(count) {
+				return nil
+			}
+
+			continue
 		}
 
 		done := make(chan error, 1)
@@ -146,27 +189,11 @@ func runWatcher(ctx context.Context, cfg Config) error {
 				backoffIdx = 0
 			}
 
-			crashes = append(crashes, now)
-			cutoff := now.Add(-cfg.MaxCrashWindow) // crashes older than now - cfg.MaxCrashWindow are considered expired
-			i := 0
-			for i < len(crashes) && crashes[i].Before(cutoff) {
-				i++
+			count, giveUp := recordCrash(now)
+			if giveUp {
+				return fmt.Errorf("supervisor: %d crashes within %s - giving up", count, cfg.MaxCrashWindow)
 			}
-			crashes = crashes[i:] // sliding-window
-
-			if len(crashes) >= cfg.MaxCrashes {
-				return fmt.Errorf("supervisor: %d crashes within %s - giving up", len(crashes), cfg.MaxCrashWindow)
-			}
-
-			wait := cfg.BackoffSchedule[min(backoffIdx, len(cfg.BackoffSchedule)-1)]
-			backoffIdx++
-			fmt.Fprintf(os.Stderr, "supervisor: backing off %s before restart (crash %d of max %d in %s window)\n", wait, len(crashes), cfg.MaxCrashes, cfg.MaxCrashWindow)
-			select {
-			case <-time.After(wait):
-				continue
-			case <-ctx.Done():
-				return nil
-			case <-sigCh:
+			if !sleepBackoff(count) {
 				return nil
 			}
 		}
@@ -184,8 +211,16 @@ func shutdownChild(cmd *exec.Cmd, grace time.Duration, done <-chan error) error 
 		return nil
 	case <-time.After(grace):
 		fmt.Fprintf(os.Stderr, "supervisor: child didn't exit within %s, sending SIGKILL\n", grace)
+
 		_ = cmd.Process.Kill()
-		<-done
+
+		// Also check if child still hasn't died for certain period
+		select {
+		case <-done:
+		case <-time.After(grace):
+			fmt.Fprintf(os.Stderr, "supervisor: child unresponsive to SIGKILL after %s, abandoning\n", grace)
+		}
+
 		return nil
 	}
 }
