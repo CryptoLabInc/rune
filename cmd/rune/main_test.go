@@ -176,7 +176,7 @@ func TestRunInstall_JSONMissingManifest(t *testing.T) {
 		t.Errorf("exit = %d, want 2", code)
 	}
 
-  // Emit stdout as JSON
+	// Emit stdout as JSON
 	var ev jsonEvent
 	if err := json.Unmarshal(stdout.Bytes(), &ev); err != nil {
 		t.Fatalf("stdout should be a JSON event; got %q (err %v)", stdout.String(), err)
