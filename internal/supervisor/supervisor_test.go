@@ -4,9 +4,12 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -217,5 +220,54 @@ func TestWatcher_ForwardSignalToChild(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("runWatcher did not return after SIGTERM - signal not forwarded")
+	}
+}
+
+func TestWatcher_RetriesStartFailure(t *testing.T) {
+	cfg := testWatcherConfig(t)
+	cfg.RunedBinary = filepath.Join(t.TempDir(), "no-such-runed")
+	cfg.MaxCrashes = 3
+
+	err := runWatcher(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("runWatcher should give up after MaxCrashes start failures")
+	}
+	if !strings.Contains(err.Error(), "giving up") {
+		t.Errorf("error: got %q, want substring 'giving up'", err.Error())
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d failures", cfg.MaxCrashes)) {
+		t.Errorf("error: got %q, want %d retried attempts before giving up", err.Error(), cfg.MaxCrashes)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("error: got %v, want wrapped os.ErrNotExist from the failed Start", err)
+	}
+}
+
+func TestShutdownChild_BoundedAfterSIGKILL(t *testing.T) {
+	t.Setenv(fakeRunedEnv, "ignore_sigterm")
+	cmd := exec.Command(os.Args[0])
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start fake: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
+
+	done := make(chan error) // no signal
+
+	grace := 200 * time.Millisecond
+	start := time.Now()
+	if err := shutdownChild(cmd, grace, done); err != nil {
+		t.Errorf("shutdownChild = %v, want nil", err)
+	}
+
+	elapsed := time.Since(start)
+	if elapsed < 2*grace {
+		t.Errorf("returned in %s; want >= %s (SIGTERM grace + bounded kill-wait)", elapsed, 2*grace)
+	}
+	if elapsed > 2*grace+2*time.Second {
+		t.Errorf("took %s; should wait after SIGKILL sended", elapsed)
 	}
 }
