@@ -21,10 +21,11 @@ type InstalledManifest struct {
 }
 
 type InstalledArtifact struct {
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
-	Path   string `json:"path"`
-	Size   int64  `json:"size,omitempty"`
+	URL        string `json:"url"`
+	SHA256     string `json:"sha256"`                // manifest spec hash (the archive hash for a tar.gz artifact)
+	DestSHA256 string `json:"dest_sha256,omitempty"` // installed raw binary sha256 (extracted file's hash for tarball)
+	Path       string `json:"path"`
+	Size       int64  `json:"size,omitempty"`
 }
 
 func WriteInstalledManifest(paths *Paths, manifestURL string, manifest *Manifest, artifacts map[string]InstalledArtifact) error {
