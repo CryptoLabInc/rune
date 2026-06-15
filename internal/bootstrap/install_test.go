@@ -164,6 +164,186 @@ func TestInstall_Idempotent_SkipsExistingBinaries(t *testing.T) {
 	}
 }
 
+func TestInstall_RepairCorruptBinary(t *testing.T) {
+	rune, _ := setRealms(t)
+	fx := newFixture(t)
+
+	if _, err := Install(context.Background(), InstallOptions{ManifestURL: fx.manifestURL()}); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+
+	// Simulate partial/stale rune-mcp
+	mcpPath := filepath.Join(rune, "bin", "rune-mcp")
+	if err := os.WriteFile(mcpPath, []byte("corrupt-truncated"), 0o755); err != nil {
+		t.Fatalf("corrupt rune-mcp: %v", err)
+	}
+	beforeMCP, beforeRuned := fx.hits["/rune-mcp"], fx.hits["/runed"]
+
+	// Non-force install detect sha mismatch and repair it
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: fx.manifestURL()})
+	if err != nil {
+		t.Fatalf("repair install: %v", err)
+	}
+	if !r.OK {
+		t.Errorf("Result.OK = false, want true (r=%+v)", r)
+	}
+
+	if fx.hits["/rune-mcp"] != beforeMCP+1 {
+		t.Errorf("rune-mcp not re-downloaded: hits=%d, want %d", fx.hits["/rune-mcp"], beforeMCP+1)
+	}
+	if got, _ := os.ReadFile(mcpPath); string(got) != string(fx.runeMCP) {
+		t.Errorf("rune-mcp not repaired: on-disk=%q, want %q", got, fx.runeMCP)
+	}
+
+	// Skip healthy runed binary
+	if fx.hits["/runed"] != beforeRuned {
+		t.Errorf("healthy runed re-downloaded: hits=%d, want %d", fx.hits["/runed"], beforeRuned)
+	}
+
+	skipped := map[string]bool{}
+	for _, s := range r.Skipped {
+		skipped[s] = true
+	}
+	if !skipped[StepRuned] {
+		t.Errorf("Skipped missing %s: %v", StepRuned, r.Skipped)
+	}
+	if skipped[StepRuneMCP] {
+		t.Errorf("corrupt %s should have been repaired, but not skipped: %v", StepRuneMCP, r.Skipped)
+	}
+}
+
+func TestInstall_SkipVerifiedTarball(t *testing.T) {
+	setRealms(t)
+	paths, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	runedTar := tarGz(t, filepath.Base(paths.RunedBinary), []byte("RUNED"))
+	mcpTar := tarGz(t, filepath.Base(paths.RuneMCPBinary), []byte("RUNE-MCP"))
+	url := tarballManifestServer(t, runedTar, mcpTar)
+
+	if _, err := Install(context.Background(), InstallOptions{ManifestURL: url}); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: url})
+	if err != nil {
+		t.Fatalf("second install: %v", err)
+	}
+	if r.Status != "no_op" {
+		t.Errorf("Status=%q, want no_op (both tar.gz artifacts verified and skipped)", r.Status)
+	}
+	if len(r.Installed) != 0 {
+		t.Errorf("Installed=%v, want empty (nothing re-extracted)", r.Installed)
+	}
+}
+
+func TestInstall_RepairCorruptTarball(t *testing.T) {
+	setRealms(t)
+	paths, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	runedTar := tarGz(t, filepath.Base(paths.RunedBinary), []byte("RUNED"))
+	mcpTar := tarGz(t, filepath.Base(paths.RuneMCPBinary), []byte("RUNE-MCP"))
+	url := tarballManifestServer(t, runedTar, mcpTar)
+
+	if _, err := Install(context.Background(), InstallOptions{ManifestURL: url}); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+
+	// Make extracted runed binary as corrupted
+	if err := os.WriteFile(paths.RunedBinary, []byte("corrupt"), 0o755); err != nil {
+		t.Fatalf("corrupt runed: %v", err)
+	}
+
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: url})
+	if err != nil {
+		t.Fatalf("repair install: %v", err)
+	}
+	if !r.OK {
+		t.Errorf("Result.OK = false, want true (r=%+v)", r)
+	}
+
+	// Corrupted runed should be re-installed
+	if got, _ := os.ReadFile(paths.RunedBinary); string(got) != "RUNED" {
+		t.Errorf("runed not repaired: on-disk=%q, want %q", got, "RUNED")
+	}
+
+	skipped := map[string]bool{}
+	for _, s := range r.Skipped {
+		skipped[s] = true
+	}
+	if skipped[StepRuned] {
+		t.Errorf("corrupt %s should have been repaired, but skipped: %v", StepRuned, r.Skipped)
+	}
+	if !skipped[StepRuneMCP] {
+		t.Errorf("healthy %s should be skipped: %v", StepRuneMCP, r.Skipped)
+	}
+}
+
+func TestInstall_TarballNoRecordedHash(t *testing.T) {
+	// tar.gz repair is conditional on a recorded dest hash. When installed.json
+	// has no hash for the step (a prior audit that couldn't hash the extracted
+	// file, or a missing/partial record), the skip path degrades to
+	// existence-only: a corrupt binary is reused, not repaired. This pins that
+	// documented fallback so it can't silently change.
+	setRealms(t)
+	paths, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	runedTar := tarGz(t, filepath.Base(paths.RunedBinary), []byte("RUNED"))
+	mcpTar := tarGz(t, filepath.Base(paths.RuneMCPBinary), []byte("RUNE-MCP"))
+	url := tarballManifestServer(t, runedTar, mcpTar)
+
+	if _, err := Install(context.Background(), InstallOptions{ManifestURL: url}); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+
+	rec, err := ReadInstalledManifest(paths)
+	if err != nil {
+		t.Fatalf("read installed.json: %v", err)
+	}
+
+	a := rec.Artifacts[StepRuned]
+	a.DestSHA256 = "" // extracted runed binary is not hashed
+	rec.Artifacts[StepRuned] = a
+
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal installed.json: %v", err)
+	}
+	if err := os.WriteFile(paths.InstalledManifest, data, 0o600); err != nil {
+		t.Fatalf("rewrite installed.json: %v", err)
+	}
+
+	// Make runed as corrupted
+	if err := os.WriteFile(paths.RunedBinary, []byte("corrupt"), 0o755); err != nil {
+		t.Fatalf("corrupt runed: %v", err)
+	}
+
+	r, err := Install(context.Background(), InstallOptions{ManifestURL: url})
+	if err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	// 'runed' is not repaired if hash is not recorded
+	skipped := map[string]bool{}
+	for _, s := range r.Skipped {
+		skipped[s] = true
+	}
+	if !skipped[StepRuned] {
+		t.Errorf("with no recorded hash, runed re-install should be skipped; Skipped=%v", r.Skipped)
+	}
+	if got, _ := os.ReadFile(paths.RunedBinary); string(got) != "corrupt" {
+		t.Errorf("repair should be skipped; runed on-disk=%q, want %q", got, "corrupt")
+	}
+}
+
 func TestInstall_Force_ReDownloadsAllBinaries(t *testing.T) {
 	setRealms(t)
 	fx := newFixture(t)

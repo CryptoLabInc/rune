@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -113,16 +114,24 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 		})
 	}
 
+	// Get previous installed info
+	recordedDestSHA := map[string]string{}
+	if prior, perr := ReadInstalledManifest(paths); perr == nil && prior != nil {
+		for step, a := range prior.Artifacts {
+			recordedDestSHA[step] = a.DestSHA256
+		}
+	}
+
 	for i, in := range installs {
 		stepNum := i + 2 // step 1: manifest
-		if !opts.Force {
-			if fileExists(in.dest) {
-				logf("[%d/%d] %s: skipped (already at %s)", stepNum, total, in.step, in.dest)
+		if !opts.Force && fileExists(in.dest) {
+			if skipExistingArtifact(in.step, in.spec, in.dest, recordedDestSHA[in.step], stepNum, total, logf) {
 				r.Completed = append(r.Completed, in.step)
 				r.Skipped = append(r.Skipped, in.step)
 
 				continue
 			}
+			// Corrupted or staled binary (SHA mismatch / unverifiable): re-install
 		}
 
 		logf("[%d/%d] %s (%d bytes): downloading...", stepNum, total, in.step, in.spec.Size)
@@ -152,6 +161,16 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 
 			if info, statErr := os.Stat(in.dest); statErr == nil {
 				entry.Size = info.Size()
+			}
+
+			entry.DestSHA256 = in.spec.SHA256 // record on-disk binary hash for later verification
+			if in.spec.Extract != "" {
+				if h, hErr := FileSHA256(in.dest); hErr == nil {
+					entry.DestSHA256 = h
+				} else {
+					entry.DestSHA256 = "" // leave as unverified
+					logf("warning: cannot hash %s for audit: %v", in.dest, hErr)
+				}
 			}
 
 			auditArtifacts[in.step] = entry
@@ -239,6 +258,30 @@ func installArtifact(ctx context.Context, paths *Paths, spec ArtifactSpec, dest 
 		return nil
 	default:
 		return fmt.Errorf("install: unsupported extract type %q", spec.Extract)
+	}
+}
+
+func skipExistingArtifact(step string, spec ArtifactSpec, dest, recordedDestSHA string, stepNum, total int, logf func(string, ...any)) bool {
+	expected, ref := spec.SHA256, "manifest" // installed from raw binary
+	if spec.Extract != "" {
+		expected, ref = recordedDestSHA, "installed.json" // installed from tarball artifact
+	}
+	if expected == "" {
+		logf("[%d/%d] %s: skipped (already at %s; no recorded sha256 to verify)", stepNum, total, step, dest)
+		return true
+	}
+
+	got, err := FileSHA256(dest)
+	switch {
+	case err != nil:
+		logf("[%d/%d] %s: cannot verify existing %s (%v); re-downloading", stepNum, total, step, dest, err)
+		return false
+	case !strings.EqualFold(got, expected):
+		logf("[%d/%d] %s: existing %s failed sha256 check vs %s (got %s, want %s); re-downloading", stepNum, total, step, dest, ref, got, expected)
+		return false
+	default:
+		logf("[%d/%d] %s: skipped (already at %s, sha256 verified vs %s)", stepNum, total, step, dest, ref)
+		return true
 	}
 }
 
