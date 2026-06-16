@@ -16,6 +16,10 @@ func TestRunVersion_PrintConstants(t *testing.T) {
 	manifestURL = "https://example/manifest.json"
 	defer func() { manifestURL = saved }()
 
+	dir := t.TempDir()
+	t.Setenv("RUNE_HOME", filepath.Join(dir, "rune"))
+	t.Setenv("RUNED_HOME", filepath.Join(dir, "runed"))
+
 	var buf bytes.Buffer
 	if code := runVersion(&buf); code != 0 {
 		t.Errorf("exit = %d, want 0", code)
@@ -35,6 +39,10 @@ func TestRunVersion_EmptyManifest(t *testing.T) {
 	defer func() { manifestURL = saved }()
 	t.Setenv("RUNE_MANIFEST", "")
 
+	dir := t.TempDir()
+	t.Setenv("RUNE_HOME", filepath.Join(dir, "rune"))
+	t.Setenv("RUNED_HOME", filepath.Join(dir, "runed"))
+
 	var buf bytes.Buffer
 	_ = runVersion(&buf)
 	// Match the actual "manifest missing" copy in version.go's empty
@@ -42,6 +50,62 @@ func TestRunVersion_EmptyManifest(t *testing.T) {
 	// require keeping two strings in lockstep.
 	if !strings.Contains(buf.String(), "manifest missing") {
 		t.Errorf("empty manifest should be flagged; got %q", buf.String())
+	}
+}
+
+func TestRunVersion_ShowsInstalledVersion(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("RUNE_HOME", filepath.Join(dir, "rune"))
+	t.Setenv("RUNED_HOME", filepath.Join(dir, "runed"))
+
+	paths, err := bootstrap.Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+
+	m := &bootstrap.Manifest{Version: 1, RuneMCPVersion: "v0.1.1", RunedVersion: "v0.1.3"}
+	arts := map[string]bootstrap.InstalledArtifact{
+		bootstrap.StepRuneMCP: {Path: paths.RuneMCPBinary, SHA256: "aaa"},
+		bootstrap.StepRuned:   {Path: paths.RunedBinary, SHA256: "bbb"},
+	}
+
+	if err := bootstrap.WriteInstalledManifest(paths, "https://example/manifest.json", m, arts); err != nil {
+		t.Fatalf("WriteInstalledManifest: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if code := runVersion(&buf); code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "v0.1.1") {
+		t.Errorf("missing installed rune-mcp version: %q", out)
+	}
+	if !strings.Contains(out, "v0.1.3") {
+		t.Errorf("missing installed runed version: %q", out)
+	}
+}
+
+func TestRunVersion_NoInstalledManifest(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("RUNE_HOME", filepath.Join(dir, "rune"))
+	t.Setenv("RUNED_HOME", filepath.Join(dir, "runed"))
+
+	var buf bytes.Buffer
+	if code := runVersion(&buf); code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "rune ") {
+		t.Errorf("CLI version line must be printed: %q", out)
+	}
+	if strings.Contains(out, "rune-mcp:") || strings.Contains(out, "runed:") {
+		t.Errorf("should not print installed versions when installed.json is absent: %q", out)
 	}
 }
 
@@ -196,6 +260,9 @@ func TestRunVersion_CheckManifestEnv(t *testing.T) {
 	defer func() { manifestURL = saved }()
 
 	t.Setenv("RUNE_MANIFEST", "https://example.invalid/m.json")
+	dir := t.TempDir()
+	t.Setenv("RUNE_HOME", filepath.Join(dir, "rune"))
+	t.Setenv("RUNED_HOME", filepath.Join(dir, "runed"))
 
 	var buf bytes.Buffer
 	if code := runVersion(&buf); code != 0 {
