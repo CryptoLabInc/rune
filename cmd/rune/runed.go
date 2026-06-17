@@ -62,7 +62,11 @@ func runRuned(ctx context.Context, args []string, stderr io.Writer) int {
 		RunedArgs:   forwardedArgs,
 		LogPath:     paths.DaemonLog,
 		LockPath:    paths.SupervisorLock,
+		PIDPath:     paths.SupervisorPID,
 	}
+
+	// If supervisor mode exit with 0, it indciates "success to try spwaning supervisor",
+	// not "supervisor daemon healthy"
 	if err := supervisor.RunDetached(ctx, cfg); err != nil {
 		fmt.Fprintf(stderr, "rune: supervisor: %v\n", err)
 		return 1

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -17,6 +18,7 @@ type Config struct {
 	RunedArgs   []string
 	LogPath     string // default: ~/.runed/logs/daemon.log
 	LockPath    string // default: ~/.runed/supervisor.lock
+	PIDPath     string // ~/.runed/supervisor.pid; removed on exit
 
 	BackoffSchedule []time.Duration // nil for DefaultBackoff
 	MaxCrashes      int             // 0 for DefaultMaxCrashes
@@ -99,6 +101,15 @@ func runSupervisor(ctx context.Context, cfg Config) error {
 // machinery.
 func runWatcher(ctx context.Context, cfg Config) error {
 	cfg = applyDefaults(cfg)
+
+	// Record supervisor's PID so other process can stop / check liveness later
+	if cfg.PIDPath != "" {
+		if err := os.WriteFile(cfg.PIDPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "supervisor: cannot write pid file %s: %v\n", cfg.PIDPath, err) // not error
+		} else {
+			defer os.Remove(cfg.PIDPath)
+		}
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

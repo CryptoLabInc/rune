@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -220,6 +221,49 @@ func TestWatcher_ForwardSignalToChild(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("runWatcher did not return after SIGTERM - signal not forwarded")
+	}
+}
+
+func TestWatcher_CheckPIDFile(t *testing.T) {
+	t.Setenv(fakeRunedEnv, "sleep")
+	cfg := testWatcherConfig(t)
+	cfg.PIDPath = filepath.Join(t.TempDir(), "supervisor.pid")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runWatcher(ctx, cfg) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(cfg.PIDPath); err == nil {
+			break
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatal("pid file not written")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	data, err := os.ReadFile(cfg.PIDPath)
+	if err != nil {
+		t.Fatalf("read pid file: %v", err)
+	}
+
+	if got := strings.TrimSpace(string(data)); got != strconv.Itoa(os.Getpid()) {
+		t.Errorf("pid file = %q, want %d (supervisor's PID)", got, os.Getpid())
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher did not exit after cancel")
+	}
+
+	if _, err := os.Stat(cfg.PIDPath); !os.IsNotExist(err) {
+		t.Errorf("pid file should be removed on exit; stat err = %v", err)
 	}
 }
 

@@ -53,6 +53,7 @@ type Paths struct {
 	LlamaServer    string // ~/.runed/bin/llama-server (extracted from runed tarball; RUNED_LLAMA_SERVER env points here)
 	InstallLock    string // ~/.runed/install.lock
 	SupervisorLock string // ~/.runed/supervisor.lock (`rune runed --detach` hold it during lifetime)
+	SupervisorPID  string // ~/.runed/supervisor.pid (PID of the running supervisor; removed on exit but SIGKILLed supervisor might leave it)
 	DaemonLog      string // ~/.runed/logs/daemon.log
 	Cache          string // ~/.runed/cache
 }
@@ -109,6 +110,7 @@ func newPaths(runeHome, runedHome string) *Paths {
 		LlamaServer:    filepath.Join(runedBin, "llama-server"),
 		InstallLock:    filepath.Join(runedHome, "install.lock"),
 		SupervisorLock: filepath.Join(runedHome, "supervisor.lock"),
+		SupervisorPID:  filepath.Join(runedHome, "supervisor.pid"),
 		DaemonLog:      filepath.Join(runedHome, "logs", "daemon.log"),
 		Cache:          filepath.Join(runedHome, "cache"),
 	}
