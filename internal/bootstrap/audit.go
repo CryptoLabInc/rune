@@ -29,7 +29,7 @@ type InstalledArtifact struct {
 }
 
 func WriteInstalledManifest(paths *Paths, manifestURL string, manifest *Manifest, artifacts map[string]InstalledArtifact) error {
-	record := InstalledManifest{
+	record := &InstalledManifest{
 		ManifestURL:     manifestURL,
 		ManifestVersion: manifest.Version,
 		RuneMCPVersion:  manifest.RuneMCPVersion,
@@ -38,7 +38,12 @@ func WriteInstalledManifest(paths *Paths, manifestURL string, manifest *Manifest
 		InstalledAt:     time.Now().UTC().Format(time.RFC3339),
 		Artifacts:       artifacts,
 	}
-	data, err := json.MarshalIndent(&record, "", "  ")
+
+	return writeManifest(paths, record)
+}
+
+func writeManifest(paths *Paths, record *InstalledManifest) error {
+	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return fmt.Errorf("installed.json: marshal: %w", err)
 	}
