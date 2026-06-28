@@ -62,6 +62,8 @@ func main() {
 		os.Exit(runVerify(ctx, args, os.Stdout, os.Stderr))
 	case "version":
 		os.Exit(runVersion(os.Stdout))
+	case "update":
+		os.Exit(runUpdate(ctx, args, os.Stdout, os.Stderr))
 	case "mcp-server":
 		os.Exit(runMCPServer(ctx, args, os.Stderr))
 	case "runed":
@@ -87,6 +89,9 @@ Usage:
         run read-only health checks
   rune version
         print version and manifest URL
+  rune update [--check] [--json] [--manifest-url URL]
+        update installed binaries to the latest version from manifest
+        (--check skip actual update)
   rune mcp-server [args...]
         forward stdio to ~/.rune/bin/rune-mcp (plugin-manifest entry point)
   rune runed [args...]
