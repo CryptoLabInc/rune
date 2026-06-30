@@ -62,10 +62,12 @@ func main() {
 		os.Exit(runVerify(ctx, args, os.Stdout, os.Stderr))
 	case "version":
 		os.Exit(runVersion(os.Stdout))
+	case "update":
+		os.Exit(runUpdate(ctx, args, os.Stdout, os.Stderr))
 	case "mcp-server":
 		os.Exit(runMCPServer(ctx, args, os.Stderr))
 	case "runed":
-		os.Exit(runRuned(ctx, args, os.Stderr))
+		os.Exit(runRuned(ctx, args, os.Stdout, os.Stderr))
 	case "-h", "--help", "help":
 		printHelp(os.Stdout)
 		os.Exit(0)
@@ -87,6 +89,9 @@ Usage:
         run read-only health checks
   rune version
         print version and manifest URL
+  rune update [--check] [--json] [--manifest-url URL]
+        update installed binaries to the latest version from manifest
+        (--check skip actual update)
   rune mcp-server [args...]
         forward stdio to ~/.rune/bin/rune-mcp (plugin-manifest entry point)
   rune runed [args...]
@@ -94,6 +99,8 @@ Usage:
   rune runed --detach [args...]
         supervise runed as a background daemon: detach + log to
         ~/.runed/logs/daemon.log + auto-restart on crash
+  rune runed --status
+        query running supervisor
 
 Environment:
   RUNE_HOME       override ~/.rune/  (rune plugin realm: config + rune-mcp)
