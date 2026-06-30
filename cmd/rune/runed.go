@@ -17,11 +17,16 @@ import (
 //     to become a process group leader, redirect stdio to ~/.runed/logs/daemon.log,
 //     take ~/.runed/supervisor.lock to prevent race, and watch runed in a restart loop.
 //     The user-facing invocation returns immediately once supervisor is launched.
-func runRuned(ctx context.Context, args []string, stderr io.Writer) int {
+func runRuned(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	paths, err := bootstrap.Resolve()
 	if err != nil {
 		fmt.Fprintf(stderr, "rune: cannot resolve home directories: %v\n", err)
 		return 1
+	}
+
+	// `rune runed --status`: query running supervisor; read-only
+	if hasFlag(args, "--status") {
+		return runedStatus(paths, stdout)
 	}
 
 	// If a llama-server is present in ~/.runed/bin, point runed at it so it skips
@@ -62,6 +67,7 @@ func runRuned(ctx context.Context, args []string, stderr io.Writer) int {
 		RunedArgs:   forwardedArgs,
 		LogPath:     paths.DaemonLog,
 		LockPath:    paths.SupervisorLock,
+		SocketPath:  paths.SupervisorSock,
 	}
 	if err := supervisor.RunDetached(ctx, cfg); err != nil {
 		fmt.Fprintf(stderr, "rune: supervisor: %v\n", err)
@@ -82,4 +88,30 @@ func extractDetachFlag(args []string) (detach bool, rest []string) {
 	}
 
 	return detach, rest
+}
+
+func hasFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+
+	return false
+}
+
+func runedStatus(paths *bootstrap.Paths, stdout io.Writer) int {
+	resp, err := supervisor.SupervisorRequest(paths.SupervisorSock, supervisor.Request{Cmd: "status"})
+	if err != nil {
+		fmt.Fprintln(stdout, "runed supervisor: not running")
+		return 1
+	}
+	if !resp.OK {
+		fmt.Fprintf(stdout, "runed supervisor: error: %s\n", resp.Error)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "runed supervisor: running (pid %d)\n", resp.PID)
+
+	return 0
 }

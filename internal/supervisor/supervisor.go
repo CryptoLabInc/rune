@@ -17,6 +17,7 @@ type Config struct {
 	RunedArgs   []string
 	LogPath     string // default: ~/.runed/logs/daemon.log
 	LockPath    string // default: ~/.runed/supervisor.lock
+	SocketPath  string // deafult: ~/.runed/supervisor.sock; empty = no control channel
 
 	BackoffSchedule []time.Duration // nil for DefaultBackoff
 	MaxCrashes      int             // 0 for DefaultMaxCrashes
@@ -103,6 +104,14 @@ func runWatcher(ctx context.Context, cfg Config) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
+
+	// Listen control channel
+	if cfg.SocketPath != "" {
+		if ln := listenControl(cfg.SocketPath); ln != nil {
+			defer ln.Close()
+			go serveControl(ln)
+		}
+	}
 
 	var crashes []time.Time
 	backoffIdx := 0

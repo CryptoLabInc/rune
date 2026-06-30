@@ -67,7 +67,7 @@ func main() {
 	case "mcp-server":
 		os.Exit(runMCPServer(ctx, args, os.Stderr))
 	case "runed":
-		os.Exit(runRuned(ctx, args, os.Stderr))
+		os.Exit(runRuned(ctx, args, os.Stdout, os.Stderr))
 	case "-h", "--help", "help":
 		printHelp(os.Stdout)
 		os.Exit(0)
@@ -99,6 +99,8 @@ Usage:
   rune runed --detach [args...]
         supervise runed as a background daemon: detach + log to
         ~/.runed/logs/daemon.log + auto-restart on crash
+  rune runed --status
+        query running supervisor
 
 Environment:
   RUNE_HOME       override ~/.rune/  (rune plugin realm: config + rune-mcp)
