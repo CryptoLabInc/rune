@@ -223,6 +223,51 @@ func TestWatcher_ForwardSignalToChild(t *testing.T) {
 	}
 }
 
+func TestWatcher_ControlStatus(t *testing.T) {
+	t.Setenv(fakeRunedEnv, "sleep")
+
+	cfg := testWatcherConfig(t)
+	cfg.SocketPath = filepath.Join(t.TempDir(), "supervisor.sock")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runWatcher(ctx, cfg) }()
+
+	var resp Response
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		r, err := SupervisorRequest(cfg.SocketPath, Request{Cmd: "status"})
+		if err == nil {
+			resp = r
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("control socket did not answer within deadlien: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !resp.OK || resp.PID != os.Getpid() {
+		t.Errorf("status = %+v, want OK with supervisor's pid %d", resp, os.Getpid())
+	}
+
+	// Reject unknown command
+	if r, err := SupervisorRequest(cfg.SocketPath, Request{Cmd: "unknown"}); err != nil || r.OK {
+		t.Errorf("unknown cmd: resp=%+v err=%v, want OK=false", r, err)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher did not exit after cancel")
+	}
+
+	if _, err := SupervisorRequest(cfg.SocketPath, Request{Cmd: "status"}); err == nil {
+		t.Error("control socket should be gone after the watcher exits")
+	}
+}
+
 func TestWatcher_RetriesStartFailure(t *testing.T) {
 	cfg := testWatcherConfig(t)
 	cfg.RunedBinary = filepath.Join(t.TempDir(), "no-such-runed")
