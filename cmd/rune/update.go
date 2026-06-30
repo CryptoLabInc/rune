@@ -119,7 +119,7 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 				fmt.Fprintf(stdout, "updated %s: %s -> %s (applies on the next session; run /mcp to reconnect now)\n", a.Step, a.Installed, to)
 			}
 		case bootstrap.StepRuned:
-			// TODO: live daemon update
+			// TODO: send reload request to restart updated runed
 			out.Deferred = append(out.Deferred, a.Step)
 			if !jsonOut {
 				fmt.Fprintf(stdout, "%s: %s -> %s available (not applied; live daemon update not yet implemented)\n", a.Step, a.Installed, a.Available)

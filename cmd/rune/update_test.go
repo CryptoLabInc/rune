@@ -270,7 +270,7 @@ func TestRunUpdate_RunedOutdated(t *testing.T) {
 	if code := runUpdate(context.Background(), nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit = %d, want 0 (runed deferral, stderr=%q)", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "daemon reload") {
+	if !strings.Contains(stdout.String(), "not applied") {
 		t.Errorf("expected runed deferral message, got %q", stdout.String())
 	}
 }
