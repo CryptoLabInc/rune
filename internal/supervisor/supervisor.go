@@ -17,7 +17,7 @@ type Config struct {
 	RunedArgs   []string
 	LogPath     string // default: ~/.runed/logs/daemon.log
 	LockPath    string // default: ~/.runed/supervisor.lock
-	SocketPath  string // deafult: ~/.runed/supervisor.sock; empty = no control channel
+	SocketPath  string // default: ~/.runed/supervisor.sock; empty = no control channel
 
 	BackoffSchedule []time.Duration // nil for DefaultBackoff
 	MaxCrashes      int             // 0 for DefaultMaxCrashes
