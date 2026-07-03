@@ -11,7 +11,7 @@ import (
 type ArtifactVersion struct {
 	Step      string `json:"step"` // StepRuned | StepRuneMCP
 	Installed string `json:"installed"`
-	Available string `json:"available"` // available verions from updated manifest
+	Available string `json:"available"` // available versions from updated manifest
 	Outdated  bool   `json:"outdated"`
 }
 

@@ -144,7 +144,7 @@ func TestCheckUpdate_NotInstalled(t *testing.T) {
 	}
 }
 
-func TestUpdateArtifact_UpdateSingleArifact(t *testing.T) {
+func TestUpdateArtifact_UpdateSingleArtifact(t *testing.T) {
 	rune, _ := setRealms(t)
 	t.Setenv("RUNE_MANIFEST", "")
 	fx := newFixture(t)
