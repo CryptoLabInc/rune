@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -105,11 +106,32 @@ func runWatcher(ctx context.Context, cfg Config) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
+	reloadCh := make(chan chan error)
+
 	// Listen control channel
 	if cfg.SocketPath != "" {
 		if ln := listenControl(cfg.SocketPath); ln != nil {
 			defer ln.Close()
-			go serveControl(ln)
+
+			reload := func() error { // restart child and block until active
+				reply := make(chan error, 1)
+
+				select {
+				case reloadCh <- reply:
+					select {
+					case err := <-reply:
+						return err
+					case <-time.After(2*cfg.ShutdownGrace + 5*time.Second):
+						return errors.New("reload: timed out waiting for restart")
+					}
+				case <-ctx.Done():
+					return errors.New("reload: supervisor shutting down")
+				case <-time.After(connTimeout):
+					return errors.New("reload: supervisor busy, try again")
+				}
+			}
+
+			go serveControl(ln, reload)
 		}
 	}
 
@@ -147,6 +169,8 @@ func runWatcher(ctx context.Context, cfg Config) error {
 		}
 	}
 
+	var pendingReload chan error
+
 	for {
 		cmd := exec.Command(cfg.RunedBinary, cfg.RunedArgs...)
 		cmd.Stdin = nil
@@ -160,6 +184,11 @@ func runWatcher(ctx context.Context, cfg Config) error {
 		if err := cmd.Start(); err != nil {
 			fmt.Fprintf(os.Stderr, "supervisor: start %s: %v\n", cfg.RunedBinary, err)
 
+			if pendingReload != nil { // reloaded new binary failed to start
+				pendingReload <- fmt.Errorf("restart failed to start %s: %w", cfg.RunedBinary, err)
+				pendingReload = nil
+			}
+
 			count, giveUp := recordCrash(time.Now())
 			if giveUp {
 				return fmt.Errorf("supervisor: start %s: %w (%d failures within %s - giving up)", cfg.RunedBinary, err, count, cfg.MaxCrashWindow)
@@ -171,16 +200,27 @@ func runWatcher(ctx context.Context, cfg Config) error {
 			continue
 		}
 
+		if pendingReload != nil { // new child exec'd reloaded successfully
+			pendingReload <- nil
+			pendingReload = nil
+		}
+
 		done := make(chan error, 1)
 		go func() { done <- cmd.Wait() }()
 
-		// Forward SIGINT/SIGTERM to child, detect child exited
+		// Forward SIGINT/SIGTERM to child, detect child exited, serve reload
 		select {
 		case <-ctx.Done():
 			return shutdownChild(cmd, cfg.ShutdownGrace, done)
 		case sig := <-sigCh:
 			fmt.Fprintf(os.Stderr, "supervisor: received %s, forwarding to child\n", sig)
 			return shutdownChild(cmd, cfg.ShutdownGrace, done)
+		case reply := <-reloadCh:
+			fmt.Fprintln(os.Stderr, "supervisor: reload requested, restarting child")
+			shutdownChild(cmd, cfg.ShutdownGrace, done)
+			backoffIdx = 0
+			pendingReload = reply
+			continue
 		case err := <-done:
 			exitCode := -1
 			if cmd.ProcessState != nil {
