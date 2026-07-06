@@ -268,6 +268,63 @@ func TestWatcher_ControlStatus(t *testing.T) {
 	}
 }
 
+func TestWatcher_ControlSocketReload(t *testing.T) {
+	countFile := t.TempDir() + "/invoke.log"
+	t.Setenv(fakeRunedEnv, "sleep") // child block until SIGTERM, then exits 0
+	t.Setenv(crashCountFileEnv, countFile)
+
+	cfg := testWatcherConfig(t)
+	cfg.SocketPath = filepath.Join(t.TempDir(), "supervisor.sock")
+	cfg.ShutdownGrace = 500 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runWatcher(ctx, cfg) }()
+
+	// Wait until the control socket response
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := SupervisorRequest(cfg.SocketPath, Request{Cmd: "status"}); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("control socket not up within 2s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Reload: stop current child and restart
+	resp, err := SupervisorRequest(cfg.SocketPath, Request{Cmd: "reload"})
+	if err != nil || !resp.OK {
+		t.Fatalf("reload: resp=%+v err=%v, want OK", resp, err)
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		data, _ := os.ReadFile(countFile)
+		if strings.Count(string(data), "\n") >= 2 { // fake append newline per invocation
+			break
+		}
+
+		if time.Now().After(deadline) {
+			data, _ := os.ReadFile(countFile)
+			t.Fatalf("child not restarted after reload; invocations=%q", data)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if st, err := SupervisorRequest(cfg.SocketPath, Request{Cmd: "status"}); err != nil || !st.OK {
+		t.Errorf("supervisor should still alive after reload: resp=%+v err=%v", st, err)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("watcher did not exit after cancel")
+	}
+}
+
 func TestWatcher_RetriesStartFailure(t *testing.T) {
 	cfg := testWatcherConfig(t)
 	cfg.RunedBinary = filepath.Join(t.TempDir(), "no-such-runed")
