@@ -101,6 +101,8 @@ Usage:
         ~/.runed/logs/daemon.log + auto-restart on crash
   rune runed --status
         query running supervisor
+  rune runed --reload
+        ask supervisor to restart runed with on-disk binary
 
 Environment:
   RUNE_HOME       override ~/.rune/  (rune plugin realm: config + rune-mcp)

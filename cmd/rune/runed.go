@@ -29,6 +29,11 @@ func runRuned(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return runedStatus(paths, stdout)
 	}
 
+	// `rune runed --reload`: ask supervisor to restart runed
+	if hasFlag(args, "--reload") {
+		return runedReload(paths, stdout)
+	}
+
 	// If a llama-server is present in ~/.runed/bin, point runed at it so it skips
 	// re-download. When it's absent, leave the env UNSET so runed
 	// self-bootstraps llama-server on first boot. Set on the process env (rather
@@ -112,6 +117,22 @@ func runedStatus(paths *bootstrap.Paths, stdout io.Writer) int {
 	}
 
 	fmt.Fprintf(stdout, "runed supervisor: running (pid %d)\n", resp.PID)
+
+	return 0
+}
+
+func runedReload(paths *bootstrap.Paths, stdout io.Writer) int {
+	resp, err := supervisor.SupervisorRequest(paths.SupervisorSock, supervisor.Request{Cmd: "reload"})
+	if err != nil {
+		fmt.Fprintln(stdout, "runed supervisor: not running (nothing to reload)")
+		return 1
+	}
+	if !resp.OK {
+		fmt.Fprintf(stdout, "runed reload failed: %s\n", resp.Error)
+		return 1
+	}
+
+	fmt.Fprintln(stdout, "runed reloaded")
 
 	return 0
 }
