@@ -31,10 +31,14 @@ const defaultManifestFetchTimeout = 30 * time.Second
 //	}
 
 type Manifest struct {
-	Version        int                          `json:"version"`
-	RuneMCPVersion string                       `json:"rune_mcp_version"`
-	RunedVersion   string                       `json:"runed_version"`
-	Platforms      map[string]PlatformArtifacts `json:"platforms"`
+	Version        int    `json:"version"`
+	RuneMCPVersion string `json:"rune_mcp_version"`
+	RunedVersion   string `json:"runed_version"`
+
+	PluginVersion    string `json:"plugin_version,omitempty"`     // plugin package version; optional
+	MinPluginVersion string `json:"min_plugin_version,omitempty"` // hard floor for `rune update`; optional
+
+	Platforms map[string]PlatformArtifacts `json:"platforms"`
 }
 
 type PlatformArtifacts struct {

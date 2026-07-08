@@ -99,6 +99,10 @@ func CheckUpdate(ctx context.Context, manifestURL string, logf func(format strin
 		return nil, err
 	}
 
+	return PlanFromManifest(manifest)
+}
+
+func PlanFromManifest(manifest *Manifest) (*UpdateList, error) {
 	paths, err := Resolve()
 	if err != nil {
 		return nil, err
@@ -106,7 +110,7 @@ func CheckUpdate(ctx context.Context, manifestURL string, logf func(format strin
 
 	// Get local installed info
 	installed, _ := ReadInstalledManifest(paths) // nil: unknown version
-	plan := planUpdate(installed, manifest)
+	plan := planUpdate(installed, manifest)      // build update plan
 
 	return &plan, nil
 }
