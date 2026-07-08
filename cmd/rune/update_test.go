@@ -439,3 +439,185 @@ func TestRunUpdate_RunedReloadFail(t *testing.T) {
 		t.Errorf("runed audit must stay at v0.1.0 when reload failed, got %q", after.RunedVersion)
 	}
 }
+
+func pluginOutdatedServer(t *testing.T, mcpBytes []byte, mcpVer, runedVer, pluginVer, minVer string) string {
+	t.Helper()
+	sum := sha256.Sum256(mcpBytes)
+	mcpSHA := hex.EncodeToString(sum[:])
+
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		m := map[string]any{
+			"version":            1,
+			"rune_mcp_version":   mcpVer,
+			"runed_version":      runedVer,
+			"plugin_version":     pluginVer,
+			"min_plugin_version": minVer,
+			"platforms": map[string]any{
+				bootstrap.PlatformTuple(): map[string]any{
+					"runed":    map[string]any{"url": srv.URL + "/runed", "sha256": "dummy-not-downloaded", "size": 1},
+					"rune_mcp": map[string]any{"url": srv.URL + "/rune-mcp", "sha256": mcpSHA, "size": len(mcpBytes)},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(m)
+	})
+	mux.HandleFunc("/rune-mcp", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(mcpBytes)))
+		_, _ = w.Write(mcpBytes)
+	})
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	return srv.URL + "/manifest.json"
+}
+
+func writePluginRoot(t *testing.T, version string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude-plugin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	body := fmt.Sprintf(`{"name":"rune","version":%q}`, version)
+	if err := os.WriteFile(filepath.Join(dir, "plugin.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	return root
+}
+
+func TestRunUpdate_RefusesBelowPluginFloor(t *testing.T) {
+	paths := setTestEnv(t)
+	mcp := []byte("new-mcp-should-not-land")
+	url := pluginOutdatedServer(t, mcp, "v0.2.0", "v0.1.0", "0.5.0", "0.5.0")
+	t.Setenv("RUNE_MANIFEST", url)
+
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0") // rune-mcp outdated, runed current
+	root := writePluginRoot(t, "0.4.1")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--plugin-root", root}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit = %d, want 1 (refused below plugin floor); stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "refusing to apply") || !strings.Contains(stderr.String(), "0.5.0") {
+		t.Errorf("expected a refusal naming the floor, got %q", stderr.String())
+	}
+	if b, _ := os.ReadFile(paths.RuneMCPBinary); string(b) == string(mcp) {
+		t.Error("rune-mcp must NOT be swapped when the update is refused")
+	}
+	after, _ := bootstrap.ReadInstalledManifest(paths)
+	if after.RuneMCPVersion != "v0.1.0" {
+		t.Errorf("audit must stay at v0.1.0 when refused, got %q", after.RuneMCPVersion)
+	}
+}
+
+func TestRunUpdate_AllowOutdatedBypass(t *testing.T) {
+	paths := setTestEnv(t)
+	mcp := []byte("bypassed-mcp")
+	url := pluginOutdatedServer(t, mcp, "v0.2.0", "v0.1.0", "0.5.0", "0.5.0")
+	t.Setenv("RUNE_MANIFEST", url)
+
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0")
+	root := writePluginRoot(t, "0.4.1")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--plugin-root", root, "--allow-plugin-outdated"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (bypassed); stderr=%q", code, stderr.String())
+	}
+	if b, _ := os.ReadFile(paths.RuneMCPBinary); string(b) != string(mcp) {
+		t.Errorf("rune-mcp should be swapped under --allow-plugin-outdated, got %q", b)
+	}
+	if !strings.Contains(stderr.String(), "allow-plugin-outdated") {
+		t.Errorf("expect outdated warning, got %q", stderr.String())
+	}
+	after, _ := bootstrap.ReadInstalledManifest(paths)
+	if after.RuneMCPVersion != "v0.2.0" {
+		t.Errorf("audit should be bumped under bypass, got %q", after.RuneMCPVersion)
+	}
+}
+
+func TestRunUpdate_PluginBehindAdvisory(t *testing.T) {
+	paths := setTestEnv(t)
+	mcp := []byte("advisory-mcp")
+
+	url := pluginOutdatedServer(t, mcp, "v0.2.0", "v0.1.0", "0.6.0", "0.4.0")
+	t.Setenv("RUNE_MANIFEST", url)
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0")
+	root := writePluginRoot(t, "0.4.1")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--plugin-root", root}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (advisory only); stderr=%q", code, stderr.String())
+	}
+	if b, _ := os.ReadFile(paths.RuneMCPBinary); string(b) != string(mcp) {
+		t.Errorf("rune-mcp should be swapped when only an advisory applies, got %q", b)
+	}
+	if !strings.Contains(stdout.String(), "plugin package is 0.4.1") || !strings.Contains(stdout.String(), "0.6.0") {
+		t.Errorf("expected a plugin advisory note, got %q", stdout.String())
+	}
+}
+
+func TestRunUpdate_CheckReportPluginOutdated(t *testing.T) {
+	paths := setTestEnv(t)
+	mcp := []byte("irrelevant-not-applied-in-check")
+	url := pluginOutdatedServer(t, mcp, "v0.2.0", "v0.1.0", "0.5.0", "0.5.0")
+	t.Setenv("RUNE_MANIFEST", url)
+
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0")
+	root := writePluginRoot(t, "0.4.1")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--check", "--plugin-root", root}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (check is read-only); stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "plugin outdated") || !strings.Contains(stdout.String(), "0.5.0") {
+		t.Errorf("expected --check to report the plugin outdated, got %q", stdout.String())
+	}
+	if b, _ := os.ReadFile(paths.RuneMCPBinary); string(b) == string(mcp) {
+		t.Error("--check must not swap the binary")
+	}
+}
+
+func TestRunUpdate_RefuseBelowFloorJSON(t *testing.T) {
+	paths := setTestEnv(t)
+	mcp := []byte("json-refuse-mcp")
+	url := pluginOutdatedServer(t, mcp, "v0.2.0", "v0.1.0", "0.5.0", "0.5.0")
+	t.Setenv("RUNE_MANIFEST", url)
+
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0")
+	root := writePluginRoot(t, "0.4.1")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--json", "--plugin-root", root}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit = %d, want 1 (refused, JSON); stderr=%q", code, stderr.String())
+	}
+
+	var sum struct {
+		Applied []appliedUpdate `json:"applied"`
+		Error   string          `json:"error"`
+		Plugin  *struct {
+			Installed    string `json:"installed"`
+			Minimum      string `json:"minimum"`
+			BelowMinimum bool   `json:"below_minimum"`
+		} `json:"plugin"`
+	}
+
+	if err := json.Unmarshal(stdout.Bytes(), &sum); err != nil {
+		t.Fatalf("stdout is not a valid update summary JSON: %v\n%s", err, stdout.String())
+	}
+	if sum.Error == "" || len(sum.Applied) != 0 {
+		t.Errorf("want non-empty error and empty applied, got error=%q applied=%+v", sum.Error, sum.Applied)
+	}
+	if sum.Plugin == nil || !sum.Plugin.BelowMinimum || sum.Plugin.Installed != "0.4.1" || sum.Plugin.Minimum != "0.5.0" {
+		t.Errorf("plugin compat not reported correctly in JSON: %+v", sum.Plugin)
+	}
+	if b, _ := os.ReadFile(paths.RuneMCPBinary); string(b) == string(mcp) {
+		t.Error("refused update must not swap the binary (JSON mode)")
+	}
+}

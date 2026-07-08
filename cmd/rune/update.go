@@ -20,6 +20,8 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	check := fs.Bool("check", false, "report available updates without applying")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	manifest := fs.String("manifest-url", manifestURL, "override manifest URL")
+	pluginRoot := fs.String("plugin-root", "", "plugin root for the plugin version check (defaults to $CLAUDE_PLUGIN_ROOT)")
+	allowOutdated := fs.Bool("allow-plugin-outdated", false, "apply even if the plugin package is older than the binaries require")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -39,20 +41,32 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return 2
 	}
 
-	plan, err := bootstrap.CheckUpdate(ctx, *manifest, nil)
+	mf, err := bootstrap.FetchManifest(ctx, *manifest, nil)
 	if err != nil {
 		fmt.Fprintf(stderr, "rune update: %v\n", err)
 		return 1
 	}
 
-	if *check {
-		return reportUpdatePlan(stdout, plan, *jsonOut)
+	plan, err := bootstrap.PlanFromManifest(mf)
+	if err != nil {
+		fmt.Fprintf(stderr, "rune update: %v\n", err)
+		return 1
 	}
 
-	return applyUpdate(ctx, *manifest, plan, stdout, stderr, *jsonOut)
+	pv, verr := bootstrap.InstalledPluginVersion(*pluginRoot)
+	compat := bootstrap.EvaluatePluginCompatibility(pv, mf)
+	if verr != nil && mf.MinPluginVersion != "" && !*jsonOut {
+		fmt.Fprintf(stderr, "rune update: note: could not read the installed plugin version (%v); skipping the plugin-compatibility check; pass --plugin-root\n", verr)
+	}
+
+	if *check {
+		return reportUpdatePlan(stdout, plan, compat, *jsonOut)
+	}
+
+	return applyUpdate(ctx, *manifest, plan, compat, *allowOutdated, stdout, stderr, *jsonOut)
 }
 
-func reportUpdatePlan(w io.Writer, plan *bootstrap.UpdateList, jsonOut bool) int {
+func reportUpdatePlan(w io.Writer, plan *bootstrap.UpdateList, compat bootstrap.PluginCompatibility, jsonOut bool) int {
 	if jsonOut {
 		_ = json.NewEncoder(w).Encode(plan)
 		return 0
@@ -60,21 +74,31 @@ func reportUpdatePlan(w io.Writer, plan *bootstrap.UpdateList, jsonOut bool) int
 
 	if !plan.HasUpdates() {
 		fmt.Fprintln(w, "rune: all binaries are up to date")
-		return 0
+	} else {
+		fmt.Fprintln(w, "Available updates:")
+		for _, a := range plan.Outdated() {
+			fmt.Fprintf(w, "  %s: %s -> %s\n", a.Step, a.Installed, a.Available)
+		}
 	}
 
-	fmt.Fprintln(w, "Available updates:")
-	for _, a := range plan.Outdated() {
-		fmt.Fprintf(w, "  %s: %s -> %s\n", a.Step, a.Installed, a.Available)
-	}
-
+	reportPluginOutdated(w, compat)
 	return 0
 }
 
+func reportPluginOutdated(w io.Writer, compat bootstrap.PluginCompatibility) {
+	switch {
+	case compat.BelowMinimum:
+		fmt.Fprintf(w, "plugin outdated: installed %s is BELOW the minimum %s required by these binaries - update the plugin before applying\n", compat.Installed, compat.Minimum)
+	case compat.Behind:
+		fmt.Fprintf(w, "plugin update available: installed %s, binaries expect %s\n", compat.Installed, compat.Expected)
+	}
+}
+
 type updateSummary struct {
-	Applied  []appliedUpdate `json:"applied"`
-	Deferred []string        `json:"deferred,omitempty"`
-	Error    string          `json:"error,omitempty"`
+	Applied  []appliedUpdate                `json:"applied"`
+	Deferred []string                       `json:"deferred,omitempty"`
+	Error    string                         `json:"error,omitempty"`
+	Plugin   *bootstrap.PluginCompatibility `json:"plugin,omitempty"`
 }
 
 type appliedUpdate struct {
@@ -83,8 +107,11 @@ type appliedUpdate struct {
 	To   string `json:"to"`
 }
 
-func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateList, stdout, stderr io.Writer, jsonOut bool) int {
+func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateList, compat bootstrap.PluginCompatibility, allowOutdated bool, stdout, stderr io.Writer, jsonOut bool) int {
 	out := updateSummary{Applied: []appliedUpdate{}}
+	if compat.Known {
+		out.Plugin = &compat
+	}
 
 	logf := func(string, ...any) {}
 	if !jsonOut {
@@ -96,8 +123,22 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 			_ = json.NewEncoder(stdout).Encode(out)
 		} else {
 			fmt.Fprintln(stdout, "rune: all binaries are up to date")
+			reportPluginOutdated(stdout, compat)
 		}
 		return 0
+	}
+
+	if compat.BelowMinimum && !allowOutdated {
+		msg := fmt.Sprintf("plugin package %s is below the minimum %s required by the new binaries", compat.Installed, compat.Minimum)
+		out.Error = msg
+		if jsonOut {
+			_ = json.NewEncoder(stdout).Encode(out)
+		} else {
+			fmt.Fprintf(stderr, "rune update: refusing to apply: %s.\n", msg)
+			fmt.Fprintf(stderr, "  Update the plugin first then re-run.\n")
+			fmt.Fprintf(stderr, "  Ignore with --allow-plugin-outdated\n")
+		}
+		return 1
 	}
 
 	paths, err := bootstrap.Resolve()
@@ -164,6 +205,15 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 					fmt.Fprintf(stdout, "updated %s: %s -> %s (staged; applies on next daemon start)\n", a.Step, a.Installed, to)
 				}
 			}
+		}
+	}
+
+	if !jsonOut {
+		switch {
+		case compat.BelowMinimum && allowOutdated:
+			fmt.Fprintf(stderr, "warning: applied with --allow-plugin-outdated; plugin %s is below the required %s - update the plugin.\n", compat.Installed, compat.Minimum)
+		case compat.Behind:
+			fmt.Fprintf(stdout, "note: plugin package is %s; these binaries expect %s. Update plugin to keep commands/agents/SKILL.md in sync best.\n", compat.Installed, compat.Expected)
 		}
 	}
 
