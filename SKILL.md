@@ -253,10 +253,11 @@ Non-destructive; no confirmation prompt and no activation-state gate (works
 whether Active or Dormant). The agent runs the CLI — the user never types it.
 
 **Steps**:
-1. Run `~/.rune/bin/rune update` (fall back to
-   `bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune update"` only if the installed
-   binary is absent). Append `--check` to report without applying when the
-   user asks to check.
+1. Run `~/.rune/bin/rune update --plugin-root "${CLAUDE_PLUGIN_ROOT}"` (fall
+   back to `bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune update --plugin-root
+   ${CLAUDE_PLUGIN_ROOT}"` only if the installed binary is absent). Append
+   `--check` to report without applying when the user asks to check. The
+   `--plugin-root` lets the CLI flag plugin/binary version outdated (step 4).
 2. Relay output verbatim, then interpret:
    - `all binaries are up to date` → nothing to do.
    - `updated rune_mcp: … (applies on the next session; run /mcp to reconnect
@@ -271,6 +272,16 @@ whether Active or Dormant). The agent runs the CLI — the user never types it.
    verbatim and suggest `/rune:activate`. On `no manifest URL configured`
    (exit 2): this build has no update channel wired — report plainly, not a
    misconfiguration. Do not retry or loop.
+4. **Plugin-version outdated** (binaries update, but plugin assets — commands,
+   agents, SKILL.md — can only be updated by the host):
+   - `note: plugin package is X; these binaries expect Y` (exit 0) → the update
+     succeeded; suggest `claude plugin update rune` when convenient. No urgency.
+   - `refusing to apply: plugin package X is below the minimum Y` (exit 1) →
+     nothing applied; tell the user to update the plugin first, then re-run.
+     `--allow-plugin-outdated` forces it but can break the assets — only on explicit
+     insistence.
+   - `--check`'s `plugin outdated: … BELOW the minimum …` → report; update the
+     plugin before applying.
 
 ## Boot Failure — Fast-Fail Rule
 

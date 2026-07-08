@@ -25,15 +25,18 @@ non-destructive and works whether Rune is Active or Dormant. Just run it.
 ### 1. Run the update
 
 Prefer the installed CLI; fall back to the plugin's bundled wrapper only if the
-installed binary is absent:
+installed binary is absent. **Always pass `--plugin-root "${CLAUDE_PLUGIN_ROOT}"`**
+so the CLI can compare the installed plugin package against what the new
+binaries expect (the plugin-version outdated check in step 4):
 
-1. `~/.rune/bin/rune update`
-2. `bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune update"` — only if `~/.rune/bin/rune`
-   does not exist yet (the wrapper downloads the Go CLI, then runs `update`).
+1. `~/.rune/bin/rune update --plugin-root "${CLAUDE_PLUGIN_ROOT}"`
+2. `bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune update --plugin-root ${CLAUDE_PLUGIN_ROOT}"`
+   — only if `~/.rune/bin/rune` does not exist yet (the wrapper downloads the Go
+   CLI, then runs `update`).
 
 If the user asked to only *check* (e.g. `$ARGUMENTS` contains `check`), append
 `--check` to report available updates **without applying**:
-`~/.rune/bin/rune update --check`.
+`~/.rune/bin/rune update --check --plugin-root "${CLAUDE_PLUGIN_ROOT}"`.
 
 Surface the command output verbatim, then interpret it per step 2. Do NOT loop
 or retry on failure — surface the result and stop.
@@ -78,6 +81,31 @@ not negate a binary that updated in the same run.
   channel wired (`RUNE_MANIFEST` unset and no baked manifest URL). This is
   expected on builds that predate the release-channel graduation; report it
   plainly and stop — it is not a user misconfiguration to fix.
+
+### 4. Plugin-version outdated (assets vs binaries)
+
+`rune update` only refreshes the **binaries**. The plugin *assets* (this command
+file, agents, SKILL.md) ship in the plugin tarball and can only be updated by
+the host's plugin-update mechanism (`claude plugin update rune`, or the
+equivalent for Codex/Gemini). When the manifest declares a plugin version, the
+CLI compares it against the installed plugin package and surfaces outdated:
+
+- **Advisory (stdout, exit 0): `note: plugin package is X; these binaries expect
+  Y`** — the update **succeeded**; the plugin is merely behind. Relay it and
+  suggest running `claude plugin update rune` when convenient to keep
+  commands/agents/SKILL.md in sync. No urgency.
+- **Refusal (stderr, exit 1): `refusing to apply: plugin package X is below the
+  minimum Y`** — the new binaries need a newer plugin than is installed, so
+  **nothing was applied**. Tell the user to update the plugin first (`claude
+  plugin update rune`), then re-run `/rune:update`. Mention `--allow-plugin-outdated`
+  exists to force it but **warn** it can break commands/agents/SKILL.md — only
+  suggest it if the user explicitly insists.
+- **`--check`: `plugin outdated: installed X is BELOW the minimum Y`** — report it;
+  the user should update the plugin before applying.
+
+If version can't be evaluated (no `${CLAUDE_PLUGIN_ROOT}`, or the manifest declares
+no plugin version), the CLI simply omits these lines — that's normal, not an
+error.
 
 Surface all output verbatim. The user never types `rune update` themselves —
 the agent runs it.
