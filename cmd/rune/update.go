@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 
 	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune-cli/internal/supervisor"
 )
 
 func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -98,11 +100,17 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 		return 0
 	}
 
+	paths, err := bootstrap.Resolve()
+	if err != nil {
+		fmt.Fprintf(stderr, "rune update: %v\n", err)
+		return 1
+	}
+
 	exit := 0
 	for _, a := range plan.Outdated() {
 		switch a.Step {
 		case bootstrap.StepRuneMCP:
-			to, err := bootstrap.UpdateArtifact(ctx, manifest, a.Step, logf)
+			to, err := bootstrap.UpdateArtifact(ctx, manifest, a.Step, nil, logf)
 			if err != nil {
 				out.Error = err.Error()
 				exit = 1
@@ -119,10 +127,42 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 				fmt.Fprintf(stdout, "updated %s: %s -> %s (applies on the next session; run /mcp to reconnect now)\n", a.Step, a.Installed, to)
 			}
 		case bootstrap.StepRuned:
-			// TODO: send reload request to restart updated runed
-			out.Deferred = append(out.Deferred, a.Step)
+			// Request supervisor to restart with new binary
+			reloaded := false
+			reload := func() error {
+				resp, rerr := supervisor.SupervisorRequest(paths.SupervisorSock, supervisor.Request{Cmd: "reload"})
+				switch {
+				case errors.Is(rerr, supervisor.ErrNoSupervisor):
+					logf("runed staged; no supervisor running - applies on next daemon start")
+					return nil
+				case rerr != nil:
+					return fmt.Errorf("supervisor reload: %v; %s", rerr, runedRecoveryHint(paths))
+				case !resp.OK:
+					return fmt.Errorf("supervisor reload failed: %s; %s", resp.Error, runedRecoveryHint(paths))
+				}
+				reloaded = true
+				return nil
+			}
+
+			to, err := bootstrap.UpdateArtifact(ctx, manifest, a.Step, reload, logf)
+			if err != nil {
+				out.Error = err.Error()
+				exit = 1
+
+				if !jsonOut {
+					fmt.Fprintf(stderr, "rune update: %s: %v\n", a.Step, err)
+				}
+
+				continue
+			}
+
+			out.Applied = append(out.Applied, appliedUpdate{Step: a.Step, From: a.Installed, To: to})
 			if !jsonOut {
-				fmt.Fprintf(stdout, "%s: %s -> %s available (not applied; live daemon update not yet implemented)\n", a.Step, a.Installed, a.Available)
+				if reloaded {
+					fmt.Fprintf(stdout, "updated %s: %s -> %s (daemon reloaded)\n", a.Step, a.Installed, to)
+				} else {
+					fmt.Fprintf(stdout, "updated %s: %s -> %s (staged; applies on next daemon start)\n", a.Step, a.Installed, to)
+				}
 			}
 		}
 	}
@@ -132,4 +172,8 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 	}
 
 	return exit
+}
+
+func runedRecoveryHint(paths *bootstrap.Paths) string {
+	return fmt.Sprintf("the daemon may be down - run `%s runed --detach` (or /rune:activate) to restart it", paths.RuneCLIBinary)
 }

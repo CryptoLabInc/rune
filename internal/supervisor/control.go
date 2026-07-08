@@ -2,12 +2,15 @@ package supervisor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"time"
 )
+
+var ErrNoSupervisor = errors.New("no supervisor listening")
 
 type Request struct {
 	Cmd string `json:"cmd"` // "status" | "reload" (TODO: "stop")
@@ -93,7 +96,7 @@ func dispatchControl(req Request, reload func() error) Response {
 func SupervisorRequest(socketPath string, req Request) (Response, error) {
 	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
 	if err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("%w: %v", ErrNoSupervisor, err)
 	}
 	defer conn.Close()
 
