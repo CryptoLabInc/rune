@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -260,17 +261,181 @@ func TestRunUpdate_ApplyJSON(t *testing.T) {
 	}
 }
 
-func TestRunUpdate_RunedOutdated(t *testing.T) {
+func runedUpdateServer(t *testing.T, runedBytes []byte, runedVer, mcpVer string) string {
+	t.Helper()
+	sum := sha256.Sum256(runedBytes)
+	runedSHA := hex.EncodeToString(sum[:])
+
+	// Serve runed as a real binary
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		m := map[string]any{
+			"version":          1,
+			"rune_mcp_version": mcpVer,
+			"runed_version":    runedVer,
+			"platforms": map[string]any{
+				bootstrap.PlatformTuple(): map[string]any{
+					"runed":    map[string]any{"url": srv.URL + "/runed", "sha256": runedSHA, "size": len(runedBytes)},
+					"rune_mcp": map[string]any{"url": "http://example.invalid/rune-mcp", "sha256": "bb", "size": 1},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(m)
+	})
+	mux.HandleFunc("/runed", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(runedBytes)))
+		_, _ = w.Write(runedBytes)
+	})
+
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	return srv.URL + "/manifest.json"
+}
+
+func fakeSupervisor(t *testing.T, sockPath, respJSON string) {
+	t.Helper()
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen supervisor sock: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				var req map[string]any
+				_ = json.NewDecoder(c).Decode(&req)
+				_, _ = c.Write([]byte(respJSON))
+			}(conn)
+		}
+	}()
+}
+
+func fakeSupervisorHangup(t *testing.T, sockPath string) {
+	t.Helper()
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen supervisor sock: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	// Simluate superviosr which dropped during reload
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				var req map[string]any
+				_ = json.NewDecoder(c).Decode(&req)
+				_ = c.Close() // hang up without a response
+			}(conn)
+		}
+	}()
+}
+
+func TestRunUpdate_RunedReloadRoundTripFails(t *testing.T) {
 	paths := setTestEnv(t)
-	url := updateManifestServer(t, "v0.2.0", "v0.2.0")
+	runed := []byte("staged-runed")
+	url := runedUpdateServer(t, runed, "v0.2.0", "v0.2.0")
+
+	t.Setenv("RUNE_MANIFEST", url)
+	writeAudit(t, paths, url, "v0.2.0", "v0.1.0")
+	fakeSupervisorHangup(t, paths.SupervisorSock)
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), nil, &stdout, &stderr); code != 1 {
+		t.Errorf("exit = %d, want 1 (reload round-trip failed)", code)
+	}
+	if strings.Contains(stdout.String(), "staged") {
+		t.Errorf("supervisor failure after connection must not report 'staged': %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "daemon may be down") {
+		t.Errorf("expected a recovery hint on reload failure, got %q", stderr.String())
+	}
+
+	after, _ := bootstrap.ReadInstalledManifest(paths)
+	if after.RunedVersion != "v0.1.0" {
+		t.Errorf("audit must stay at v0.1.0 when reload failed, got %q", after.RunedVersion)
+	}
+}
+
+func TestRunUpdate_ApplyRunedReload(t *testing.T) {
+	paths := setTestEnv(t)
+	runed := []byte("freshly-updated-runed")
+	url := runedUpdateServer(t, runed, "v0.2.0", "v0.2.0")
+
 	t.Setenv("RUNE_MANIFEST", url)
 	writeAudit(t, paths, url, "v0.2.0", "v0.1.0") // rune-mcp current, runed old
+	fakeSupervisor(t, paths.SupervisorSock, `{"ok":true,"pid":123}`)
 
 	var stdout, stderr bytes.Buffer
 	if code := runUpdate(context.Background(), nil, &stdout, &stderr); code != 0 {
-		t.Fatalf("exit = %d, want 0 (runed deferral, stderr=%q)", code, stderr.String())
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "not applied") {
-		t.Errorf("expected runed deferral message, got %q", stdout.String())
+	if b, _ := os.ReadFile(paths.RunedBinary); string(b) != string(runed) {
+		t.Errorf("runed not swapped on disk: got %q", b)
+	}
+	if !strings.Contains(stdout.String(), "reloaded") {
+		t.Errorf("expected 'daemon reloaded', got %q", stdout.String())
+	}
+
+	after, _ := bootstrap.ReadInstalledManifest(paths)
+	if after.RunedVersion != "v0.2.0" {
+		t.Errorf("runed audit not bumped after reload: %q", after.RunedVersion)
+	}
+}
+
+func TestRunUpdate_RunedNoSupervisor(t *testing.T) {
+	paths := setTestEnv(t)
+	runed := []byte("staged-runed")
+	url := runedUpdateServer(t, runed, "v0.2.0", "v0.2.0")
+
+	t.Setenv("RUNE_MANIFEST", url)
+	writeAudit(t, paths, url, "v0.2.0", "v0.1.0")
+	// no supervisor listening
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "staged") {
+		t.Errorf("expected 'staged; applies on next daemon start', got %q", stdout.String())
+	}
+
+	after, _ := bootstrap.ReadInstalledManifest(paths)
+	if after.RunedVersion != "v0.2.0" {
+		t.Errorf("runed audit should be bumped after staging: %q", after.RunedVersion)
+	}
+}
+
+func TestRunUpdate_RunedReloadFail(t *testing.T) {
+	paths := setTestEnv(t)
+	runed := []byte("bad-runed")
+	url := runedUpdateServer(t, runed, "v0.2.0", "v0.2.0")
+
+	t.Setenv("RUNE_MANIFEST", url)
+	writeAudit(t, paths, url, "v0.2.0", "v0.1.0")
+	fakeSupervisor(t, paths.SupervisorSock, `{"ok":false,"error":"restart failed to start"}`)
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), nil, &stdout, &stderr); code != 1 {
+		t.Errorf("exit = %d, want 1 (reload failed)", code)
+	}
+
+	after, _ := bootstrap.ReadInstalledManifest(paths)
+	if after.RunedVersion != "v0.1.0" {
+		t.Errorf("runed audit must stay at v0.1.0 when reload failed, got %q", after.RunedVersion)
 	}
 }
