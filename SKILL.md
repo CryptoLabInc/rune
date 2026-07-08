@@ -241,6 +241,37 @@ branch on `diagnostics.vault.last_boot_error`.)
    to Dormant on the next reload because no config means no Vault dial)
 3. Show reconfiguration instructions
 
+### `/rune:update`
+(or `$rune update` for Codex CLI)
+
+**Purpose**: Update the runtime binaries (rune-mcp, runed) in place to the
+versions in the published manifest — no plugin uninstall/reinstall. Plugin
+*assets* (commands, agents, SKILL.md) still need the host's plugin-update
+mechanism; they are not covered here.
+
+Non-destructive; no confirmation prompt and no activation-state gate (works
+whether Active or Dormant). The agent runs the CLI — the user never types it.
+
+**Steps**:
+1. Run `~/.rune/bin/rune update` (fall back to
+   `bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune update"` only if the installed
+   binary is absent). Append `--check` to report without applying when the
+   user asks to check.
+2. Relay output verbatim, then interpret:
+   - `all binaries are up to date` → nothing to do.
+   - `updated rune_mcp: … (applies on the next session; run /mcp to reconnect
+     now)` → applies in a new session automatically; `/mcp` reconnect applies
+     it now.
+   - `updated runed: … (daemon reloaded)` → live daemon restarted onto the
+     new binary; a brief embedder blip is expected.
+   - `updated runed: … (staged; applies on next daemon start)` → no supervisor
+     was running; run `/rune:activate` to start it now.
+3. On a failed runed reload (exit 1, `supervisor reload …`): the daemon may be
+   down and the recorded version was **not** advanced. Relay the recovery hint
+   verbatim and suggest `/rune:activate`. On `no manifest URL configured`
+   (exit 2): this build has no update channel wired — report plainly, not a
+   misconfiguration. Do not retry or loop.
+
 ## Boot Failure — Fast-Fail Rule
 
 When `diagnostics.vault.last_boot_error` is present, that field is the boot
