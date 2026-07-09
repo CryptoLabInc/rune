@@ -621,3 +621,57 @@ func TestRunUpdate_RefuseBelowFloorJSON(t *testing.T) {
 		t.Error("refused update must not swap the binary (JSON mode)")
 	}
 }
+
+// '--only'
+func TestRunUpdate_OnlyRuneMCP(t *testing.T) {
+	paths := setTestEnv(t)
+	mcp := []byte("only-mcp")
+	url := dummyUpdateServer(t, mcp, "v0.2.0", "v0.2.0")
+	t.Setenv("RUNE_MANIFEST", url)
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--only", "rune_mcp"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+
+	if b, _ := os.ReadFile(paths.RuneMCPBinary); string(b) != string(mcp) {
+		t.Errorf("rune-mcp should be swapped, got %q", b)
+	}
+
+	if strings.Contains(stdout.String(), "runed") {
+		t.Errorf("--only rune_mcp must not touch runed: %q", stdout.String())
+	}
+
+	after, _ := bootstrap.ReadInstalledManifest(paths)
+	if after.RuneMCPVersion != "v0.2.0" {
+		t.Errorf("rune-mcp audit = %q, want v0.2.0", after.RuneMCPVersion)
+	}
+	if after.RunedVersion != "v0.1.0" {
+		t.Errorf("runed audit must stay at v0.1.0 (not selected), got %q", after.RunedVersion)
+	}
+}
+
+func TestRunUpdate_OnlyUnknown(t *testing.T) {
+	t.Setenv("RUNE_MANIFEST", "http://example.invalid/manifest.json")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--only", "bogus"}, &stdout, &stderr); code != 2 {
+		t.Errorf("exit = %d, want 2 for an unknown --only artifact", code)
+	}
+	if !strings.Contains(stderr.String(), "unknown artifact") {
+		t.Errorf("stderr = %q, want an --only validation error", stderr.String())
+	}
+}
+
+func TestRunUpdate_OnlyDegenerate(t *testing.T) {
+	t.Setenv("RUNE_MANIFEST", "http://example.invalid/manifest.json")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--only", " , "}, &stdout, &stderr); code != 2 {
+		t.Errorf("exit = %d, want 2 for a degenerate --only value", code)
+	}
+	if !strings.Contains(stderr.String(), "no valid artifacts") {
+		t.Errorf("stderr = %q, want a 'no valid artifacts' error", stderr.String())
+	}
+}
