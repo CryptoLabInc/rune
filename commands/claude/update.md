@@ -20,6 +20,13 @@ embedder daemon).
 No confirmation prompt and no activation-state gate: updating binaries is
 non-destructive and works whether Rune is Active or Dormant. Just run it.
 
+**Relationship to the automatic check:** `rune mcp-server` also runs a
+**throttled, non-blocking** background check at session start — it stages a
+newer **rune-mcp** for the next session (never touches runed) and is silent.
+`/rune:update` is the **explicit, immediate** path (checks all binaries now and
+applies in-session where possible). Users can disable the background check with
+`RUNE_NO_AUTO_UPDATE=1`; `/rune:update` still works regardless of it.
+
 ## Steps
 
 ### 1. Run the update

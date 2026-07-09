@@ -252,6 +252,12 @@ mechanism; they are not covered here.
 Non-destructive; no confirmation prompt and no activation-state gate (works
 whether Active or Dormant). The agent runs the CLI — the user never types it.
 
+`rune mcp-server` also runs a throttled, non-blocking background check at
+session start that stages a newer **rune-mcp** for the next session (silent;
+never touches runed). `/rune:update` is the explicit, immediate path. Disable
+the background check with `RUNE_NO_AUTO_UPDATE=1` (does not affect
+`/rune:update`).
+
 **Steps**:
 1. Run `~/.rune/bin/rune update --plugin-root "${CLAUDE_PLUGIN_ROOT}"` (fall
    back to `bash -c "${CLAUDE_PLUGIN_ROOT}/bin/rune update --plugin-root
