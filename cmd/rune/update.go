@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
 	"github.com/CryptoLabInc/rune-cli/internal/supervisor"
@@ -22,11 +23,18 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	manifest := fs.String("manifest-url", manifestURL, "override manifest URL")
 	pluginRoot := fs.String("plugin-root", "", "plugin root for the plugin version check (defaults to $CLAUDE_PLUGIN_ROOT)")
 	allowOutdated := fs.Bool("allow-plugin-outdated", false, "apply even if the plugin package is older than the binaries require")
+	only := fs.String("only", "", "restrict to a comma-separated set of artifacts: rune_mcp, runed")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(stderr, "rune update: unexpected argument: %v\n", fs.Args())
+		return 2
+	}
+
+	onlySteps, err := parseOnly(*only)
+	if err != nil {
+		fmt.Fprintf(stderr, "rune update: %v\n", err)
 		return 2
 	}
 
@@ -51,6 +59,9 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if err != nil {
 		fmt.Fprintf(stderr, "rune update: %v\n", err)
 		return 1
+	}
+	if len(onlySteps) > 0 {
+		plan = filterPlan(plan, onlySteps)
 	}
 
 	pv, verr := bootstrap.InstalledPluginVersion(*pluginRoot)
@@ -226,4 +237,36 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 
 func runedRecoveryHint(paths *bootstrap.Paths) string {
 	return fmt.Sprintf("the daemon may be down - run `%s runed --detach` (or /rune:activate) to restart it", paths.RuneCLIBinary)
+}
+
+func parseOnly(only string) (map[string]bool, error) {
+	set := map[string]bool{}
+	for _, tok := range strings.Split(only, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		if tok != bootstrap.StepRuneMCP && tok != bootstrap.StepRuned {
+			return nil, fmt.Errorf("--only: unknown artifact %q (want %s or %s)", tok, bootstrap.StepRuneMCP, bootstrap.StepRuned)
+		}
+
+		set[tok] = true
+	}
+
+	if strings.TrimSpace(only) != "" && len(set) == 0 {
+		return nil, fmt.Errorf("--only: no valid artifacts in %q", only)
+	}
+
+	return set, nil
+}
+
+func filterPlan(plan *bootstrap.UpdateList, want map[string]bool) *bootstrap.UpdateList {
+	out := &bootstrap.UpdateList{}
+	for _, a := range plan.Artifacts {
+		if want[a.Step] {
+			out.Artifacts = append(out.Artifacts, a)
+		}
+	}
+
+	return out
 }
