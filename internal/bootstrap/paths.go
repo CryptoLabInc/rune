@@ -41,6 +41,8 @@ type Paths struct {
 	RuneMCPBinary     string // ~/.rune/bin/rune-mcp
 	RuneConfig        string // ~/.rune/config.json
 	InstalledManifest string // ~/.rune/installed.json - install audit log
+	AutoCheckStamp    string // ~/.rune/last-update-check
+	UpdateLog         string // ~/.rune/update.log - auto-update output
 
 	// Runed
 	RunedHome      string // ~/.runed
@@ -99,6 +101,8 @@ func newPaths(runeHome, runedHome string) *Paths {
 		RuneMCPBinary:     filepath.Join(runeBin, "rune-mcp"),
 		RuneConfig:        filepath.Join(runeHome, "config.json"),
 		InstalledManifest: filepath.Join(runeHome, "installed.json"),
+		AutoCheckStamp:    filepath.Join(runeHome, "last-update-check"),
+		UpdateLog:         filepath.Join(runeHome, "update.log"),
 
 		RunedHome:      runedHome,
 		RunedBin:       runedBin,
