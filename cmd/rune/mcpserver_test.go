@@ -151,3 +151,91 @@ func TestWaitForFile_Timeout(t *testing.T) {
 		t.Errorf("returned %s before the 200ms timeout", elapsed)
 	}
 }
+
+// Background update launcher for test
+func stubSpawn(t *testing.T) *int {
+	t.Helper()
+
+	n := 0
+	prev := spawnUpdateFn
+	spawnUpdateFn = func(_ *bootstrap.Paths, _ string) error {
+		n++
+		return nil
+	}
+
+	t.Cleanup(func() { spawnUpdateFn = prev })
+
+	return &n
+}
+
+func TestTryAutoCheck_Due(t *testing.T) {
+	paths := setTestEnv(t)
+	t.Setenv("RUNE_MANIFEST", "http://example.invalid/manifest.json")
+	t.Setenv("RUNE_NO_AUTO_UPDATE", "")
+
+	calls := stubSpawn(t)
+
+	var stderr bytes.Buffer
+	tryAutoCheck(paths, &stderr)
+
+	if *calls != 1 {
+		t.Errorf("spawn calls = %d, want 1 when a check is due", *calls)
+	}
+
+	if _, err := os.Stat(paths.AutoCheckStamp); err != nil {
+		t.Errorf("expected the auto-check stamp to be recorded before spawning: %v", err)
+	}
+}
+
+func TestTryAutoCheck_Disabled(t *testing.T) {
+	paths := setTestEnv(t)
+	t.Setenv("RUNE_MANIFEST", "http://example.invalid/manifest.json")
+	t.Setenv("RUNE_NO_AUTO_UPDATE", "1")
+
+	calls := stubSpawn(t)
+
+	var stderr bytes.Buffer
+	tryAutoCheck(paths, &stderr)
+
+	if *calls != 0 {
+		t.Errorf("spawn calls = %d, want 0 when disabled", *calls)
+	}
+
+	if _, err := os.Stat(paths.AutoCheckStamp); err == nil {
+		t.Error("disabled run must not write the stamp")
+	}
+}
+
+func TestTryAutoCheck_Throttled(t *testing.T) {
+	paths := setTestEnv(t)
+	t.Setenv("RUNE_MANIFEST", "http://example.invalid/manifest.json")
+	t.Setenv("RUNE_NO_AUTO_UPDATE", "")
+
+	if err := bootstrap.RecordAutoCheck(paths.AutoCheckStamp, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := stubSpawn(t)
+
+	var stderr bytes.Buffer
+	tryAutoCheck(paths, &stderr)
+
+	if *calls != 0 {
+		t.Errorf("spawn calls = %d, want 0 within the throttle window", *calls)
+	}
+}
+
+func TestTryAutoCheck_NoManifest(t *testing.T) {
+	paths := setTestEnv(t)
+	t.Setenv("RUNE_MANIFEST", "")
+	t.Setenv("RUNE_NO_AUTO_UPDATE", "")
+
+	calls := stubSpawn(t)
+
+	var stderr bytes.Buffer
+	tryAutoCheck(paths, &stderr)
+
+	if *calls != 0 {
+		t.Errorf("spawn calls = %d, want 0 with no manifest configured", *calls)
+	}
+}
