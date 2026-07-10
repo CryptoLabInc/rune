@@ -159,7 +159,7 @@ func TestUpdateArtifact_UpdateSingleArtifact(t *testing.T) {
 		t.Fatalf("EnsureDirs: %v", err)
 	}
 
-	// Simulate installed artfiact - rune-mcp: old, runed: latest
+	// Simulate installed artifact - rune-mcp: old, runed: latest
 	rec := &Manifest{Version: 1, RuneMCPVersion: "v0.0.1", RunedVersion: "v0.1.0-test"}
 	arts := map[string]InstalledArtifact{
 		StepRuneMCP: {Path: paths.RuneMCPBinary, SHA256: "old-mcp", DestSHA256: "old-mcp"},
