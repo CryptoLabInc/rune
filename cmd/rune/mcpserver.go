@@ -27,7 +27,6 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 	// Self-install rune-mcp itself in this case.
 	justInstalled := false
 	if _, statErr := os.Stat(paths.RuneMCPBinary); statErr != nil {
-		justInstalled = true
 		fmt.Fprintln(stderr, "rune: rune-mcp not installed yet; fetching before launch...")
 		manifest := manifestURL
 		if env := os.Getenv("RUNE_MANIFEST"); env != "" {
@@ -61,6 +60,8 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 
 			fmt.Fprintln(stderr, "rune: rune-mcp installed by a concurrent session")
 		}
+
+		justInstalled = true
 	}
 
 	if !justInstalled {
