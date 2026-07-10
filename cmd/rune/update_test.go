@@ -329,7 +329,7 @@ func fakeSupervisorHangup(t *testing.T, sockPath string) {
 	}
 	t.Cleanup(func() { _ = ln.Close() })
 
-	// Simluate superviosr which dropped during reload
+	// Simulate supervisor which dropped during reload
 	go func() {
 		for {
 			conn, err := ln.Accept()

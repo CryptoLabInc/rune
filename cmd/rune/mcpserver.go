@@ -71,7 +71,7 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 	return execInstalledBinary(ctx, paths.RuneBin, "rune-mcp", args, nil, stderr)
 }
 
-var spawnUpdateFn = spawnDetachedUpdate // backgorund update launcher
+var spawnUpdateFn = spawnDetachedUpdate // background update launcher
 
 var errBackgroundUnsupported = errors.New("detached background update not supported on this platform")
 
@@ -120,7 +120,7 @@ func spawnDetachedUpdate(paths *bootstrap.Paths, manifest string) error {
 	}
 	defer logFile.Close()
 
-	// Runed is excluded since mcp server does not handle it's lifecycle
+	// Runed is excluded since mcp server does not handle its lifecycle
 	cmd := exec.Command(exe, "update", "--only", bootstrap.StepRuneMCP, "--manifest-url", manifest)
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
