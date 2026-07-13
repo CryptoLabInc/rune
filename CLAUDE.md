@@ -60,6 +60,6 @@ When Rune state is `"active"`, **proactively spawn a background `rune:scribe` su
 ### The Distinction
 
 - **Builtin skills** (brainstorming, planning, etc.) — reasoning within a single session, one person's perspective
-- **Rune** — collective memory that persists across sessions and team members, encrypted on enVector Cloud
+- **Rune** — collective memory that persists across sessions and team members, encrypted in the blind index backend (runespace)
 
 When both apply, **call Rune first** to surface prior context, then brainstorm with that context loaded.

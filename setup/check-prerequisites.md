@@ -22,9 +22,9 @@ This authenticates you to access your team's Vault. Keep this secure and never s
 
 ---
 
-## enVector Cloud (Automatic)
+## Index Backend Credentials (Not Needed)
 
-enVector Cloud credentials (endpoint, API key) are delivered automatically via the Vault bundle at startup. You do not need to obtain or configure them separately. Your team administrator manages enVector setup as part of the Vault deployment.
+Index backend (runespace) credentials stay on Rune-Vault and are never distributed to team members. You do not need to obtain or configure them. Your team administrator manages the index backend as part of the Vault deployment.
 
 ---
 
@@ -44,8 +44,10 @@ Great! Run `/rune:configure` to set up your credentials and activate the plugin.
 
 If your team hasn't deployed Rune-Vault yet, see the [full Rune deployment guide](https://github.com/CryptoLabInc/rune-admin).
 
-#### enVector credentials?
-enVector credentials are delivered automatically via the Vault bundle. If you see enVector errors, contact your team administrator to verify the Vault deployment includes enVector configuration.
+#### Index backend credentials?
+Index backend credentials stay on Vault. If you see runespace errors, contact
+your team administrator to verify the Vault deployment includes index backend
+configuration.
 
 ---
 
@@ -57,7 +59,7 @@ Once configured with `/rune:configure`:
 - **Automatic context capture**: Claude will automatically identify and store significant organizational decisions
 - **Context retrieval**: Ask Claude about past decisions and get full context
 - **Team sharing**: All team members with the same Vault see the same organizational memory
-- **Zero-knowledge security**: enVector Cloud never sees plaintext data
+- **Customer-controlled security**: Vault controls keys and plaintext access; the index backend stores encrypted vectors and sealed metadata
 
 ### Example Usage
 
@@ -85,18 +87,25 @@ Claude: Stored in organizational memory
 ## Security & Privacy
 
 ### What gets encrypted?
-- All conversational context
-- All organizational decisions
-- All code patterns and rationale
+- Captured organizational decisions and reusable insights
+- Embeddings derived from those captured insights
+- Metadata sealed by your team's Vault before index storage
 
-### What can the cloud provider see?
-- **Nothing**: All data is FHE-encrypted before leaving your machine
-- Cloud only sees encrypted vectors (mathematical noise)
-- Only your team's Vault can decrypt
+Rune does not store every full conversation by default. The agent extracts
+significant decisions, trade-offs, and lessons, then Rune stores that reusable
+memory.
+
+### What can the blind index backend see?
+- Encrypted stored vectors and sealed metadata
+- Opaque IDs and operational metadata needed to serve the index
+- Normalized query embeddings under the PCMM search path
+
+The index backend does not receive natural-language organizational records.
+Only your team's Vault can open metadata and decrypt score results.
 
 ### Who has access?
 - **Team members**: Anyone with your Vault Endpoint + Token
-- **Cloud provider**: No access (zero-knowledge encryption)
+- **Blind index backend**: No plaintext organizational records
 - **Admin control**: Revoke access by rotating Vault tokens
 
 ---

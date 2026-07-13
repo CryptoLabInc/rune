@@ -55,9 +55,9 @@ $ claude plugin install rune
 The plugin manifest (`.claude-plugin/plugin.json`) declares the wrapper
 path; Claude Code spawns `${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server` via
 stdio on session start (on a fresh install the wrapper self-installs
-rune-mcp first, then execs it). enVector Cloud credentials are delivered
-automatically via the Vault bundle — you never set `ENVECTOR_*` env vars
-directly.
+rune-mcp first, then execs it). Index backend credentials stay on
+Rune-Vault — team members never set runespace or index backend credentials
+locally.
 
 ### Configure credentials
 
@@ -74,8 +74,8 @@ Walks you through Vault endpoint + token + TLS choice, writes
 > /rune:status
 ```
 
-Renders per-subsystem health (Vault / EncKey / AgentDEK / Embedder /
-enVector) via the `diagnostics` MCP tool.
+Renders per-subsystem health (Vault / key manifest / Embedder / index
+backend) via the `diagnostics` MCP tool.
 
 ### Dev mode (running from a local clone)
 
@@ -173,14 +173,14 @@ into `MCPServerStdio`.
 
 ## Multi-Agent Collaboration
 
-Each agent spawns its own MCP server process; shared state is
-maintained via enVector Cloud (encrypted vectors) and Rune-Vault
-(decryption keys).
+Each agent spawns its own MCP server process. Every process talks only to
+Rune-Vault; Vault owns the keys, enforces token policy, seals metadata, and
+calls the blind index backend.
 
 ```
 Claude ──→ rune-mcp (stdio) ──┐
-                              ├──→ enVector Cloud (encrypted)
-Gemini ──→ rune-mcp (stdio) ──┤       └──→ Rune-Vault (secret key)
+                              ├──→ Rune-Vault ──→ runespace
+Gemini ──→ rune-mcp (stdio) ──┤    trusted        blind encrypted index
                               │
 GPT    ──→ rune-mcp (stdio) ──┘
 ```
@@ -219,9 +219,9 @@ cat ~/.rune/config.json
 # vault.endpoint, vault.token, ca_cert, tls_disable, state
 ```
 
-enVector credentials are delivered automatically via the Vault bundle
-at boot — they live in memory only and are not stored locally. You do
-NOT need to set `ENVECTOR_ENDPOINT` or `ENVECTOR_API_KEY`.
+Index backend credentials live on Vault and are not stored locally. You do
+NOT need to set any runespace or index backend credentials on team member
+machines.
 
 ### Verify MCP tools are available
 

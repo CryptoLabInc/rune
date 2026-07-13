@@ -19,7 +19,7 @@ Before doing anything, verify Rune is active:
 Surface relevant past decisions and organizational context whenever the conversation touches topics where prior knowledge may exist. Call the `recall` MCP tool. The tool handles search internally:
 
 1. **Query parsing**: Intent detection, entity extraction, query expansion
-2. **Search**: Multi-query encrypted vector search via enVector
+2. **Search**: Multi-query encrypted vector search via the blind index backend (runespace)
 3. **Vault decryption**: Secret key never leaves Vault
 
 The recall tool returns **raw results** -- you are responsible for synthesizing them into a coherent, well-cited answer.

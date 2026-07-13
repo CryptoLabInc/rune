@@ -202,7 +202,7 @@ Render based on `last_boot_error.kind`:
 | `vault_rate_limit`    | Token throttled. Show `hint`. Wait and retry. |
 | `vault_bad_endpoint`  | Endpoint syntax invalid. Show `hint`. Re-run `/rune:configure` with corrected format. |
 | `embedder_unreachable`| `runed` daemon not running. Show `hint`. Re-run `/rune:activate` to (re)spawn the daemon; if it persists, the agent runs the Preflight install, then `/rune:activate`. |
-| `envector_init` / `envector_index` | Envector side. Show `hint` + `detail`. |
+| `runespace_init` / `runespace_index` | Index backend (runespace) side. Show `hint` + `detail`. |
 | `key_save` / `local_io` | Local FS issue. Show `hint` + suggest checking `~/.rune/` permissions. |
 | anything else (incl. `unknown`) | Show `kind`, `hint`, and `detail`. Suggest user share the detail with their Vault admin. |
 
@@ -233,7 +233,7 @@ Rune Configuration Complete
   Scribe        : ✓ initialized / ✗ not initialized
   Retriever     : ✓ initialized / ✗ not initialized
   Embedder      : ✓ <model> (<mode>, dim=<vector_dim>) / ✗ not initialized
-  enVector      : ✓ reachable (<latency_ms>ms) / ✗ <error> — <hint>
+  Index backend : ✓ reachable (<latency_ms>ms) / ✗ <error> — <hint>
 
 Next steps:
   - /rune:status      — re-check pipeline health later

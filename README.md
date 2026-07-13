@@ -1,7 +1,7 @@
 # Rune
 **Encrypted shared memory for AI agents.**
 
-Rune gives every AI agent on your team the **collective experience** of the entire organization — automatically, privately, and without anyone searching for it.
+Rune gives every AI agent on your team the **collective experience** of the entire organization — automatically, with a customer-controlled security boundary, and without anyone searching for it.
 
 ```
   Without Rune                         With Rune
@@ -65,7 +65,7 @@ $ gemini extensions install https://github.com/CryptoLabInc/rune.git
 You'll need from your team admin:
 - **Vault endpoint** + **token**
 
-That's all. enVector Cloud credentials are delivered automatically via the Vault bundle. On a fresh machine, `/rune:configure` also handles binary download and daemon setup in the same step.
+That's all. Index backend credentials stay on Rune-Vault; team members never configure runespace or index backend credentials locally. On a fresh machine, `/rune:configure` also handles binary download and daemon setup in the same step.
 
 Don't have these? See [rune-admin](https://github.com/CryptoLabInc/rune-admin) for deployment, [setup/check-prerequisites.md](setup/check-prerequisites.md) for the full prerequisite checklist, or [examples/team-setup-example.md](examples/team-setup-example.md) for a walkthrough.
 
@@ -116,36 +116,36 @@ You don't "query" Rune. Your agent draws from it the way an experienced engineer
 | **Built-in memory** | Siloed per vendor. Your team's Claude memory and Codex memory never connect. | One shared memory across all agents. Vendor-independent. |
 | **RAG pipelines** | Chunks documents into fragments. Destroys reasoning structure. Requires ongoing pipeline maintenance. | Agent judges significance and stores *decisions*, not document chunks. No pipeline to maintain. |
 | **Wikis & docs** | Manual. Nobody updates the wiki after the meeting. | Captures automatically during work, not after. |
-| **Plaintext vector DBs** | Your organizational knowledge is readable by the cloud provider. | FHE encryption — the cloud stores and searches *only ciphertext*. Mathematically guaranteed. |
+| **Plaintext vector DBs** | Your organizational knowledge is readable by the cloud provider. | The cloud index stays blind: it stores encrypted vectors and sealed metadata, while your Vault controls keys and plaintext access. |
 
 ---
 
 ## Architecture
 
 ```
-  Agent Swarm (your team)              Cloud Infrastructure
-  ━━━━━━━━━━━━━━━━━━━━━━              ━━━━━━━━━━━━━━━━━━━━
+  Agent Swarm (your team)              Customer-controlled trust boundary        Blind index backend
+  ━━━━━━━━━━━━━━━━━━━━━━              ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━        ━━━━━━━━━━━━━━━━━━━
 
   Alice's Agent ─┐
-  Bob's Agent ───┤── MCP ──► enVector Cloud (encrypted vectors)
-  Carol's Agent ─┘               │
-                            Rune-Vault (secret key holder)
-                            decrypts similarity scores only
+  Bob's Agent ───┤── MCP ──► Rune-Vault ───────────────────────────────► runespace
+  Carol's Agent ─┘            owns keys, tokens, metadata sealing,        encrypted vectors,
+                              score decryption, and access policy         sealed metadata
 ```
 
-**Capture:** Agent judges significance → generates reusable insight → novelty check against existing memory → FHE encrypt → store
+**Capture:** Agent judges significance → generates reusable insight → local embedding → Vault receives the embedding and metadata over TLS → Vault encrypts the vector, seals metadata, and stores it in the blind index
 
-**Recall:** Semantic query → encrypted similarity scoring → Vault decrypts scores only → metadata retrieved and decrypted locally
+**Recall:** Semantic query → local embedding → Vault searches the blind index, decrypts encrypted score results, opens authorized metadata, and returns ranked hits
 
-### Privacy: Zero-Knowledge Encryption
+### Security Model: Customer-Controlled Vault + Blind Index
 
-Every memory is encrypted **before leaving your machine** using Fully Homomorphic Encryption (FHE).
+Rune separates the trusted control plane from the blind search backend.
 
-- **enVector Cloud** stores and searches **only encrypted vectors** — it cannot read your data
-- **Rune-Vault** holds the secret key and decrypts **only similarity scores** — it never sees the content
-- **Plaintext never leaves your machine**
+- **Team machines** talk only to Rune-Vault over TLS using a Vault token.
+- **Rune-Vault** is the customer-controlled trust anchor. It owns the FHE key set, receives plaintext embeddings and capture metadata from authorized agents, seals metadata, decrypts score results, and enforces token policy.
+- **runespace** is the blind index backend. It stores encrypted vectors and sealed metadata, holds only public evaluation material, and cannot decrypt organizational memory.
+- **Plaintext is visible to the local agent session and to your Vault, not to the blind index backend.**
 
-Even if the cloud is compromised, your organizational knowledge remains mathematically protected.
+If the index backend is compromised, stored vectors and metadata remain encrypted. If Vault is compromised, the attacker may access keys and authorized plaintext results, so operate Vault as sensitive customer infrastructure.
 
 ---
 
@@ -176,7 +176,7 @@ Rune's capture system is modeled on how the brain forms long-term memories:
   Full conversation   ──►   Agent judges:     ──►    Stores the GIST:
   with all the              "Is this significant?"
   tangents, greetings,                                "PostgreSQL for
-  weather chat...           enVector checks:          financial data.
+  weather chat...           Vault checks:             financial data.
                             "Is this novel?"          ACID required.
                                                       MongoDB rejected."
                             Filters ~99% out.
@@ -200,19 +200,19 @@ The memory itself acts as the filter. An empty memory captures aggressively (eve
 
 Rune requires two infrastructure components:
 
-1. **Rune-Vault** — Holds the team's secret key. Decrypts only similarity scores, never content. Deploy via [rune-admin](https://github.com/CryptoLabInc/rune-admin).
-2. **enVector Cloud** — Encrypted vector storage and search. Sign up at [envector.io](https://envector.io).
+1. **Rune-Vault** — Customer-controlled trust anchor. It authenticates users, owns the FHE keys, encrypts embeddings, seals/opens metadata, decrypts scores, and calls the index backend. Deploy via [rune-admin](https://github.com/CryptoLabInc/rune-admin).
+2. **Blind vector index** — runespace encrypted vector storage and search. It stores encrypted vectors and sealed metadata, not plaintext organizational knowledge.
 
 ### Deploying
 
 See [rune-admin](https://github.com/CryptoLabInc/rune-admin):
 1. Deploy Rune-Vault (OCI/AWS/GCP via Terraform)
-2. Create enVector Cloud account and cluster
-3. Provision team index on Vault
+2. Connect Vault to a runespace index backend
+3. Provision the team index and issue Vault tokens
 
 ### Onboarding Members
 
-Give each member their **Vault endpoint + token**. enVector credentials are bundled automatically.
+Give each member their **Vault endpoint + token**. Index backend credentials stay on Vault.
 
 They install the plugin, run `/rune:configure` (or `$rune configure` in Codex), and they're connected.
 
@@ -220,6 +220,7 @@ They install the plugin, run `/rune:configure` (or `$rune configure` in Codex), 
 
 - **Token rotation**: New token → distribute → revoke old. Departed members lose access immediately.
 - **Project isolation**: Separate Vault instances per project for isolated memory spaces.
+- **Vault hardening**: Treat Vault as sensitive infrastructure. It should run with TLS, restricted admin access, encrypted disks, and regular token rotation.
 
 ---
 
@@ -299,14 +300,14 @@ Then reinstall from the [Install](#install) section above.
 /rune:configure           # or: $rune configure — re-enter Vault credentials
 ```
 
-`/rune:status` reports per-subsystem state (vault / encryption key / embedder /
-enVector reachability). Failures surface a recovery action on the same line.
+`/rune:status` reports per-subsystem state (Vault / key manifest / embedder /
+index backend reachability). Failures surface a recovery action on the same line.
 
 ## Related Projects
 
 - [Rune-Admin](https://github.com/CryptoLabInc/rune-admin) — Infrastructure deployment and admin tools
-- [envector-go-sdk](https://github.com/CryptoLabInc/envector-go-sdk) — FHE encryption SDK (Go)
-- [enVector Cloud](https://envector.io) — Encrypted vector database
+- [runespace](https://github.com/CryptoLabInc/runespace) — Blind encrypted vector index engine
+- [runespace-go-sdk](https://github.com/CryptoLabInc/runespace-go-sdk) — Go client SDK used by Vault
 
 ## Support
 
