@@ -5,7 +5,7 @@ description: Encrypted organizational memory workflow for Rune with activation c
 
 # Rune - Organizational Memory System
 
-**Context**: This skill provides encrypted organizational memory capabilities using Fully Homomorphic Encryption (FHE). It allows teams to capture, store, and retrieve institutional knowledge while maintaining zero-knowledge privacy. Works with Claude Code, Codex CLI, Gemini CLI, and any MCP-compatible agent.
+**Context**: This skill provides encrypted organizational memory capabilities using Fully Homomorphic Encryption (FHE). It allows teams to capture, store, and retrieve institutional knowledge with a customer-controlled Vault and blind index backend. Works with Claude Code, Codex CLI, Gemini CLI, and any MCP-compatible agent.
 
 ## Execution Model
 
@@ -44,8 +44,8 @@ commands into cross-agent/common instructions.
    - `state` is `"active"` → **Go to Active State**
    - Otherwise → **Go to Dormant State**
 
-**Note**: enVector credentials are NOT in `~/.rune/config.json`. They are
-delivered via the Vault bundle at runtime when the boot loop dials Vault.
+**Note**: Index backend credentials are NOT in `~/.rune/config.json`. They
+stay on Vault; the local agent stores only Vault connection settings.
 
 **IMPORTANT**: Do NOT attempt to ping Vault or make network requests during
 activation check. This wastes tokens. The MCP server runs its own boot
@@ -107,7 +107,7 @@ If in Active state but operations fail:
       - Show warning: "This should only be used for local development. All gRPC traffic will be sent in plaintext."
       - → config: `ca_cert: ""`, `tls_disable: true`
 
-   Note: enVector credentials are delivered automatically via the Vault bundle — no user input needed.
+   Note: index backend credentials stay on Rune-Vault and are never distributed — no user input needed.
 
 4. Call the `configure` MCP tool with the collected values
    (`endpoint`, `token`, `ca_cert_path`, `tls_disable`). The server does
@@ -116,8 +116,8 @@ If in Active state but operations fail:
    The agent never writes the config file itself.
 5. Call the `activate` MCP tool to bring pipelines online. It runs the
    prereq checks server-side and drives the boot loop: dials Vault,
-   fetches the agent manifest (EncKey + enVector creds), connects to
-   enVector, and transitions to Active.
+   fetches the agent manifest, connects to the embedder and (via
+   Vault) the runespace index, and transitions to Active.
 6. Confirm health by calling `diagnostics` and applying the
    **Boot Failure — Fast-Fail Rule** (see section below). If
    `vault.last_boot_error` is present, surface its `hint` verbatim
@@ -149,12 +149,14 @@ System Health (from diagnostics):
   ✓ Encryption Key : loaded (key_id: <id>)
   ✓ Agent DEK      : loaded
   ✓ Embedder       : <model> (<mode>, dim=<vector_dim>)
-  ✓ enVector Cloud : reachable (<latency>ms)
 
 Recommendations:
   - If Dormant: /rune:configure to (re)trigger the boot loop
   - If a subsystem failed: surface the recovery action on its row
 ```
+
+Index backend reachability is not shown separately: mcp reaches the index only
+through Vault, so `vault.healthy` (the `Vault` row above) is the single signal.
 
 ### `/rune:capture <context>`
 (or `$rune capture <context>` for Codex CLI)
@@ -259,7 +261,7 @@ signal on its own.) Treat `last_boot_error` as ground truth.
      `/rune:configure` after applying the hint's fix.
    - `user_deactivated` → `/rune:activate`.
    - `embedder_unreachable` → re-run `/rune:activate` to spawn the daemon, then `/rune:status`.
-   - `envector_*` → share `detail` with the Vault admin.
+   - `runespace_*` → share `detail` with the Vault admin.
    - `unknown` → show `kind` + `detail`, suggest sharing with admin.
 
 **Do NOT:** retry `reload_pipelines`, poll `diagnostics` in a loop, or run
@@ -270,7 +272,7 @@ lives in `commands/claude/configure.md` for the rare case the hint string
 needs supplementation.
 
 **Fallback** (older rune-mcp binary without `last_boot_error`): use
-`vault.error`, `embedding.health_error`, `envector.error`, and the
+`vault.error`, `embedding.health_error`, `runespace.error`, and the
 `dormant_reason` translation in `/rune:status`. Still: do not investigate
 further, surface what you have and stop.
 
@@ -355,10 +357,11 @@ When users ask questions about past decisions, automatically search organization
 
 ## Security & Privacy
 
-**Zero-Knowledge Encryption**:
-- All data stored as FHE-encrypted vectors
-- enVector Cloud cannot read plaintext
-- Only team members with Vault access can decrypt
+**Customer-Controlled Vault + Blind Index**:
+- Stored vectors are FHE-encrypted before reaching the blind index backend
+- Metadata is sealed by Vault before storage in the index backend
+- Vault is the trust anchor: it owns keys, receives authorized plaintext embeddings/metadata, decrypts score results, and enforces access policy
+- The blind index backend cannot decrypt organizational memory or metadata
 
 **Credential Storage**:
 - Tokens stored locally in `~/.rune/config.json`
@@ -380,8 +383,8 @@ Check activation state with `/rune:status` (or `$rune status` for Codex CLI)
 2. Check Vault is accessible: `curl <vault-url>/health`
 3. Reconfigure with `/rune:configure` (or `$rune configure` for Codex CLI)
 
-### enVector not provisioned?
-Vault admin must configure `ENVECTOR_ENDPOINT` and `ENVECTOR_API_KEY` on the Vault server. Contact your Vault administrator.
+### Index backend not provisioned?
+Vault admin must configure the runespace index backend on the Vault server as part of the Vault deployment. Contact your Vault administrator.
 
 ### Need to switch teams?
 Use `/rune:reset` (or `$rune reset` for Codex CLI) then `/rune:configure` (or `$rune configure` for Codex CLI) with new team credentials

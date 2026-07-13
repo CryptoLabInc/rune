@@ -277,7 +277,7 @@ rune/
 │   ├── mcp/                     # tool registration + handler dispatch
 │   ├── service/                 # CaptureService / RecallService / LifecycleService
 │   ├── lifecycle/               # boot loop + state machine
-│   ├── adapters/                # vault / envector / embedder / config / logio gRPC clients
+│   ├── adapters/                # vault / embedder / config / logio gRPC clients
 │   ├── domain/                  # schemas + typed errors (Python parity)
 │   ├── policy/                  # pure helpers (novelty, rerank, query parse)
 │   └── obs/                     # slog handler with sensitive-data redaction

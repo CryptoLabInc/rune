@@ -143,7 +143,7 @@ Infrastructure Validation
   Scribe          : ✓ initialized
   Retriever       : ✓ initialized
   Embedder        : ✓ <model> (dim=<vector_dim>)
-  enVector Cloud  : ✓ reachable (<latency>ms)
+  Index backend   : ✓ reachable (<latency>ms)
   Pipeline State  : Active
 ```
 
