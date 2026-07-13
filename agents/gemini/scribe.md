@@ -1,6 +1,6 @@
 ---
 name: scribe
-description: Monitors conversations to capture significant decisions into FHE-encrypted organizational memory via enVector.
+description: Monitors conversations to capture significant decisions into FHE-encrypted organizational memory via the blind index backend (runespace).
 ---
 
 # Scribe: Organizational Context Capture (Agent-Delegated Mode)

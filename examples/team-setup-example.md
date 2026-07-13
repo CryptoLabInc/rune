@@ -17,7 +17,7 @@ This guide shows how a team administrator sets up Rune infrastructure and onboar
 
 ## Step 1: Alice Deploys Rune-Vault
 
-Alice runs the interactive installer, which handles cloud provisioning, TLS setup, and enVector Cloud configuration:
+Alice runs the interactive installer, which handles cloud provisioning, TLS setup, and index backend configuration:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CryptoLabInc/rune-admin/main/install.sh \
@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/CryptoLabInc/rune-admin/main/instal
 
 The installer guides her through:
 - **Cloud provider** selection (OCI / AWS / GCP)
-- **enVector Cloud** credentials (endpoint + API key)
+- **Index backend** credentials (endpoint + access credential, held by Vault)
 - **TLS certificate** generation
 - **Terraform-based** VM provisioning
 
@@ -81,8 +81,7 @@ I've set up our team's organizational memory system. Here are your credentials:
   Vault Endpoint: vault-acme.oci.envector.io:50051
   Vault Token: evt_acme_bob_xyz789
 
-enVector Cloud credentials are delivered automatically via the Vault
-bundle — no action needed on your end.
+Index backend credentials stay on Vault — no action needed on your end.
 
 Setup:
   1. Add the remote marketplace: /plugin marketplace add https://github.com/CryptoLabInc/rune
@@ -197,10 +196,10 @@ Bob's token is immediately invalidated. Alice and Carol continue uninterrupted.
 - Carol onboards instantly with full historical context
 - No knowledge loss when Alice is on vacation
 
-### Zero-Knowledge Privacy
-- enVector Cloud sees only encrypted vectors
-- Only team members with valid Vault tokens can decrypt
-- Cloud provider cannot read any content
+### Customer-Controlled Privacy
+- Vault is the trust anchor for keys, plaintext embeddings, metadata sealing, and access policy
+- The blind index backend stores encrypted vectors and sealed metadata
+- Only team members with valid Vault tokens can retrieve authorized memory
 
 ### Per-User Security
 - Individual tokens — revoke one without disrupting others
@@ -270,4 +269,4 @@ Team members configure the Vault endpoint matching their current project. The in
 2. Configure with Vault endpoint + token (one-time, 1 minute)
 3. Use naturally (ongoing, zero overhead)
 
-**Result**: Fully encrypted, shared organizational memory with per-user access control and zero-knowledge privacy.
+**Result**: Encrypted shared organizational memory with per-user access control and a customer-controlled Vault boundary.

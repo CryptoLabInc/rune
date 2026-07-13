@@ -1,4 +1,4 @@
-# TODO(v0.4 migration): v0.3-stale, bootstrap-mcp.sh runtime block removed (script deleted); rest still shows envector/LLM-provider fields.
+# TODO(v0.4 migration): v0.3-stale, bootstrap-mcp.sh runtime block removed (script deleted); rest still shows LLM-provider/Scribe/Retriever fields.
 # Regenerate from commands/claude/status.md before re-enabling Codex/Gemini.
 description = "Check Rune plugin health and configuration status"
 prompt = """
@@ -23,8 +23,6 @@ Configuration:
   Config file   : ~/.rune/config.json
   Vault Endpoint: <url or "not set">
   Vault Token   : <masked or "not set">
-  enVector      : <endpoint or "not set">
-  enVector Key  : <masked or "not set">
 
 System Health (from diagnostics):
   Vault         : healthy / unreachable
@@ -33,7 +31,6 @@ System Health (from diagnostics):
   Scribe        : ready / not initialized
   Retriever     : ready / not initialized
   LLM Provider  : <provider or "none">
-  enVector Cloud: reachable (<latency>ms) / unreachable
 
 MCP Tools:
   capture       : <available / unavailable>
@@ -46,8 +43,6 @@ MCP Tools:
    - State dormant: "Run `/rune:activate` (or `$rune activate` for Codex CLI) to enable"
    - Keys not loaded: "Check Vault connection — keys are fetched from Vault at startup"
    - Pipelines not initialized: "Run `reload_pipelines` or restart the MCP server"
-   - enVector unreachable: "Check network connectivity and enVector endpoint"
-   - enVector not provisioned: "No enVector Cloud endpoint is configured on Rune-Vault. Contact your Vault administrator."
 
 Use checkmarks for healthy items, X marks for issues.
 
