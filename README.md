@@ -307,7 +307,7 @@ index backend reachability). Failures surface a recovery action on the same line
 
 - [Rune-Admin](https://github.com/CryptoLabInc/rune-admin) — Infrastructure deployment and admin tools
 - [runespace](https://github.com/CryptoLabInc/runespace) — Blind encrypted vector index engine
-- [runespace-go-sdk](https://github.com/CryptoLabInc/runespace-go-sdk) — Go client SDK used by Vault
+- [runespace-sdk](https://github.com/CryptoLabInc/runespace-sdk) — Go client SDK used by Vault
 
 ## Support
 
