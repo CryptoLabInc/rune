@@ -7,6 +7,7 @@
     "email": "zotanika@cryptolab.co.kr"
   },
   "commands": "./commands/claude/",
+  "hooks": "./hooks/hooks.json",
   "agents": [
     "./agents/claude/scribe.md",
     "./agents/claude/retriever.md"
