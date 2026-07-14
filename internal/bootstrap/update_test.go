@@ -2,8 +2,10 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -157,7 +159,7 @@ func TestUpdateArtifact_UpdateSingleArtifact(t *testing.T) {
 		t.Fatalf("EnsureDirs: %v", err)
 	}
 
-	// Simulate installed artfiact - rune-mcp: old, runed: latest
+	// Simulate installed artifact - rune-mcp: old, runed: latest
 	rec := &Manifest{Version: 1, RuneMCPVersion: "v0.0.1", RunedVersion: "v0.1.0-test"}
 	arts := map[string]InstalledArtifact{
 		StepRuneMCP: {Path: paths.RuneMCPBinary, SHA256: "old-mcp", DestSHA256: "old-mcp"},
@@ -167,7 +169,7 @@ func TestUpdateArtifact_UpdateSingleArtifact(t *testing.T) {
 		t.Fatalf("WriteInstalledManifest: %v", err)
 	}
 
-	got, err := UpdateArtifact(context.Background(), fx.manifestURL(), StepRuneMCP, nil)
+	got, err := UpdateArtifact(context.Background(), fx.manifestURL(), StepRuneMCP, nil, nil)
 	if err != nil {
 		t.Fatalf("UpdateArtifact: %v", err)
 	}
@@ -210,7 +212,73 @@ func TestUpdateArtifact_UpdateSingleArtifact(t *testing.T) {
 }
 
 func TestUpdateArtifact_UnknownArtifact(t *testing.T) {
-	if _, err := UpdateArtifact(context.Background(), "http://unused", "llama-server", nil); err == nil {
+	if _, err := UpdateArtifact(context.Background(), "http://unused", "llama-server", nil, nil); err == nil {
 		t.Error("expected error for an unknown artifact")
+	}
+}
+
+func outdatedRuneMCP(t *testing.T) (*Paths, string) {
+	t.Helper()
+	setRealms(t)
+	t.Setenv("RUNE_MANIFEST", "")
+	fx := newFixture(t) // v0.1.0-test
+
+	paths, err := Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := paths.EnsureDirs(); err != nil {
+		t.Fatalf("EnsureDirs: %v", err)
+	}
+
+	rec := &Manifest{Version: 1, RuneMCPVersion: "v0.0.1", RunedVersion: "v0.1.0-test"}
+	arts := map[string]InstalledArtifact{
+		StepRuneMCP: {Path: paths.RuneMCPBinary},
+		StepRuned:   {Path: paths.RunedBinary},
+	}
+	if err := WriteInstalledManifest(paths, fx.manifestURL(), rec, arts); err != nil {
+		t.Fatalf("WriteInstalledManifest: %v", err)
+	}
+
+	return paths, fx.manifestURL()
+}
+
+func TestUpdateArtifact_AfterInstallOK(t *testing.T) {
+	paths, url := outdatedRuneMCP(t)
+
+	called := false
+	v, err := UpdateArtifact(context.Background(), url, StepRuneMCP, func() error { called = true; return nil }, nil)
+	if err != nil {
+		t.Fatalf("UpdateArtifact: %v", err)
+	}
+	if !called {
+		t.Error("afterInstall was not called")
+	}
+	if v != "v0.1.0-test" {
+		t.Errorf("version = %q, want v0.1.0-test", v)
+	}
+
+	after, _ := ReadInstalledManifest(paths)
+	if after.RuneMCPVersion != "v0.1.0-test" {
+		t.Errorf("audit not bumped after afterInstall ok: %q", after.RuneMCPVersion)
+	}
+}
+
+func TestUpdateArtifact_AfterInstallErrorSkipsAudit(t *testing.T) {
+	paths, url := outdatedRuneMCP(t)
+
+	_, err := UpdateArtifact(context.Background(), url, StepRuneMCP, func() error {
+		return errors.New("restart failed")
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "restart failed") {
+		t.Fatalf("err = %v, want the afterInstall error surfaced", err)
+	}
+
+	if b, _ := os.ReadFile(paths.RuneMCPBinary); string(b) == "" {
+		t.Error("binary should have been staged before afterInstall")
+	}
+	after, _ := ReadInstalledManifest(paths)
+	if after.RuneMCPVersion != "v0.0.1" {
+		t.Errorf("rune_mcp_version = %q, want unchanged v0.0.1 (afterInstall failed)", after.RuneMCPVersion)
 	}
 }

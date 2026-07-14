@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
@@ -23,6 +25,7 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 	// Fresh `claude plugin install rune` try to spawn MCP server via
 	// "${CLAUDE_PLUGIN_ROOT}/bin/rune mcp-server" which does not exist yet.
 	// Self-install rune-mcp itself in this case.
+	justInstalled := false
 	if _, statErr := os.Stat(paths.RuneMCPBinary); statErr != nil {
 		fmt.Fprintln(stderr, "rune: rune-mcp not installed yet; fetching before launch...")
 		manifest := manifestURL
@@ -57,9 +60,82 @@ func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
 
 			fmt.Fprintln(stderr, "rune: rune-mcp installed by a concurrent session")
 		}
+
+		justInstalled = true
+	}
+
+	if !justInstalled {
+		tryAutoCheck(paths, stderr)
 	}
 
 	return execInstalledBinary(ctx, paths.RuneBin, "rune-mcp", args, nil, stderr)
+}
+
+var spawnUpdateFn = spawnDetachedUpdate // background update launcher
+
+var errBackgroundUnsupported = errors.New("detached background update not supported on this platform")
+
+func resolvedManifest() string {
+	m := manifestURL
+	if env := os.Getenv("RUNE_MANIFEST"); env != "" {
+		m = env
+	}
+	return m
+}
+
+func tryAutoCheck(paths *bootstrap.Paths, stderr io.Writer) {
+	if bootstrap.AutoUpdateDisabled() {
+		return
+	}
+
+	manifest := resolvedManifest()
+	if manifest == "" {
+		return
+	}
+	if !bootstrap.ShouldAutoCheck(paths.AutoCheckStamp, bootstrap.AutoCheckInterval(), time.Now()) {
+		return
+	}
+
+	// Record first to prevent re-spawn on reconnection
+	if err := bootstrap.RecordAutoCheck(paths.AutoCheckStamp, time.Now()); err != nil {
+		return
+	}
+	if err := spawnUpdateFn(paths, manifest); err != nil {
+		fmt.Fprintf(stderr, "rune: background update check not started: %v\n", err)
+	}
+}
+
+func spawnDetachedUpdate(paths *bootstrap.Paths, manifest string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(paths.UpdateLog), 0o700); err != nil {
+		return err
+	}
+	logFile, err := os.OpenFile(paths.UpdateLog, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+
+	// Runed is excluded since mcp server does not handle its lifecycle
+	cmd := exec.Command(exe, "update", "--only", bootstrap.StepRuneMCP, "--manifest-url", manifest)
+	cmd.Stdin = nil
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	if !setDetached(cmd) {
+		return errBackgroundUnsupported
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	go func() { _ = cmd.Wait() }() // child exit
+
+	return nil
 }
 
 func waitForFile(ctx context.Context, path string, timeout time.Duration) bool {

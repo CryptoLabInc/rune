@@ -10,6 +10,9 @@ import (
 
 func runVersion(w io.Writer) int {
 	fmt.Fprintf(w, "rune %s\n", runeVersion)
+	if pv, _ := bootstrap.InstalledPluginVersion(""); pv != "" {
+		fmt.Fprintf(w, "plugin: %s\n", pv)
+	}
 	manifest := manifestURL
 	if manifest == "" {
 		manifest = os.Getenv("RUNE_MANIFEST")

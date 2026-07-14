@@ -99,6 +99,10 @@ func CheckUpdate(ctx context.Context, manifestURL string, logf func(format strin
 		return nil, err
 	}
 
+	return PlanFromManifest(manifest)
+}
+
+func PlanFromManifest(manifest *Manifest) (*UpdateList, error) {
 	paths, err := Resolve()
 	if err != nil {
 		return nil, err
@@ -106,13 +110,12 @@ func CheckUpdate(ctx context.Context, manifestURL string, logf func(format strin
 
 	// Get local installed info
 	installed, _ := ReadInstalledManifest(paths) // nil: unknown version
-	plan := planUpdate(installed, manifest)
+	plan := planUpdate(installed, manifest)      // build update plan
 
 	return &plan, nil
 }
 
-// Swap binary only; rune-mcp applies on next spawn and runed needs manual restart
-func UpdateArtifact(ctx context.Context, manifestURL, step string, logf func(format string, args ...any)) (string, error) {
+func UpdateArtifact(ctx context.Context, manifestURL, step string, afterInstall func() error, logf func(format string, args ...any)) (string, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -144,6 +147,13 @@ func UpdateArtifact(ctx context.Context, manifestURL, step string, logf func(for
 		Log:         logf,
 	}); err != nil {
 		return "", err
+	}
+
+	// Reload updated binary before recording
+	if afterInstall != nil {
+		if err := afterInstall(); err != nil {
+			return "", err
+		}
 	}
 
 	var spec ArtifactSpec

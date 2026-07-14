@@ -95,6 +95,46 @@ func TestRunRuned_StatusNotRunning(t *testing.T) {
 	}
 }
 
+func TestRunRuned_ReloadNotRunning(t *testing.T) {
+	runedEnv(t) // no supervisor listening
+
+	var stdout, stderr bytes.Buffer
+	if code := runRuned(context.Background(), []string{"--reload"}, &stdout, &stderr); code != 1 {
+		t.Errorf("exit = %d, want 1 (no supervisor to reload)", code)
+	}
+	if !strings.Contains(stdout.String(), "not running") {
+		t.Errorf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunRuned_ReloadFailed(t *testing.T) {
+	paths := runedEnv(t)
+
+	ln, err := net.Listen("unix", paths.SupervisorSock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var req map[string]any
+		_ = json.NewDecoder(conn).Decode(&req)
+		_ = json.NewEncoder(conn).Encode(map[string]any{"ok": false, "error": "restart failed to start"})
+	}()
+
+	var stdout, stderr bytes.Buffer
+	if code := runRuned(context.Background(), []string{"--reload"}, &stdout, &stderr); code != 1 {
+		t.Errorf("exit = %d, want 1 (reload reported failure)", code)
+	}
+	if !strings.Contains(stdout.String(), "reload failed") {
+		t.Errorf("stdout = %q, want 'reload failed'", stdout.String())
+	}
+}
+
 func TestRunRuned_StatusRunning(t *testing.T) {
 	paths := runedEnv(t)
 
