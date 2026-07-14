@@ -246,7 +246,7 @@ mcp__plugin_rune_rune__capture(
 2. **DO NOT** explore the filesystem or read system files
 3. **DO NOT** capture the same decision twice in one session
 4. Keep reports concise — one line per capture
-5. When in doubt about whether to capture, err on the side of NOT capturing — false negatives are recoverable via `/rune:capture`, but false positives erode user trust
+5. When in doubt, capture — the server-side novelty filter deduplicates against team memory, recall ranking demotes noise, and stale records get corrected when recall resurfaces them. Under-capture is the costlier failure: a missed insight is invisible and nothing downstream can recover it
 
 ## Session-End Sweep
 
