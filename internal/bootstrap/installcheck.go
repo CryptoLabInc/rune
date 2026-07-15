@@ -31,16 +31,16 @@ const (
 )
 
 const (
-	CheckRuneConfig  = "rune_config"
-	CheckConsoleCreds  = "console_creds"
-	CheckRunedBinary = "runed_binary"
-	CheckModelFile   = "model_file"
-	CheckSocket      = "daemon_socket"
-	CheckSpawnLock   = "spawn_lock"
+	CheckRuneConfig   = "rune_config"
+	CheckConsoleCreds = "console_creds"
+	CheckRunedBinary  = "runed_binary"
+	CheckModelFile    = "model_file"
+	CheckSocket       = "daemon_socket"
+	CheckSpawnLock    = "spawn_lock"
 )
 
 type runeMCPConfig struct {
-	Console    *runeConsoleBlock    `json:"console,omitempty"`
+	Console  *runeConsoleBlock  `json:"console,omitempty"`
 	Embedder *runeEmbedderBlock `json:"embedder,omitempty"`
 }
 
