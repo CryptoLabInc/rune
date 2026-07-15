@@ -10,7 +10,7 @@ Follow these steps:
 
 2. Read the config and display the basic configuration section.
 
-3. Call the `diagnostics` MCP tool to get health data. If `diagnostics` is unavailable, fall back to `vault_status`.
+3. Call the `diagnostics` MCP tool to get health data. If `diagnostics` is unavailable, fall back to `console_status`.
 
 4. Display a status report using the diagnostics response:
 
@@ -21,11 +21,11 @@ State: Active / Dormant
 
 Configuration:
   Config file   : ~/.rune/config.json
-  Vault Endpoint: <url or "not set">
-  Vault Token   : <masked or "not set">
+  Console Endpoint: <url or "not set">
+  Console Token   : <masked or "not set">
 
 System Health (from diagnostics):
-  Vault         : healthy / unreachable
+  Console         : healthy / unreachable
   Encryption Key: loaded (key_id: <id>) / not loaded
   Agent DEK     : loaded / not loaded
   Scribe        : ready / not initialized
@@ -41,7 +41,7 @@ MCP Tools:
 5. Add recommendations based on what is missing:
    - Config missing: "Run `/rune:configure` (or `$rune configure` for Codex CLI) to set up"
    - State dormant: "Run `/rune:activate` (or `$rune activate` for Codex CLI) to enable"
-   - Keys not loaded: "Check Vault connection — keys are fetched from Vault at startup"
+   - Keys not loaded: "Check Console connection — keys are fetched from Console at startup"
    - Pipelines not initialized: "Run `reload_pipelines` or restart the MCP server"
 
 Use checkmarks for healthy items, X marks for issues.
