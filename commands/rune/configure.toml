@@ -4,15 +4,22 @@ description = "Set up Rune credentials and write ~/.rune/config.json"
 prompt = """
 You are configuring Rune, an FHE-encrypted organizational memory system.
 
-Collect the following credentials from the user, one at a time:
+PREFERRED — registration string: if the user has a `runev1_…` string from their
+Rune invite email, that is all they need. Call the configure MCP tool with
+`{"registration_string": "runev1_…"}` and skip the manual collection below — the
+server runs the 3-stage bootstrap (fetch+pin the Console CA, unwrap the one-time
+handle into the real token, write config). Treat the string as a credential;
+never echo it. Fall through to manual entry only when there is no string.
 
-1. **Vault Endpoint** (required) — e.g. `tcp://vault-myteam.oci.envector.io:50051`
+Manual fallback — collect the following from the user, one at a time:
+
+1. **Console Endpoint** (required) — e.g. `tcp://console.rune.team:50051`
    - If the user enters a value without a scheme prefix (no `tcp://`, `http://`, or `https://`), auto-prepend `tcp://`.
-2. **Vault Token** (required) — a base64url hash, e.g. `dG9rLWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1`
+2. **Console Token** (required) — an `evt_…` access token from the Console admin.
 
 Then ask the TLS question:
 
-**"How does your Vault server handle TLS?"**
+**"How does your Console server handle TLS?"**
 
 1. **Self-signed certificate** — "My team uses a self-signed CA"
    - Follow-up: ask for the path to CA certificate PEM file
@@ -22,7 +29,7 @@ Then ask the TLS question:
    - Inform user: "CA certificate copied to ~/.rune/certs/ca.pem"
    → config: `ca_cert: "~/.rune/certs/ca.pem"`, `tls_disable: false`
 
-2. **Public CA (default)** — "Vault uses a publicly-signed certificate (e.g., Let's Encrypt)"
+2. **Public CA (default)** — "Console uses a publicly-signed certificate (e.g., Let's Encrypt)"
    - No additional input needed, system CA handles verification
    → config: `ca_cert: ""`, `tls_disable: false`
 
@@ -40,13 +47,13 @@ Then write `~/.rune/config.json` with this structure (chmod 600 after writing):
 
 ```json
 {
-  "vault": {"endpoint": "<vault_endpoint>", "token": "<vault_token>", "ca_cert": "<ca_cert or empty>", "tls_disable": false},
+  "console": {"endpoint": "<console_endpoint>", "token": "<console_token>", "ca_cert": "<ca_cert or empty>", "tls_disable": false},
   "state": "dormant",
   "metadata": {"configVersion": "2.0", "lastUpdated": "<ISO timestamp>"}
 }
 ```
 
-Note: enVector credentials are no longer stored locally — they are delivered automatically via the Vault bundle at session start.
+Note: the FHE keys are never stored locally — the Console is the sole key holder and delivers the agent manifest (public EncKey + agent_dek) over the authenticated connection at session start.
 
 After writing the config, show a summary:
 
@@ -54,7 +61,7 @@ After writing the config, show a summary:
 Rune Configuration Complete
 ============================
   Config    : ~/.rune/config.json
-  Vault TLS : <enabled (system CA) | enabled (custom CA) | disabled>
+  Console TLS : <enabled (system CA) | enabled (custom CA) | disabled>
   State     : dormant (run /rune:activate or $rune activate to enable)
 ```
 

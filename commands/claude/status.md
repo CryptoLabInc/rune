@@ -1,6 +1,6 @@
 ---
 description: Check Rune plugin activation status and infrastructure health
-allowed-tools: Bash(cat ~/.rune/*), Bash(ls:*), Read, mcp__plugin_rune_rune__diagnostics, mcp__plugin_rune_rune__vault_status
+allowed-tools: Bash(cat ~/.rune/*), Bash(ls:*), Read, mcp__plugin_rune_rune__diagnostics, mcp__plugin_rune_rune__console_status
 ---
 
 # /rune:status — Plugin Status
@@ -13,7 +13,7 @@ Read `~/.rune/config.json` and show a status report.
 
 2. Read the config and display the basic configuration section.
 
-3. Call the `diagnostics` MCP tool to get system health. If unavailable, fall back to `vault_status`.
+3. Call the `diagnostics` MCP tool to get system health. If unavailable, fall back to `console_status`.
 
 4. Display the full status report:
 
@@ -26,10 +26,10 @@ Dormant Since:  <timestamp>  (only when dormant with a timestamp)
 
 Configuration:
   [check] Config file: ~/.rune/config.json
-  [check] Vault Endpoint: <url or "not set">
+  [check] Console Endpoint: <url or "not set">
 
 System Health:
-  [check] Vault         : healthy / unreachable
+  [check] Console         : healthy / unreachable
   [check] Encryption Key: loaded (key_id) / not loaded
   [check] Agent DEK     : loaded / not loaded
   [check] Scribe        : ready / not initialized
@@ -54,14 +54,14 @@ Use checkmarks for healthy items, X marks for issues.
 - Omit the entire `(model: ..., dim: ...)` parenthetical when the embedder is not initialized (i.e. `model` empty AND `socket_path` empty — pre-boot). In that case render just `Embedder : not initialized`.
 
 **Dormant Reason Display**: When `dormant_reason` is present in config or diagnostics, translate reason code into a user-friendly message:
-- `not_configured`: "Rune is not configured yet. Run `/rune:configure` to set up Vault credentials."
-- `vault_unconfigured`: "Vault endpoint or token is missing in config. Run `/rune:configure`."
+- `not_configured`: "Rune is not configured yet. Run `/rune:configure` to set up Console credentials."
+- `console_unconfigured`: "Console endpoint or token is missing in config. Run `/rune:configure`."
 - `user_deactivated`: "Manually deactivated by user via `/rune:deactivate`. Run `/rune:activate` to resume."
 - `invalid_state`: "config.json has an unknown state value. Re-run `/rune:configure` to reset."
 - Other/unknown: show raw reason string with "Run `/rune:activate` to retry."
 
-**Boot Error Display** (`vault.last_boot_error`): When
-`diagnostics.vault.last_boot_error` is set (regardless of `state` — a transient
+**Boot Error Display** (`console.last_boot_error`): When
+`diagnostics.console.last_boot_error` is set (regardless of `state` — a transient
 failure keeps the persisted `state` at `"active"` while the boot loop retries),
 render its `hint` field prominently in the **Recommendations** section. The boot
 loop has already classified the root cause — relay it verbatim instead of
@@ -79,12 +79,13 @@ Recommendations:
 ```
 
 Examples:
-- `kind=vault_tls_handshake` → "CA cert at … does not verify the server cert.
+- `kind=console_tls_handshake` → "CA cert at … does not verify the server cert.
   The CA was likely regenerated on the server side. Re-fetch from your
-  Vault admin and replace `~/.rune/certs/ca.pem`."
-- `kind=vault_auth` → "Vault rejected the token. Re-issue with
-  `runevault token issue --user <name> --role member`."
-- `kind=vault_network` → "Vault endpoint `<endpoint>` is not reachable.
+  Console admin and replace `~/.rune/certs/ca.pem`."
+- `kind=console_auth` → "Console rejected the token (expired/revoked/consumed).
+  Ask your Console admin for a fresh invite and re-run `/rune:configure` with
+  the new registration string."
+- `kind=console_network` → "Console endpoint `<endpoint>` is not reachable.
   Verify the host/port and your network/firewall."
 - `kind=embedder_unreachable` → "Embedder daemon (`runed`) is not running on
   its UDS socket. Re-run `/rune:activate` to (re)spawn it."
