@@ -16,6 +16,19 @@ import (
 const mcpSelfhealBudget = 25 * time.Second // (download:25s + (exec + MCP handshake):5s) < plugin manifest 30s MCP connection timeout
 
 func runMCPServer(ctx context.Context, args []string, stderr io.Writer) int {
+	// Dev override: point the plugin at a locally-built rune-mcp (e.g. a feature
+	// branch that the release pin does not yet ship). When RUNE_MCP_BIN is set we
+	// exec that binary directly and skip install + auto-update entirely, so the
+	// pinned release is never fetched over it.
+	if dev := os.Getenv("RUNE_MCP_BIN"); dev != "" {
+		if _, statErr := os.Stat(dev); statErr != nil {
+			fmt.Fprintf(stderr, "rune: RUNE_MCP_BIN=%s not usable: %v\n", dev, statErr)
+			return 127
+		}
+		fmt.Fprintf(stderr, "rune: using dev rune-mcp override %s (install + auto-update skipped)\n", dev)
+		return execInstalledBinary(ctx, filepath.Dir(dev), filepath.Base(dev), args, nil, stderr)
+	}
+
 	paths, err := bootstrap.Resolve()
 	if err != nil {
 		fmt.Fprintf(stderr, "rune: cannot resolve home directories: %v\n", err)
