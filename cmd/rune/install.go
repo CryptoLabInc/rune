@@ -73,7 +73,7 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		} else {
 			fmt.Fprintln(stderr, "ready.")
 			fmt.Fprintln(stderr, "next:")
-			fmt.Fprintln(stderr, "  1. in Claude, run /rune:configure to set up Vault credentials")
+			fmt.Fprintln(stderr, "  1. in Claude, run /rune:configure to set up Console credentials")
 			fmt.Fprintln(stderr, "  2. then /rune:activate")
 		}
 	}
