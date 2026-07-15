@@ -32,7 +32,7 @@ const (
 
 const (
 	CheckRuneConfig  = "rune_config"
-	CheckVaultCreds  = "vault_creds"
+	CheckConsoleCreds  = "console_creds"
 	CheckRunedBinary = "runed_binary"
 	CheckModelFile   = "model_file"
 	CheckSocket      = "daemon_socket"
@@ -40,11 +40,11 @@ const (
 )
 
 type runeMCPConfig struct {
-	Vault    *runeVaultBlock    `json:"vault,omitempty"`
+	Console    *runeConsoleBlock    `json:"console,omitempty"`
 	Embedder *runeEmbedderBlock `json:"embedder,omitempty"`
 }
 
-type runeVaultBlock struct {
+type runeConsoleBlock struct {
 	Endpoint string `json:"endpoint"`
 	Token    string `json:"token"`
 }
@@ -69,7 +69,7 @@ func RunInstallChecks(ctx context.Context) *InstallChecks {
 
 	cfg, cfgChecks := loadRuneConfigChecks(paths)
 	checks := append([]InstallCheck{}, cfgChecks...)
-	checks = append(checks, vaultCredsCheck(cfg))
+	checks = append(checks, consoleCredsCheck(cfg))
 	checks = append(checks, executableCheck(CheckRunedBinary, paths.RunedBinary, "agent: invoke "+AgentInstallRecoveryHint()+" to fetch runed"))
 	checks = append(checks, modelFileCheck(paths.RunedModels))
 	checks = append(checks, socketCheck(paths.RunedSocket, cfg))
@@ -92,7 +92,7 @@ func loadRuneConfigChecks(paths *Paths) (*runeMCPConfig, []InstallCheck) {
 				Name:    CheckRuneConfig,
 				Status:  StatusFail,
 				Detail:  fmt.Sprintf("%s does not exist", paths.RuneConfig),
-				FixHint: "run /rune:configure to set up Vault credentials",
+				FixHint: "run /rune:configure to set up Console credentials",
 			}}
 		}
 
@@ -121,10 +121,10 @@ func loadRuneConfigChecks(paths *Paths) (*runeMCPConfig, []InstallCheck) {
 	}}
 }
 
-func vaultCredsCheck(cfg *runeMCPConfig) InstallCheck {
+func consoleCredsCheck(cfg *runeMCPConfig) InstallCheck {
 	if cfg == nil {
 		return InstallCheck{
-			Name:    CheckVaultCreds,
+			Name:    CheckConsoleCreds,
 			Status:  StatusFail,
 			Detail:  "config file unreadable",
 			FixHint: "fix rune_config above first",
@@ -132,25 +132,25 @@ func vaultCredsCheck(cfg *runeMCPConfig) InstallCheck {
 	}
 
 	var missing []string
-	if cfg.Vault == nil || cfg.Vault.Endpoint == "" {
-		missing = append(missing, "vault.endpoint")
+	if cfg.Console == nil || cfg.Console.Endpoint == "" {
+		missing = append(missing, "console.endpoint")
 	}
-	if cfg.Vault == nil || cfg.Vault.Token == "" {
-		missing = append(missing, "vault.token")
+	if cfg.Console == nil || cfg.Console.Token == "" {
+		missing = append(missing, "console.token")
 	}
 	if len(missing) > 0 {
 		return InstallCheck{
-			Name:    CheckVaultCreds,
+			Name:    CheckConsoleCreds,
 			Status:  StatusFail,
 			Detail:  fmt.Sprintf("missing: %s", strings.Join(missing, ", ")),
-			FixHint: "run /rune:configure to provide Vault endpoint and token",
+			FixHint: "run /rune:configure to provide Console endpoint and token",
 		}
 	}
 
 	return InstallCheck{
-		Name:   CheckVaultCreds,
+		Name:   CheckConsoleCreds,
 		Status: StatusOK,
-		Detail: cfg.Vault.Endpoint,
+		Detail: cfg.Console.Endpoint,
 	}
 }
 

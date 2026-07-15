@@ -11,13 +11,13 @@ import (
 
 // writeConfig writes a valid rune-mcp config.json to runeHome/config.json.
 // Tests use this to set up the "configure already done" baseline.
-func writeConfig(t *testing.T, runeHome string, vaultEndpoint, vaultToken string) {
+func writeConfig(t *testing.T, runeHome string, consoleEndpoint, consoleToken string) {
 	t.Helper()
 	if err := os.MkdirAll(runeHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	cfg := runeMCPConfig{
-		Vault: &runeVaultBlock{Endpoint: vaultEndpoint, Token: vaultToken},
+		Console: &runeConsoleBlock{Endpoint: consoleEndpoint, Token: consoleToken},
 	}
 	data, _ := json.Marshal(cfg)
 	if err := os.WriteFile(filepath.Join(runeHome, "config.json"), data, 0o600); err != nil {
@@ -51,7 +51,7 @@ func findCheck(t *testing.T, r *InstallChecks, name string) InstallCheck {
 
 func TestInstallChecks_HealthyInstall(t *testing.T) {
 	rune, runed := setRealms(t)
-	writeConfig(t, rune, "tcp://vault.example:50051", "evt_test")
+	writeConfig(t, rune, "tcp://console.example:50051", "evt_test")
 	writeFakeBinary(t, filepath.Join(runed, "bin", "runed"))
 	// Plausibly-real GGUF: a file with size >= minModelSize.
 	if err := os.MkdirAll(filepath.Join(runed, "models"), 0o700); err != nil {
@@ -100,13 +100,13 @@ func TestInstallChecks_CorruptConfig(t *testing.T) {
 	}
 }
 
-func TestInstallChecks_MissingVaultFields(t *testing.T) {
+func TestInstallChecks_MissingConsoleFields(t *testing.T) {
 	rune, _ := setRealms(t)
 	writeConfig(t, rune, "", "") // both empty
 	r := RunInstallChecks(context.Background())
-	creds := findCheck(t, r, CheckVaultCreds)
+	creds := findCheck(t, r, CheckConsoleCreds)
 	if creds.Status != StatusFail {
-		t.Errorf("vault_creds should fail on empty fields; got %+v", creds)
+		t.Errorf("console_creds should fail on empty fields; got %+v", creds)
 	}
 }
 

@@ -16,7 +16,7 @@
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/rune",
       "args": ["mcp-server"],
       "timeout": 30000,
-      "description": "Rune MCP server (talks to Vault + embedder). The command is the plugin's bash wrapper, which always exists at session start; on first run it self-install rune-mcp, then exec - MCP server comes online in the same session with no restart."
+      "description": "Rune MCP server (talks to Console + embedder). The command is the plugin's bash wrapper, which always exists at session start; on first run it self-install rune-mcp, then exec - MCP server comes online in the same session with no restart."
     }
   }
 }
