@@ -224,7 +224,7 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 		case compat.BelowMinimum && allowOutdated:
 			fmt.Fprintf(stderr, "warning: applied with --allow-plugin-outdated; plugin %s is below the required %s - update the plugin.\n", compat.Installed, compat.Minimum)
 		case compat.Behind:
-			fmt.Fprintf(stdout, "note: plugin package is %s; these binaries expect %s. Update plugin to keep commands/agents/SKILL.md in sync best.\n", compat.Installed, compat.Expected)
+			fmt.Fprintf(stdout, "note: plugin package is %s; these binaries expect %s. Update plugin to keep commands/agents in sync best.\n", compat.Installed, compat.Expected)
 		}
 	}
 
