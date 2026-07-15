@@ -1,2 +1,5 @@
+# NOTE: the registration-string path in commands/*/configure.md needs a rune-mcp
+# that accepts `registration_string` on the configure tool (3-stage bootstrap).
+# Bump rune_mcp_version to that release before relying on it.
 rune_mcp_version: v0.1.0
 runed_version: v0.1.0

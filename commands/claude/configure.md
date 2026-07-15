@@ -5,9 +5,38 @@ allowed-tools: Bash(cp:*), Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGI
 
 # /rune:configure — Setup & Configuration
 
-Single entry after `claude plugin install rune`. Collects Vault credentials,
-calls `mcp__plugin_rune_rune__configure` (atomic 0600 write + soft Vault probe), and
+Single entry after `claude plugin install rune`. Collects credentials,
+calls `mcp__plugin_rune_rune__configure` (atomic 0600 write + soft console probe), and
 hands off to `mcp__plugin_rune_rune__activate` to bring pipelines online.
+
+There are two ways to configure. **Prefer the registration string** — it is the
+one-paste path a teammate gets by email; the manual endpoint/token flow below is
+the fallback for operators who were handed raw values.
+
+## Registration string path (recommended)
+
+If the user has a **registration string** — a single opaque token that starts
+with `runev1_`, delivered in their Rune invite email — that is all they need.
+Do NOT ask for endpoint, token, or CA separately.
+
+1. Get the string: if `$ARGUMENTS` already contains a `runev1_…` token, use it;
+   otherwise ask once ("Paste your Rune registration string (starts with
+   `runev1_`)"). Treat it as a **credential** — never echo it back.
+2. Call `mcp__plugin_rune_rune__configure` with a single field:
+   ```jsonc
+   { "registration_string": "runev1_…" }
+   ```
+   The server runs the 3-stage bootstrap itself: decode → fetch the console CA
+   over an untrusted channel and verify it against the pinned SHA-256 → unwrap
+   the one-time handle into the real access token → write `~/.rune/config.json`
+   (endpoint / token / pinned `ca_cert`) and probe. The one-time handle is
+   consumed on first use, so a second `configure` with the SAME string will fail
+   ("already used") — that is the tamper signal; the user must request a fresh
+   invite.
+3. Branch on the response exactly as in "Decide what to do next" (§5) below, then
+   call `mcp__plugin_rune_rune__activate`. Skip the manual collection steps.
+
+Fall through to the manual flow only when the user has no registration string.
 
 The MCP server is a Go binary at `~/.rune/bin/rune-mcp`. The plugin manifest
 spawns it via the committed bash wrapper `${CLAUDE_PLUGIN_ROOT}/bin/rune
