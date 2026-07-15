@@ -10,12 +10,31 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 )
+
+// shortSockDir returns an auto-cleaned temp dir under a short base. macOS caps
+// unix-socket paths at 104 bytes and the default t.TempDir() ($TMPDIR =
+// /var/folders/...) already runs ~90 chars, so a supervisor.sock beneath it
+// overflows bind(2)/connect(2). Anchor under /tmp on unix.
+func shortSockDir(t *testing.T) string {
+	t.Helper()
+	base := "/tmp"
+	if runtime.GOOS == "windows" {
+		base = ""
+	}
+	dir, err := os.MkdirTemp(base, "sv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
 
 const fakeRunedEnv = "RUNE_SUPERVISOR_FAKE_RUNED_BEHAVIOR"
 const crashCountFileEnv = "RUNE_SUPERVISOR_FAKE_CRASH_COUNT_FILE"
@@ -227,7 +246,7 @@ func TestWatcher_ControlStatus(t *testing.T) {
 	t.Setenv(fakeRunedEnv, "sleep")
 
 	cfg := testWatcherConfig(t)
-	cfg.SocketPath = filepath.Join(t.TempDir(), "supervisor.sock")
+	cfg.SocketPath = filepath.Join(shortSockDir(t), "supervisor.sock")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -274,7 +293,7 @@ func TestWatcher_ControlSocketReload(t *testing.T) {
 	t.Setenv(crashCountFileEnv, countFile)
 
 	cfg := testWatcherConfig(t)
-	cfg.SocketPath = filepath.Join(t.TempDir(), "supervisor.sock")
+	cfg.SocketPath = filepath.Join(shortSockDir(t), "supervisor.sock")
 	cfg.ShutdownGrace = 500 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())

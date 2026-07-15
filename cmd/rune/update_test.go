@@ -47,7 +47,7 @@ func updateManifestServer(t *testing.T, runeMCPVer, runedVer string) string {
 func setTestEnv(t *testing.T) *bootstrap.Paths {
 	t.Helper()
 
-	dir := t.TempDir()
+	dir := shortTempDir(t)
 	t.Setenv("RUNE_HOME", filepath.Join(dir, "rune"))
 	t.Setenv("RUNED_HOME", filepath.Join(dir, "runed"))
 
