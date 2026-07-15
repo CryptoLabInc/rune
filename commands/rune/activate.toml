@@ -1,4 +1,4 @@
-# TODO(v0.4 migration): v0.3-stale, bootstrap-mcp.sh runtime block removed (script deleted); rest still uses envector.* fields + python mcp check.
+# TODO(v0.4 migration): v0.3-stale; rest still does a manual python mcp check.
 # Regenerate from commands/claude/activate.md before re-enabling Codex/Gemini.
 description = "Activate Rune by validating infrastructure and setting state to active"
 prompt = """
@@ -9,11 +9,13 @@ Follow these steps:
 1. Read `~/.rune/config.json`. If it does not exist, respond:
    "Not configured. Run `/rune:configure` first." and stop.
 
-2. Verify required fields exist: `vault.endpoint`, `vault.token`, `envector.endpoint`, `envector.api_key`.
-   If any are missing or empty, show what is missing and suggest `/rune:configure` (or `$rune configure` for Codex CLI).
+2. Verify the console block is configured: `console.endpoint` plus a token source
+   (`console.token`, or `console.token_storage: "keyring"` with the token in the
+   OS keyring). If the endpoint or token source is missing, show what is missing
+   and suggest `/rune:configure` (or `$rune configure` for Codex CLI).
 
 3. Validate infrastructure connectivity:
-   - For Vault endpoint, parse the scheme:
+   - For Console endpoint, parse the scheme:
      - If `http://` or `https://`: test with `curl -sf <endpoint>/health`
      - If `tcp://`: extract host and port, test with Python (portable, works on macOS zsh and Linux):
        `python3 -c "import socket; s=socket.socket(); s.settimeout(10); s.connect(('<host>', <port>)); print('OK'); s.close()"`

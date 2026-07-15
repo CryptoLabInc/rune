@@ -1,6 +1,6 @@
 ---
 description: Activate Rune (resume from dormant) and verify pipelines come up healthy
-allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__plugin_rune_rune__activate, mcp__plugin_rune_rune__diagnostics, mcp__plugin_rune_rune__vault_status
+allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__plugin_rune_rune__activate, mcp__plugin_rune_rune__diagnostics, mcp__plugin_rune_rune__console_status
 ---
 
 # /rune:activate — Activate Plugin
@@ -41,7 +41,7 @@ error and stop — do NOT loop. The user never types `rune install` themselves.
 That's it - no Read, no Edit, no manual state inspection. The MCP tool
 performs:
 
-- `config.Load()`: if missing or vault block empty, returns
+- `config.Load()`: if missing or console block empty, returns
   `status: "configure_required"` without touching the boot loop
 - `os.Stat(~/.runed/embedding.sock)`: if absent, returns
   `status: "install_pending"`
@@ -58,7 +58,7 @@ The response shape:
   "ok": true,
   "status": "configure_required" | "install_pending" |
             "waiting_for_bootstrap" |
-            "active" | "waiting_for_vault" | "dormant",
+            "active" | "waiting_for_console" | "dormant",
   "hint": "<actionable string when status is not active>",
   "bootstrap": {                              // only when status == "waiting_for_bootstrap"
     "phase": "FETCHING_LLAMA_SERVER" | "FETCHING_MODEL" | "STARTING_LLAMA_SERVER",
@@ -72,8 +72,8 @@ The response shape:
 
 ### 2. Branch on `status`
 
-**`configure_required`** - Vault credentials missing.
-- Render: `"Rune is not yet configured. Run /rune:configure to set Vault credentials."`
+**`configure_required`** - Console credentials missing.
+- Render: `"Rune is not yet configured. Run /rune:configure to set Console credentials."`
 - Use the `hint` verbatim - it already names the exact next step.
 - Stop. Do NOT call `mcp__plugin_rune_rune__diagnostics`; the agent already has the answer.
 
@@ -118,7 +118,7 @@ it can serve embeddings.
   per-subsystem summary below. Skip if you only need to confirm activation;
   `response.reload.state == "active"` is authoritative.
 
-**`waiting_for_vault`** or **`dormant`** - boot loop ran but didn't reach Active.
+**`waiting_for_console`** or **`dormant`** - boot loop ran but didn't reach Active.
 - Fast-fail. Look at `response.reload.last_boot_error` — the boot loop has
   already classified the root cause.
 - Render the recovery as **one block**: the `hint` from
@@ -137,7 +137,7 @@ the specific error on the same line):
 ```
 Infrastructure Validation
 =========================
-  Vault           : ✓ reachable (<endpoint>)
+  Console           : ✓ reachable (<endpoint>)
   Encryption Key  : ✓ loaded (key_id: <id>)
   Agent DEK       : ✓ loaded
   Scribe          : ✓ initialized
@@ -157,5 +157,5 @@ Then: `"Rune activated. Organizational memory is now online."`
   loop on dormant to active transitions).
 - For an older rune-mcp binary without the `activate` tool, fall back to
   the legacy flow: Read config, call `reload_pipelines` directly, and branch
-  on `diagnostics.vault.last_boot_error`. The SDK will surface a
+  on `diagnostics.console.last_boot_error`. The SDK will surface a
   `method-not-found` error to signal the missing tool.
