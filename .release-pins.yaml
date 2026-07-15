@@ -1,5 +1,5 @@
-# NOTE: the registration-string path in commands/*/configure.md needs a rune-mcp
-# that accepts `registration_string` on the configure tool (3-stage bootstrap).
-# Bump rune_mcp_version to that release before relying on it.
-rune_mcp_version: v0.1.0
-runed_version: v0.1.0
+# v1.0.0-alpha ships the registration-string path used by commands/*/configure.md:
+# a rune-mcp whose configure tool accepts `registration_string` (3-stage bootstrap),
+# with the matching runed (centroid routing / SetCentroids).
+rune_mcp_version: v1.0.0-alpha
+runed_version: v1.0.0-alpha
