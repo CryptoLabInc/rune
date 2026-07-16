@@ -33,8 +33,16 @@ Do NOT ask for endpoint, token, or CA separately.
    consumed on first use, so a second `configure` with the SAME string will fail
    ("already used") — that is the tamper signal; the user must request a fresh
    invite.
-3. Branch on the response exactly as in "Decide what to do next" (§5) below, then
-   call `mcp__plugin_rune_rune__activate`. Skip the manual collection steps.
+3. **If the FIRST call returns `ok:false` with
+   `error.code == "REGISTRATION_CONSUMED"`**: the handle was redeemed but
+   writing `~/.rune/config.json` failed afterward, so nothing was saved. The
+   string is now spent — do NOT retry it. Surface `error.recovery_hint`
+   verbatim, have the user clear the local problem (disk space / `~/.rune`
+   permissions), and tell them to request a **fresh invite**. Do not call
+   `activate`.
+4. Otherwise branch on the response exactly as in "Decide what to do next" (§5)
+   below, then call `mcp__plugin_rune_rune__activate`. Skip the manual
+   collection steps.
 
 Fall through to the manual flow only when the user has no registration string.
 
