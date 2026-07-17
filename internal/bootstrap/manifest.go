@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -78,10 +77,11 @@ func FetchManifest(ctx context.Context, manifestURL string, logf func(string, ..
 		return nil, err
 	}
 
+	// Unknown fields are tolerated: every deployed binary polls the shared
+	// "latest" release channel, so a future manifest field must degrade to
+	// a no-op on older binaries instead of bricking their update path.
 	var m Manifest
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&m); err != nil {
+	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, fmt.Errorf("manifest: parse JSON: %w", err)
 	}
 	if m.Version != ManifestVersion {
