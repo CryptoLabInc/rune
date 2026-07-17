@@ -132,7 +132,7 @@ func TestRenderVerifyText_FailFlagsStatus(t *testing.T) {
 	r := &bootstrap.InstallChecks{
 		OK: false,
 		Checks: []bootstrap.InstallCheck{
-			{Name: "vault_creds", Status: bootstrap.StatusFail, Detail: "missing token", FixHint: "/rune:configure"},
+			{Name: "console_creds", Status: bootstrap.StatusFail, Detail: "missing token", FixHint: "/rune:configure"},
 		},
 	}
 	var buf bytes.Buffer

@@ -27,7 +27,6 @@ temp/
 
 # Keys
 keys/
-vault_keys/
 *.pem
 *.key
 
