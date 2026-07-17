@@ -40,15 +40,6 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Python virtual environment
-.venv/
-venv/
-__pycache__/
-.pytest_cache/
-*.pyc
-*.pyo
-*.pyd
-
 # Git worktrees
 .worktrees/
 
