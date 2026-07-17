@@ -19,8 +19,13 @@ type installFixture struct {
 	runedSHA string
 	mcpSHA   string
 
+	// CLI self-update artifact; the manifest advertises it only while
+	// cliVersion is set (assign after newFixture, like mismatchStep)
+	cli        []byte
+	cliVersion string
+
 	// Override SHA in the manifest to simulate a checksum mismatch
-	mismatchStep string // "" | StepRuned | StepRuneMCP
+	mismatchStep string // "" | StepRuned | StepRuneMCP | StepRuneCLI
 
 	hits map[string]int
 }
@@ -39,24 +44,30 @@ func newFixture(t *testing.T) *installFixture {
 	mux.HandleFunc("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
 		runedSHA := fx.runedSHA
 		mcpSHA := fx.mcpSHA
+		cliSHA := sha256Hex(fx.cli)
 
 		switch fx.mismatchStep {
 		case StepRuned:
 			runedSHA = "00" + runedSHA[2:]
 		case StepRuneMCP:
 			mcpSHA = "00" + mcpSHA[2:]
+		case StepRuneCLI:
+			cliSHA = "00" + cliSHA[2:]
 		}
 
+		plat := map[string]any{
+			"runed":    map[string]any{"url": fx.srv.URL + "/runed", "sha256": runedSHA, "size": len(fx.runed)},
+			"rune_mcp": map[string]any{"url": fx.srv.URL + "/rune-mcp", "sha256": mcpSHA, "size": len(fx.runeMCP)},
+		}
 		manifest := map[string]any{
 			"version":          1,
 			"rune_mcp_version": "v0.1.0-test",
 			"runed_version":    "v0.1.0-test",
-			"platforms": map[string]any{
-				PlatformTuple(): map[string]any{
-					"runed":    map[string]any{"url": fx.srv.URL + "/runed", "sha256": runedSHA, "size": len(fx.runed)},
-					"rune_mcp": map[string]any{"url": fx.srv.URL + "/rune-mcp", "sha256": mcpSHA, "size": len(fx.runeMCP)},
-				},
-			},
+			"platforms":        map[string]any{PlatformTuple(): plat},
+		}
+		if fx.cliVersion != "" {
+			manifest["cli_version"] = fx.cliVersion
+			plat["rune_cli"] = map[string]any{"url": fx.srv.URL + "/rune-cli", "sha256": cliSHA, "size": len(fx.cli)}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(manifest)
@@ -72,6 +83,12 @@ func newFixture(t *testing.T) *installFixture {
 
 	mux.HandleFunc("/runed", serveBinary("/runed", fx.runed))
 	mux.HandleFunc("/rune-mcp", serveBinary("/rune-mcp", fx.runeMCP))
+	// fx.cli is assigned after newFixture, so serve it per request
+	mux.HandleFunc("/rune-cli", func(w http.ResponseWriter, r *http.Request) {
+		fx.hits["/rune-cli"]++
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(fx.cli)))
+		_, _ = w.Write(fx.cli)
+	})
 
 	fx.srv = httptest.NewServer(mux)
 	t.Cleanup(fx.srv.Close)
