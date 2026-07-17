@@ -201,6 +201,214 @@ func dummyUpdateServer(t *testing.T, mcpBytes []byte, mcpVer, runedVer string) s
 	return srv.URL + "/manifest.json"
 }
 
+// Manifest server whose only outdated artifact is the CLI itself
+func cliUpdateServer(t *testing.T, cliBytes []byte, cliVer string) string {
+	t.Helper()
+	return cliUpdateServerWithPlugin(t, cliBytes, cliVer, "", "")
+}
+
+// As cliUpdateServer, plus optional plugin_version / min_plugin_version.
+func cliUpdateServerWithPlugin(t *testing.T, cliBytes []byte, cliVer, pluginVer, minPluginVer string) string {
+	t.Helper()
+
+	sum := sha256.Sum256(cliBytes)
+	cliSHA := hex.EncodeToString(sum[:])
+
+	var srv *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/manifest.json", func(w http.ResponseWriter, r *http.Request) {
+		m := map[string]any{
+			"version":          1,
+			"rune_mcp_version": "v0.1.0",
+			"runed_version":    "v0.1.0",
+			"cli_version":      cliVer,
+			"platforms": map[string]any{
+				bootstrap.PlatformTuple(): map[string]any{
+					"runed":    map[string]any{"url": "http://example.test/runed", "sha256": "aa", "size": 1},
+					"rune_mcp": map[string]any{"url": "http://example.test/rune-mcp", "sha256": "bb", "size": 1},
+					"rune_cli": map[string]any{"url": srv.URL + "/rune-cli", "sha256": cliSHA, "size": len(cliBytes)},
+				},
+			},
+		}
+		if pluginVer != "" {
+			m["plugin_version"] = pluginVer
+		}
+		if minPluginVer != "" {
+			m["min_plugin_version"] = minPluginVer
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(m)
+	})
+	mux.HandleFunc("/rune-cli", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(cliBytes)))
+		_, _ = w.Write(cliBytes)
+	})
+
+	srv = httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	return srv.URL + "/manifest.json"
+}
+
+func TestRunUpdate_ApplyRuneCLI(t *testing.T) {
+	paths := setTestEnv(t)
+	cli := []byte("freshly-updated-rune-cli")
+	url := cliUpdateServer(t, cli, "v9.9.9") // newer than runeVersion (v0.4.0-dev)
+	t.Setenv("RUNE_MANIFEST", url)
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0") // runed/rune_mcp current
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	if b, _ := os.ReadFile(paths.RuneCLIBinary); string(b) != string(cli) {
+		t.Errorf("CLI not swapped on disk: got %q", b)
+	}
+	if !strings.Contains(stdout.String(), "updated rune_cli") {
+		t.Errorf("expected a rune_cli applied message, got %q", stdout.String())
+	}
+}
+
+func TestRunUpdate_CheckNeverOffersCLIDowngrade(t *testing.T) {
+	paths := setTestEnv(t)
+	url := cliUpdateServer(t, []byte("older-cli"), "v0.0.1") // older than runeVersion
+	t.Setenv("RUNE_MANIFEST", url)
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--check"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "rune_cli") {
+		t.Errorf("downgrade must not be offered: %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "up to date") {
+		t.Errorf("expected up-to-date message, got %q", stdout.String())
+	}
+}
+
+// A released binary must poll the shared channel, not its own pinned
+// manifest - the pinned manifest always matches what is installed, so
+// polling it would report "up to date" forever.
+func TestRunUpdate_DefaultsToChannelNotPinnedManifest(t *testing.T) {
+	paths := setTestEnv(t)
+	channel := cliUpdateServer(t, []byte("cli-from-channel"), "v9.9.9")
+	pinned := updateManifestServer(t, "v0.1.0", "v0.1.0")
+
+	saved, savedChannel := manifestURL, updateManifestURL
+	t.Cleanup(func() { manifestURL, updateManifestURL = saved, savedChannel })
+	manifestURL, updateManifestURL = pinned, channel
+	t.Setenv("RUNE_MANIFEST", "")
+	writeAudit(t, paths, pinned, "v0.1.0", "v0.1.0") // current per the PINNED manifest
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), []string{"--check"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	// Only the channel advertises a newer CLI; the pinned manifest has none.
+	if !strings.Contains(stdout.String(), "rune_cli") {
+		t.Errorf("expected the channel's CLI update to be reported, got %q", stdout.String())
+	}
+}
+
+// An explicit --manifest-url overrides the baked channel.
+func TestRunUpdate_ExplicitManifestURLBeatsChannel(t *testing.T) {
+	paths := setTestEnv(t)
+	channel := cliUpdateServer(t, []byte("cli-from-channel"), "v9.9.9")
+	explicit := updateManifestServer(t, "v0.2.0", "v0.2.0")
+
+	saved, savedChannel := manifestURL, updateManifestURL
+	t.Cleanup(func() { manifestURL, updateManifestURL = saved, savedChannel })
+	manifestURL, updateManifestURL = "", channel
+	t.Setenv("RUNE_MANIFEST", "")
+	writeAudit(t, paths, explicit, "v0.1.0", "v0.2.0")
+
+	var stdout, stderr bytes.Buffer
+	code := runUpdate(context.Background(), []string{"--check", "--manifest-url", explicit}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "rune_mcp: v0.1.0 -> v0.2.0") {
+		t.Errorf("expected the explicit manifest to be used, got %q", out)
+	}
+	if strings.Contains(out, "rune_cli") {
+		t.Errorf("channel must not leak in when --manifest-url is given: %q", out)
+	}
+}
+
+// A channel behind this build (here: predating self-update, so no
+// cli_version) must never drag the runtime pair backwards.
+func TestRunUpdate_IgnoresChannelBehindThisBuild(t *testing.T) {
+	paths := setTestEnv(t)
+	// Old-schema channel manifest: no cli_version, older runtime pins
+	channel := updateManifestServer(t, "v0.1.0", "v0.1.0")
+
+	saved, savedChannel := manifestURL, updateManifestURL
+	t.Cleanup(func() { manifestURL, updateManifestURL = saved, savedChannel })
+	manifestURL, updateManifestURL = "", channel
+	t.Setenv("RUNE_MANIFEST", "")
+	// Bootstrapped from a newer, not-yet-promoted release
+	writeAudit(t, paths, channel, "v1.0.0-alpha", "v1.0.0-alpha")
+
+	var stdout, stderr bytes.Buffer
+	if code := runUpdate(context.Background(), nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr=%q)", code, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "channel is behind this build") {
+		t.Errorf("expected the behind-channel notice, got %q", out)
+	}
+	// The audit must still show the newer pair: nothing was rolled back.
+	rec, err := bootstrap.ReadInstalledManifest(paths)
+	if err != nil {
+		t.Fatalf("ReadInstalledManifest: %v", err)
+	}
+	if rec.RuneMCPVersion != "v1.0.0-alpha" || rec.RunedVersion != "v1.0.0-alpha" {
+		t.Errorf("stale channel downgraded the runtime pair: rune_mcp=%q runed=%q", rec.RuneMCPVersion, rec.RunedVersion)
+	}
+}
+
+// The plugin floor gates every step, the CLI included.
+func TestRunUpdate_PluginFloorBlocksCLI(t *testing.T) {
+	paths := setTestEnv(t)
+	cli := []byte("cli-that-must-not-land")
+	url := cliUpdateServerWithPlugin(t, cli, "v9.9.9", "1.0.0", "1.0.0")
+	t.Setenv("RUNE_MANIFEST", url)
+	writeAudit(t, paths, url, "v0.1.0", "v0.1.0")
+
+	proot := filepath.Join(shortTempDir(t), "plugin")
+	if err := os.MkdirAll(filepath.Join(proot, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 0.4.1 is below the manifest's 1.0.0 floor
+	if err := os.WriteFile(filepath.Join(proot, ".claude-plugin", "plugin.json"), []byte(`{"version":"0.4.1"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runUpdate(context.Background(), []string{"--plugin-root", proot}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr=%q)", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "refusing to apply") {
+		t.Errorf("expected a refusal, got %q", stderr.String())
+	}
+	if _, err := os.Stat(paths.RuneCLIBinary); !os.IsNotExist(err) {
+		t.Errorf("CLI must not be swapped while the plugin is below the floor (err=%v)", err)
+	}
+}
+
+func TestParseOnly_AcceptsRuneCLI(t *testing.T) {
+	set, err := parseOnly("rune_mcp,rune_cli")
+	if err != nil {
+		t.Fatalf("parseOnly: %v", err)
+	}
+	if !set[bootstrap.StepRuneCLI] || !set[bootstrap.StepRuneMCP] {
+		t.Errorf("set = %+v, want rune_mcp and rune_cli", set)
+	}
+}
+
 func TestRunUpdate_ApplyRuneMCP(t *testing.T) {
 	paths := setTestEnv(t)
 	mcp := []byte("freshly-updated-rune-mcp")
@@ -219,7 +427,7 @@ func TestRunUpdate_ApplyRuneMCP(t *testing.T) {
 		t.Errorf("expected an applied message, got %q", stdout.String())
 	}
 
-	plan, err := bootstrap.CheckUpdate(context.Background(), url, nil)
+	plan, err := bootstrap.CheckUpdate(context.Background(), url, runeVersion, nil)
 	if err != nil {
 		t.Fatalf("CheckUpdate: %v", err)
 	}
