@@ -23,6 +23,9 @@ func runVersion(w io.Writer) int {
 	} else {
 		fmt.Fprintln(w, "manifest missing: supply --manifest-url or RUNE_MANIFEST")
 	}
+	if updateManifestURL != "" {
+		fmt.Fprintf(w, "update channel: %s\n", updateManifestURL)
+	}
 
 	// Show latest installed rune-mcp/runed (skip if not installed yet)
 	if paths, err := bootstrap.Resolve(); err == nil {

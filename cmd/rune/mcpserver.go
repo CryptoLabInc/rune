@@ -76,7 +76,7 @@ var spawnUpdateFn = spawnDetachedUpdate // background update launcher
 var errBackgroundUnsupported = errors.New("detached background update not supported on this platform")
 
 func resolvedManifest() string {
-	m := manifestURL
+	m := updateChannel()
 	if env := os.Getenv("RUNE_MANIFEST"); env != "" {
 		m = env
 	}
