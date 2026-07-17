@@ -125,8 +125,6 @@ it can serve embeddings.
   `last_boot_error.hint` verbatim, then a single re-run suggestion
   (`/rune:configure` for credential issues, `/rune:activate` after fixing
   substrate). Do NOT retry, do NOT shell-probe with openssl/nc/etc.
-- Per-`kind` reference table lives in `commands/claude/configure.md` §5
-  for the rare case the hint needs supplementation.
 
 ### 3. Render success snapshot (active path only)
 
