@@ -1,0 +1,17 @@
+{
+  "description": "RUNE proactive-capture reminder injected at session start",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/rune-capture-hint.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
