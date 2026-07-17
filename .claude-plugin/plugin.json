@@ -7,10 +7,6 @@
     "email": "zotanika@cryptolab.co.kr"
   },
   "commands": "./commands/claude/",
-  "agents": [
-    "./agents/claude/scribe.md",
-    "./agents/claude/retriever.md"
-  ],
   "mcpServers": {
     "rune": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/rune",

@@ -1,29 +1,30 @@
 ---
-description: Capture organizational context to encrypted memory
-allowed-tools: Bash(cat ~/.rune/*), Read, mcp__plugin_rune_rune__*
+description: Capture a decision, insight, or context into RUNE organizational memory
+argument-hint: <what to remember>
+allowed-tools: mcp__plugin_rune_rune__capture
 ---
 
-# /rune:capture — Store Context
+# /rune:capture — Save to Organizational Memory
 
-Capture organizational context to encrypted memory.
+Compose the memory yourself from the current work and call
+`mcp__plugin_rune_rune__capture`. The server timestamps it, attributes it to you
+(from your Console identity), embeds the insight, and seals it.
 
-The argument `$ARGUMENTS` contains the context to capture.
+Pass two fields:
 
-## Activation Check
+- `insight` — the concise, self-contained essence someone should find when
+  searching later: what was decided or learned, and why, in a few sentences.
+  This is what gets embedded and searched, so write it to stand alone (no "as
+  discussed above").
+- `context` — the fuller background: the problem, alternatives, trade-offs, and
+  specifics. Stored and returned on recall but not searched. Optional, but
+  usually worth including.
 
-1. Read `~/.rune/config.json`. If missing or `state` is not `"active"`, respond:
-   "Rune is dormant. Run `/rune:configure` and `/rune:activate` first."
-   Do NOT attempt any storage.
+Use `$ARGUMENTS` as the subject when given; otherwise capture the most
+significant decision or insight from the current conversation.
 
-## When Active
-
-1. Parse `$ARGUMENTS` as the context to capture.
-2. Add metadata: timestamp, domain classification (infer from content).
-3. Use the Rune MCP tools to embed and store the context.
-4. Confirm what was stored with a brief summary.
-
-## Example
-
-```
-/rune:capture We chose PostgreSQL over MongoDB for better ACID guarantees
-```
+Result handling:
+- `captured: true` → confirm briefly, citing `record_id`.
+- `captured: false` → it was a near-duplicate of `novelty.related`; say so and
+  do not retry.
+- `ok: false` → relay the error.

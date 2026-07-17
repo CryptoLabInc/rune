@@ -1,32 +1,22 @@
 ---
-description: Search organizational memory for past decisions and context
-allowed-tools: Bash(cat ~/.rune/*), Read, mcp__plugin_rune_rune__*
+description: Search RUNE organizational memory for relevant past decisions and context
+argument-hint: <question or topic>
+allowed-tools: mcp__plugin_rune_rune__recall
 ---
 
-# /rune:recall — Search Memory
+# /rune:recall — Search Organizational Memory
 
-Search encrypted organizational memory for relevant context.
+Call `mcp__plugin_rune_rune__recall` with `query` set to `$ARGUMENTS` (a
+question, topic, or statement — the embedding search handles any form).
+Optional: `topk` (default 5), `since` (ISO date).
 
-The argument `$ARGUMENTS` contains the search query.
+The tool returns recency-weighted results, each `{ record_id, author, insight,
+context, score }`. Synthesize them into a short, direct answer:
 
-## Activation Check
-
-1. Read `~/.rune/config.json`. If missing or `state` is not `"active"`, respond:
-   "Rune is dormant. Run `/rune:configure` and `/rune:activate` first."
-   Do NOT attempt any search.
-
-## When Active
-
-1. Parse `$ARGUMENTS` as the search query.
-2. Use the Rune MCP tools to search encrypted vectors.
-3. Return relevant results with:
-   - Source attribution (who/when)
-   - Relevant excerpts
-   - Confidence/certainty level
-4. Offer to elaborate on any result.
-
-## Example
-
-```
-/rune:recall Why did we choose PostgreSQL?
-```
+- Lead with what organizational memory says, grounded in the `insight` fields;
+  draw on `context` for detail.
+- Cite sources by `record_id`; attribute to `author` when who decided it matters.
+- Empty results → say no relevant records were found and answer from general
+  knowledge only, marked as such. If the conversation is producing a decision
+  worth saving, suggest `/rune:capture`.
+- `ok: false` → relay the error.
