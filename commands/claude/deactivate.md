@@ -10,7 +10,7 @@ Flip Rune from active to dormant. Credentials and connection stay in
 
 ## Steps
 
-1. Call `deactivate`. The server persists `state=dormant` (reason
+1. Call `mcp__plugin_rune_rune__deactivate`. The server persists `state=dormant` (reason
    `user_deactivated`) and re-runs the boot loop into the dormant state, so
    `capture` / `recall` immediately return `PIPELINE_NOT_READY` until
    reactivated.
