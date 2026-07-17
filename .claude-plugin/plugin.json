@@ -11,6 +11,7 @@
     "rune": {
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/rune",
       "args": ["mcp-server"],
+      "env": { "RUNE_NO_AUTO_UPDATE": "1" },
       "timeout": 30000,
       "description": "Rune MCP server (talks to Console + embedder). The command is the plugin's bash wrapper, which always exists at session start; on first run it self-install rune-mcp, then exec - MCP server comes online in the same session with no restart."
     }
