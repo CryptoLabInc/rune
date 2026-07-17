@@ -20,9 +20,62 @@ set -euo pipefail
 RUNE_HOME="${RUNE_HOME:-$HOME/.rune}"
 TARGET="$RUNE_HOME/bin/rune"
 
-# Delegate to ~/.rune/bin/rune immediately
+# Minimum CLI version rune plugin require
+RUNE_CLI_MIN="${RUNE_CLI_MIN-v1.0.0}"
+
+# Installed CLI version: "" when absent or unparseable (treat as old)
+installed_cli_version() {
+  [ -x "$TARGET" ] || return 0
+  "$TARGET" version 2>/dev/null | head -1 | awk '$1 == "rune" {print $2}'
+}
+
+# True when semver(A) > semver(B)
+ver_lt() {
+  local a="${1#v}" b="${2#v}"
+  if [ "$a" = "$b" ]; then
+    return 1
+  fi
+
+  local ar="${a%%-*}" br="${b%%-*}"
+  local ap="" bp=""
+  case "$a" in *-*) ap="${a#*-}" ;; esac
+  case "$b" in *-*) bp="${b#*-}" ;; esac
+
+  if [ "$ar" != "$br" ]; then
+    [ "$(printf '%s\n%s\n' "$ar" "$br" | sort -V | head -1)" = "$ar" ]
+    return
+  fi
+  if [ -z "$ap" ]; then
+    return 1 # A: release > B: pre-release
+  fi
+  if [ -z "$bp" ]; then
+    return 0 # A: pre-release < B: release
+  fi
+
+  [ "$(printf '%s\n%s\n' "$ap" "$bp" | sort -V | head -1)" = "$ap" ]
+}
+
+target_ready() {
+  [ -x "$TARGET" ] || return 1
+  [ -n "$RUNE_CLI_MIN" ] || return 0
+  local v
+  v="$(installed_cli_version || true)"
+  [ -n "$v" ] && ! ver_lt "$v" "$RUNE_CLI_MIN"
+}
+
+# ~/.rune/bin/rune exist
 if [ -x "$TARGET" ]; then
-  exec "$TARGET" "$@"
+  case "${1:-}" in
+    install|mcp-server)
+      if target_ready; then
+        exec "$TARGET" "$@"
+      fi
+      echo "rune: installed CLI $(installed_cli_version || true) is older than this plugin needs (min $RUNE_CLI_MIN); upgrading..." >&2
+      ;;
+    *)
+      exec "$TARGET" "$@"
+      ;;
+  esac
 fi
 
 # Bootstrap path (~/.rune/bin/rune missing)
@@ -122,7 +175,7 @@ while true; do
   fi
 
   # Wait for another process as we failed to claim lock
-  if [ -x "$TARGET" ]; then
+  if target_ready; then
     exec "$TARGET" "$@"   # bootstrap finished
   fi
 
@@ -173,7 +226,7 @@ while true; do
 done
 
 # Double-check: install is completed right before we won the lock
-if [ -x "$TARGET" ]; then
+if target_ready; then
   cleanup
   trap - EXIT INT TERM
   exec "$TARGET" "$@"
@@ -208,9 +261,6 @@ if [ -z "$RUNE_VERSION" ]; then
     body="$(fetch --max-time "$NET_API_MAXTIME" "$api" || true)"
   fi
 
-  # Newest release whose tag looks like a CLI version (v<digit>...): other
-  # release trains in this repo (e.g. plugin/*) carry no rune-* assets and
-  # must never be picked up here.
   RUNE_VERSION="$(printf '%s' "$body" \
     | grep -o '"tag_name":[[:space:]]*"[^"]*"' \
     | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/' \
@@ -222,6 +272,14 @@ if [ -z "$RUNE_VERSION" ]; then
   echo "rune: cannot determine the latest release" >&2
   echo "      Pin it explicitly, e.g.: RUNE_VERSION=v0.4.0 ${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install" >&2
   exit 1
+fi
+
+INSTALLED_VERSION="$(installed_cli_version || true)"
+if [ -x "$TARGET" ] && [ -n "$INSTALLED_VERSION" ] && ! ver_lt "$INSTALLED_VERSION" "$RUNE_VERSION"; then
+  echo "rune: no new release after $INSTALLED_VERSION (latest $RUNE_VERSION)" >&2
+  cleanup
+  trap - EXIT INT TERM
+  exec "$TARGET" "$@"
 fi
 
 # Map (OS, arch) to release asset name
