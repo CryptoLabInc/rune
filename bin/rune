@@ -180,12 +180,11 @@ if [ -x "$TARGET" ]; then
 fi
 
 # Lazy version evaluation
-# Priority: RUNE_VERSION > latest release (including pre-release for now)
-# TODO: switch to .../rune/releases/latest
+# Priority: RUNE_VERSION > newest CLI release (tag v*, including pre-releases)
 RUNE_VERSION="${RUNE_VERSION:-}"
 if [ -z "$RUNE_VERSION" ]; then
   echo "rune: resolving latest release..." >&2
-  api="https://api.github.com/repos/CryptoLabInc/rune/releases?per_page=1"
+  api="https://api.github.com/repos/CryptoLabInc/rune/releases?per_page=10"
 
   # Use token if exist
   token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
@@ -195,9 +194,13 @@ if [ -z "$RUNE_VERSION" ]; then
     body="$(fetch --max-time "$NET_API_MAXTIME" "$api" || true)"
   fi
 
+  # Newest release whose tag looks like a CLI version (v<digit>...): other
+  # release trains in this repo (e.g. plugin/*) carry no rune-* assets and
+  # must never be picked up here.
   RUNE_VERSION="$(printf '%s' "$body" \
-    | grep -m1 '"tag_name"' \
+    | grep -o '"tag_name":[[:space:]]*"[^"]*"' \
     | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/' \
+    | grep -m1 '^v[0-9]' \
     || true)"
 fi
 
