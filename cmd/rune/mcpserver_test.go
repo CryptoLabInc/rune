@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 func TestRunMCPServer_InstallErrorFailFast(t *testing.T) {

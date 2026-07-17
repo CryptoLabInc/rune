@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
-	"github.com/CryptoLabInc/rune-cli/internal/supervisor"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/supervisor"
 )
 
 // runRuned dispatches `rune runed [args...]`:

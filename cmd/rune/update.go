@@ -10,8 +10,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
-	"github.com/CryptoLabInc/rune-cli/internal/supervisor"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/supervisor"
 )
 
 func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int {

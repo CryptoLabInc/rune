@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 func runVersion(w io.Writer) int {

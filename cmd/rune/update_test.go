@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 func updateManifestServer(t *testing.T, runeMCPVer, runedVer string) string {

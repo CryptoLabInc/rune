@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 func TestRunVersion_PrintConstants(t *testing.T) {

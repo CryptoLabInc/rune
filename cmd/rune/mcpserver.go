@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 const mcpSelfhealBudget = 25 * time.Second // (download:25s + (exec + MCP handshake):5s) < plugin manifest 30s MCP connection timeout
