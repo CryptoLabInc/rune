@@ -1,6 +1,6 @@
 ---
 description: Activate Rune — resume from dormant and bring Console pipelines online
-allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__plugin_rune_rune__activate, mcp__plugin_rune_rune__diagnostics
+allowed-tools: Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__plugin_rune_rune__activate
 ---
 
 # /rune:activate — Bring Rune Online
@@ -10,14 +10,14 @@ Credentials are untouched — this only flips Rune to active.
 
 ## Steps
 
-Call `activate` and branch on `status`. Relay the tool's `hint` verbatim — it
-already names the exact next step; do not shell-probe (openssl/nc) to
-second-guess the classifier.
+Call `mcp__plugin_rune_rune__activate` and branch on `status`. Relay the tool's
+`hint` verbatim — it already names the exact next step; do not shell-probe
+(openssl/nc) to second-guess the classifier.
 
 - **`active`** — pipelines are up. Report "Rune is active. Organizational memory
-  is online." Optionally call `diagnostics` once for a per-subsystem snapshot.
+  is online."
 - **`configure_required`** — no credentials. Relay `hint` and stop (points at
-  `/rune:configure`). Do NOT call diagnostics.
+  `/rune:configure`).
 - **`install_pending`** — the runed daemon isn't reachable. Relay `hint`, run
   the agent-recovery command it names (`rune install`), then retry
   `/rune:activate` once. The user never runs `rune install` themselves.
