@@ -208,9 +208,13 @@ if [ -z "$RUNE_VERSION" ]; then
     body="$(fetch --max-time "$NET_API_MAXTIME" "$api" || true)"
   fi
 
+  # Newest release whose tag looks like a CLI version (v<digit>...): other
+  # release trains in this repo (e.g. plugin/*) carry no rune-* assets and
+  # must never be picked up here.
   RUNE_VERSION="$(printf '%s' "$body" \
-    | grep -m1 '"tag_name"' \
+    | grep -o '"tag_name":[[:space:]]*"[^"]*"' \
     | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/' \
+    | grep -m1 '^v[0-9]' \
     || true)"
 fi
 
