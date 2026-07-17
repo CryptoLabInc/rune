@@ -105,6 +105,15 @@ func tryAutoCheck(paths *bootstrap.Paths, stderr io.Writer) {
 	}
 }
 
+// Background update check argv
+func detachedUpdateArgs(manifest string) []string {
+	return []string{
+		"update",
+		"--only", bootstrap.StepRuneCLI,
+		"--manifest-url", manifest,
+	}
+}
+
 func spawnDetachedUpdate(paths *bootstrap.Paths, manifest string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -120,8 +129,7 @@ func spawnDetachedUpdate(paths *bootstrap.Paths, manifest string) error {
 	}
 	defer logFile.Close()
 
-	// Runed is excluded since mcp server does not handle its lifecycle
-	cmd := exec.Command(exe, "update", "--only", bootstrap.StepRuneMCP, "--manifest-url", manifest)
+	cmd := exec.Command(exe, detachedUpdateArgs(manifest)...)
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
