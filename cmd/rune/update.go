@@ -20,7 +20,7 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 
 	check := fs.Bool("check", false, "report available updates without applying")
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	manifest := fs.String("manifest-url", manifestURL, "override manifest URL")
+	manifest := fs.String("manifest-url", updateChannel(), "override manifest URL")
 	pluginRoot := fs.String("plugin-root", "", "plugin root for the plugin version check (defaults to $CLAUDE_PLUGIN_ROOT)")
 	allowOutdated := fs.Bool("allow-plugin-outdated", false, "apply even if the plugin package is older than the binaries require")
 	only := fs.String("only", "", "restrict to a comma-separated set of artifacts: rune_mcp, runed, rune_cli")
@@ -38,6 +38,9 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return 2
 	}
 
+	// Override with explicit --manifest-url or RUNE_MANIFEST
+	onChannel := updateManifestURL != "" && *manifest == updateManifestURL && os.Getenv("RUNE_MANIFEST") == ""
+
 	// Fall-back
 	if *manifest == "" {
 		if env := os.Getenv("RUNE_MANIFEST"); env != "" {
@@ -53,6 +56,16 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if err != nil {
 		fmt.Fprintf(stderr, "rune update: %v\n", err)
 		return 1
+	}
+
+	if onChannel && bootstrap.ChannelBehind(mf, runeVersion) {
+		if *jsonOut {
+			_ = json.NewEncoder(stdout).Encode(updateSummary{Applied: []appliedUpdate{}})
+		} else {
+			fmt.Fprintf(stdout, "rune: update channel is behind this build (channel CLI %q, running %s)\n", mf.CLIVersion, runeVersion)
+			fmt.Fprintln(stdout, "  This version might not promoted yet")
+		}
+		return 0
 	}
 
 	plan, err := bootstrap.PlanFromManifest(mf, runeVersion)

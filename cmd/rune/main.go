@@ -44,6 +44,17 @@ var runeVersion = "v0.4.0-dev"
 // Configurable at build time via `-ldflags -X main.manifestURL=...`
 var manifestURL = ""
 
+// Configurable at build time via `-ldflags -X main.updateManifestURL=...`
+var updateManifestURL = ""
+
+func updateChannel() string {
+	if updateManifestURL != "" {
+		return updateManifestURL
+	}
+
+	return manifestURL
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printHelp(os.Stderr)

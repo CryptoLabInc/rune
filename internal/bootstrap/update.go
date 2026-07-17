@@ -217,6 +217,17 @@ func UpdateArtifact(ctx context.Context, manifestURL, step string, afterInstall 
 	return version, writeManifest(paths, rec)
 }
 
+func ChannelBehind(m *Manifest, cliVersion string) bool {
+	if m == nil || cliVersion == "" {
+		return false // unknown running version: leave the plan alone
+	}
+	if m.CLIVersion == "" {
+		return true // predates self-update
+	}
+
+	return compareVersions(m.CLIVersion, cliVersion) < 0
+}
+
 var ErrCLIOutdated = errors.New("update: CLI is not newer than exsiting binary")
 
 // cliVersion is the running binary's own version. The strictly-newer gate is
