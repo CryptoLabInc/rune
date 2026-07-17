@@ -40,6 +40,7 @@ const (
 	StepManifest = "manifest"
 	StepRuned    = "runed"
 	StepRuneMCP  = "rune_mcp"
+	StepRuneCLI  = "rune_cli" // CLI self-update; updated via UpdateCLI, never via Install
 )
 
 const binaryMode = 0o755 // executable

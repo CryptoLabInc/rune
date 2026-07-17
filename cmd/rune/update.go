@@ -23,7 +23,7 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	manifest := fs.String("manifest-url", manifestURL, "override manifest URL")
 	pluginRoot := fs.String("plugin-root", "", "plugin root for the plugin version check (defaults to $CLAUDE_PLUGIN_ROOT)")
 	allowOutdated := fs.Bool("allow-plugin-outdated", false, "apply even if the plugin package is older than the binaries require")
-	only := fs.String("only", "", "restrict to a comma-separated set of artifacts: rune_mcp, runed")
+	only := fs.String("only", "", "restrict to a comma-separated set of artifacts: rune_mcp, runed, rune_cli")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -55,7 +55,7 @@ func runUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		return 1
 	}
 
-	plan, err := bootstrap.PlanFromManifest(mf)
+	plan, err := bootstrap.PlanFromManifest(mf, runeVersion)
 	if err != nil {
 		fmt.Fprintf(stderr, "rune update: %v\n", err)
 		return 1
@@ -216,6 +216,31 @@ func applyUpdate(ctx context.Context, manifest string, plan *bootstrap.UpdateLis
 					fmt.Fprintf(stdout, "updated %s: %s -> %s (staged; applies on next daemon start)\n", a.Step, a.Installed, to)
 				}
 			}
+		case bootstrap.StepRuneCLI:
+			to, err := bootstrap.UpdateCLI(ctx, manifest, runeVersion, logf)
+			if errors.Is(err, bootstrap.ErrCLIOutdated) {
+				out.Deferred = append(out.Deferred, a.Step)
+				if !jsonOut {
+					fmt.Fprintf(stderr, "rune update: %s: skipped (%v)\n", a.Step, err)
+				}
+
+				continue
+			}
+			if err != nil {
+				out.Error = err.Error()
+				exit = 1
+
+				if !jsonOut {
+					fmt.Fprintf(stderr, "rune update: %s: %v\n", a.Step, err)
+				}
+
+				continue
+			}
+
+			out.Applied = append(out.Applied, appliedUpdate{Step: a.Step, From: a.Installed, To: to})
+			if !jsonOut {
+				fmt.Fprintf(stdout, "updated %s: %s -> %s (apply on the next rune execution)\n", a.Step, a.Installed, to)
+			}
 		}
 	}
 
@@ -246,8 +271,8 @@ func parseOnly(only string) (map[string]bool, error) {
 		if tok == "" {
 			continue
 		}
-		if tok != bootstrap.StepRuneMCP && tok != bootstrap.StepRuned {
-			return nil, fmt.Errorf("--only: unknown artifact %q (want %s or %s)", tok, bootstrap.StepRuneMCP, bootstrap.StepRuned)
+		if tok != bootstrap.StepRuneMCP && tok != bootstrap.StepRuned && tok != bootstrap.StepRuneCLI {
+			return nil, fmt.Errorf("--only: unknown artifact %q (want %s, %s or %s)", tok, bootstrap.StepRuneMCP, bootstrap.StepRuned, bootstrap.StepRuneCLI)
 		}
 
 		set[tok] = true
