@@ -3,3 +3,6 @@
 # with the matching runed (centroid routing / SetCentroids).
 rune_mcp_version: v1.0.0-alpha
 runed_version: v1.0.0-alpha
+
+# Hard floor for `rune update`
+min_plugin_version: 1.0.0-alpha

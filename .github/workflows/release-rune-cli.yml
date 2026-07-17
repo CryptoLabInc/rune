@@ -188,6 +188,21 @@ jobs:
           fi
           echo "Pinning rune-mcp=${RUNE_MCP_VERSION}, runed=${RUNED_VERSION}"
 
+          PLUGIN_VERSION=$(jq -r '.version // empty' .claude-plugin/plugin.json)
+          MIN_PLUGIN_VERSION=$(awk '/^min_plugin_version:/ {print $2}' .release-pins.yaml)
+          if [ -z "${PLUGIN_VERSION:-}" ] || [ -z "${MIN_PLUGIN_VERSION:-}" ]; then
+            echo "::error::missing plugin version (plugin.json version=${PLUGIN_VERSION}, .release-pins.yaml min_plugin_version=${MIN_PLUGIN_VERSION})" >&2
+            exit 1
+          fi
+
+          if [[ "${MIN_PLUGIN_VERSION#v}" =~ ^[0-9]+(\.[0-9]+)*$ && "${PLUGIN_VERSION#v}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            if [ "$(printf '%s\n%s\n' "${MIN_PLUGIN_VERSION#v}" "${PLUGIN_VERSION#v}" | sort -V | head -1)" != "${MIN_PLUGIN_VERSION#v}" ]; then
+              echo "::error::min_plugin_version ${MIN_PLUGIN_VERSION} is above the shipped plugin version ${PLUGIN_VERSION}" >&2
+              exit 1
+            fi
+          fi
+          echo "Plugin: plugin_version=${PLUGIN_VERSION}, min_plugin_version=${MIN_PLUGIN_VERSION}"
+
           mkdir -p _downstream/runed _downstream/rune-mcp
 
           # runed
@@ -258,6 +273,8 @@ jobs:
             "version": 1,
             "rune_mcp_version": "${RUNE_MCP_VERSION}",
             "runed_version": "${RUNED_VERSION}",
+            "plugin_version": "${PLUGIN_VERSION}",
+            "min_plugin_version": "${MIN_PLUGIN_VERSION}",
             "platforms": {
               "darwin-arm64": {
                 "runed": {
