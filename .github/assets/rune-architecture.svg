@@ -1,0 +1,139 @@
+<svg width="1200" height="480" viewBox="0 0 1200 480" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>RUNE architecture and planned agent integrations</title>
+  <defs>
+    <linearGradient id="canvas" x1="30" y1="12" x2="1170" y2="468" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#101f34"/>
+      <stop offset="1" stop-color="#07131f"/>
+    </linearGradient>
+    <linearGradient id="active-card" x1="0" y1="0" x2="180" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#163646"/>
+      <stop offset="1" stop-color="#102638"/>
+    </linearGradient>
+    <linearGradient id="core-card" x1="0" y1="0" x2="230" y2="110" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173447"/>
+      <stop offset="1" stop-color="#0e2132"/>
+    </linearGradient>
+    <radialGradient id="core-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(540 238) rotate(180) scale(370 250)">
+      <stop stop-color="#48e7c5" stop-opacity="0.11"/>
+      <stop offset="1" stop-color="#48e7c5" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="30" height="30" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.5" fill="#b8fff0" fill-opacity="0.055"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="4.32" markerHeight="4.32" orient="auto-start-reverse">
+      <path d="M0 0L8 4L0 8L2.2 4L0 0Z" fill="#55e8ca"/>
+    </marker>
+    <marker id="arrow-planned" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="4.32" markerHeight="4.32" orient="auto-start-reverse">
+      <path d="M0 0L8 4L0 8L2.2 4L0 0Z" fill="#638294"/>
+    </marker>
+    <clipPath id="frame">
+      <rect width="1200" height="480" rx="24"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="480" fill="url(#canvas)"/>
+    <rect width="1200" height="480" fill="url(#dots)"/>
+    <rect width="820" height="480" fill="url(#core-glow)"/>
+
+    <text x="42" y="52" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="26" font-weight="750">How RUNE moves memory</text>
+    <text x="42" y="78" fill="#8fa5b5" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14">One encrypted path from the agent to the team's shared context.</text>
+
+    <line x1="918" y1="51" x2="954" y2="51" stroke="#55e8ca" stroke-width="2"/>
+    <text x="966" y="56" fill="#b7c7d2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1">AVAILABLE</text>
+    <line x1="1060" y1="51" x2="1096" y2="51" stroke="#638294" stroke-width="2" stroke-dasharray="5 5"/>
+    <text x="1108" y="56" fill="#718797" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1">PLANNED</text>
+
+    <rect x="28" y="104" width="590" height="338" rx="20" fill="#0a1928" fill-opacity="0.58" stroke="#284356"/>
+    <text x="52" y="129" fill="#6f8798" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.5">YOUR DEVICE</text>
+
+    <rect x="630" y="154" width="262" height="176" rx="20" fill="#0a1928" fill-opacity="0.58" stroke="#284356"/>
+    <text x="654" y="179" fill="#6f8798" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.5">TEAM TRUST BOUNDARY</text>
+
+    <rect x="910" y="154" width="262" height="176" rx="20" fill="#0a1928" fill-opacity="0.58" stroke="#284356"/>
+    <text x="934" y="179" fill="#6f8798" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.5">BLIND STORAGE</text>
+
+    <path d="M240 169C286 169 286 220 330 220" stroke="#55e8ca" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M240 235C286 235 290 239 330 239" stroke="#638294" stroke-width="1.6" stroke-dasharray="6 7" marker-end="url(#arrow-planned)" opacity="0.72"/>
+    <path d="M240 301C286 301 290 258 330 258" stroke="#638294" stroke-width="1.6" stroke-dasharray="6 7" marker-end="url(#arrow-planned)" opacity="0.62"/>
+    <path d="M240 367C286 367 286 277 330 277" stroke="#638294" stroke-width="1.6" stroke-dasharray="6 7" marker-end="url(#arrow-planned)" opacity="0.54"/>
+
+    <path d="M455 312V338" stroke="#55e8ca" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="470" y="329" fill="#6f8798" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1">EMBED</text>
+
+    <path d="M582 252H644" stroke="#55e8ca" stroke-width="2.2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="575" y="238" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1">SEALED + FHE</text>
+
+    <path d="M878 252H924" stroke="#55e8ca" stroke-width="2.2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="872" y="238" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1">ENCRYPTED</text>
+
+    <g transform="translate(52 141)">
+      <rect width="180" height="56" rx="13" fill="url(#active-card)" stroke="#4fd9bd"/>
+      <circle cx="20" cy="28" r="9" fill="#5cffd6" fill-opacity="0.12"/>
+      <path d="M16.5 24.5L20 28L16.5 31.5M22 31.5H26" stroke="#72f5dc" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="38" y="25" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="700">Claude Code</text>
+      <text x="38" y="40" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" font-weight="700" letter-spacing="1">AVAILABLE</text>
+      <circle cx="164" cy="28" r="3" fill="#5cffd6"/>
+    </g>
+
+    <g transform="translate(52 207)" opacity="0.72">
+      <rect width="180" height="56" rx="13" fill="#102131" stroke="#587286" stroke-dasharray="5 5"/>
+      <circle cx="20" cy="28" r="9" fill="#668597" fill-opacity="0.12"/>
+      <path d="M16.5 24.5L20 28L16.5 31.5M22 31.5H26" stroke="#8ba2b1" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="38" y="25" fill="#cad5dc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="700">Codex</text>
+      <text x="38" y="40" fill="#7890a3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" font-weight="700" letter-spacing="1">PLANNED</text>
+    </g>
+
+    <g transform="translate(52 273)" opacity="0.62">
+      <rect width="180" height="56" rx="13" fill="#102131" stroke="#587286" stroke-dasharray="5 5"/>
+      <circle cx="20" cy="28" r="9" fill="#668597" fill-opacity="0.12"/>
+      <path d="M16.5 24.5L20 28L16.5 31.5M22 31.5H26" stroke="#8ba2b1" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="38" y="25" fill="#cad5dc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="700">Antigravity</text>
+      <text x="38" y="40" fill="#7890a3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" font-weight="700" letter-spacing="1">PLANNED</text>
+    </g>
+
+    <g transform="translate(52 339)" opacity="0.54">
+      <rect width="180" height="56" rx="13" fill="#102131" stroke="#587286" stroke-dasharray="5 5"/>
+      <circle cx="20" cy="28" r="9" fill="#668597" fill-opacity="0.12"/>
+      <path d="M16.5 24.5L20 28L16.5 31.5M22 31.5H26" stroke="#8ba2b1" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="38" y="23" fill="#cad5dc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="700">Local agents</text>
+      <text x="38" y="40" fill="#7890a3" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" font-weight="700" letter-spacing="0.8">QWEN 3.6 · PLANNED</text>
+    </g>
+
+    <g transform="translate(340 198)">
+      <rect width="230" height="108" rx="17" fill="url(#core-card)" stroke="#55e8ca"/>
+      <circle cx="30" cy="29" r="12" fill="#5cffd6" fill-opacity="0.1"/>
+      <path d="M27 21L37 29L27 37L27 30L21 35V23L27 28V21Z" fill="#72f5dc"/>
+      <text x="52" y="35" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15" font-weight="750">RUNE plugin</text>
+      <text x="24" y="68" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12">capture · seal · recall</text>
+      <rect x="24" y="80" width="139" height="18" rx="9" fill="#5cffd6" fill-opacity="0.08"/>
+      <text x="34" y="92" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" font-weight="700" letter-spacing="0.7">CLIENT-SIDE CRYPTO</text>
+    </g>
+
+    <g transform="translate(340 344)">
+      <rect width="230" height="70" rx="15" fill="#102637" stroke="#315164"/>
+      <circle cx="28" cy="35" r="11" fill="#5cffd6" fill-opacity="0.1"/>
+      <path d="M22 35H34M28 29V41" stroke="#72f5dc" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="50" y="31" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" font-weight="700">runed</text>
+      <text x="50" y="49" fill="#8fa5b5" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11">local embeddings</text>
+    </g>
+
+    <g transform="translate(656 198)">
+      <rect width="210" height="108" rx="17" fill="url(#core-card)" stroke="#315164"/>
+      <circle cx="30" cy="29" r="12" fill="#5cffd6" fill-opacity="0.1"/>
+      <path d="M30 21L36 24V29C36 33 33.5 36.2 30 37.5C26.5 36.2 24 33 24 29V24L30 21Z" stroke="#72f5dc" stroke-width="1.4"/>
+      <text x="52" y="35" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15" font-weight="750">RUNE CONSOLE</text>
+      <text x="24" y="68" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12">keys · identity · policy</text>
+      <text x="24" y="91" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="8" font-weight="700" letter-spacing="0.8">AUTHORIZED RESULTS</text>
+    </g>
+
+    <g transform="translate(936 198)">
+      <rect width="210" height="108" rx="17" fill="#102131" stroke="#315164"/>
+      <circle cx="30" cy="29" r="12" fill="#5cffd6" fill-opacity="0.1"/>
+      <ellipse cx="30" cy="25" rx="8" ry="4" stroke="#72f5dc" stroke-width="1.2"/>
+      <path d="M22 25V33C22 35.2 25.6 37 30 37C34.4 37 38 35.2 38 33V25M22 29C22 31.2 25.6 33 30 33C34.4 33 38 31.2 38 29" stroke="#72f5dc" stroke-width="1.2"/>
+      <text x="52" y="35" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15" font-weight="750">RUNESPACE</text>
+      <text x="20" y="72" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11">encrypted vector index</text>
+    </g>
+  </g>
+</svg>

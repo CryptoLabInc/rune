@@ -1,0 +1,29 @@
+<svg width="1200" height="270" viewBox="0 0 1200 270" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>One team. Every agent. The same hard-won context.</title>
+  <text x="600" y="43" text-anchor="middle" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="32" font-weight="750">One team. Every agent. The same hard-won context.</text>
+  <text x="600" y="78" text-anchor="middle" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="18">Turn decisions, reasoning, and hard-won context into memory every agent can use.</text>
+
+  <g transform="translate(40 116)">
+    <text x="0" y="29" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="28" font-weight="800">01</text>
+    <text x="48" y="25" fill="#7890a3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="800" letter-spacing="2">CAPTURE</text>
+    <text x="0" y="75" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="700">Keep the why, not just the outcome.</text>
+    <text x="0" y="109" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">Save decisions together with the reasoning</text>
+    <text x="0" y="133" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">and context that made them useful.</text>
+  </g>
+
+  <g transform="translate(430 116)">
+    <text x="0" y="29" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="28" font-weight="800">02</text>
+    <text x="48" y="25" fill="#7890a3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="800" letter-spacing="2">BLIND SEARCH</text>
+    <text x="0" y="75" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="700">Search without exposing plaintext.</text>
+    <text x="0" y="109" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">RuneSpace evaluates encrypted vectors while</text>
+    <text x="0" y="133" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">the storage layer stays blind.</text>
+  </g>
+
+  <g transform="translate(820 116)">
+    <text x="0" y="29" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="28" font-weight="800">03</text>
+    <text x="48" y="25" fill="#7890a3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="800" letter-spacing="2">RECALL</text>
+    <text x="0" y="75" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="700">Bring back what matters.</text>
+    <text x="0" y="109" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">Search team memory in natural language and</text>
+    <text x="0" y="133" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">ground answers in specific records.</text>
+  </g>
+</svg>
