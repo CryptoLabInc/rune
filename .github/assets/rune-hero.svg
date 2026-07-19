@@ -15,23 +15,6 @@
       <stop stop-color="#5cffd6" stop-opacity="0.74"/>
       <stop offset="1" stop-color="#5cffd6" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="mark-left" x1="110" y1="116" x2="230" y2="395" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#7ff5dd"/>
-      <stop offset="1" stop-color="#29bda7"/>
-    </linearGradient>
-    <linearGradient id="mark-fold-shade" x1="95" y1="351" x2="154" y2="415" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0b665f" stop-opacity="0"/>
-      <stop offset="0.3" stop-color="#0b665f" stop-opacity="0.08"/>
-      <stop offset="1" stop-color="#0b665f" stop-opacity="0.46"/>
-    </linearGradient>
-    <linearGradient id="mark-top" x1="260" y1="72" x2="430" y2="320" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ccfff3"/>
-      <stop offset="1" stop-color="#5cffd6"/>
-    </linearGradient>
-    <linearGradient id="mark-right" x1="342" y1="294" x2="292" y2="468" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2ac6a8"/>
-      <stop offset="1" stop-color="#189e86"/>
-    </linearGradient>
     <pattern id="dots" width="28" height="28" patternUnits="userSpaceOnUse">
       <circle cx="1.5" cy="1.5" r="1.5" fill="#b8fff0" fill-opacity="0.08"/>
     </pattern>
@@ -45,12 +28,7 @@
     <rect width="1280" height="420" fill="url(#dots)"/>
     <rect width="560" height="420" fill="url(#glow)"/>
 
-    <g transform="translate(44 15) scale(0.72)" shape-rendering="geometricPrecision">
-      <path d="M365 281 L440 341 L259 475 L259 352 Z" fill="url(#mark-right)"/>
-      <path d="M257 64 L440 201 L440 341 L365 281 L258 201 Z" fill="url(#mark-top)"/>
-      <path d="M257 64 L95 185 L95 351 L164 401 L265 313 L190 260 L258 201 Z" fill="url(#mark-left)"/>
-      <path d="M95 351 L258 201 L190 260 L265 313 L164 401 Z" fill="url(#mark-fold-shade)"/>
-    </g>
+    <image href="rune-mark-official.png" x="44" y="15" width="352.8" height="374.4" preserveAspectRatio="xMidYMid meet"/>
 
     <rect x="430" y="58" width="340" height="36" rx="18" fill="#5cffd6" fill-opacity="0.08" stroke="#7ff5dd" stroke-opacity="0.3"/>
     <circle cx="450" cy="76" r="4" fill="#5cffd6"/>
