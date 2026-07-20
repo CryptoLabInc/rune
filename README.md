@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://rune.team" aria-label="RUNE website">
-    <img src=".github/assets/rune-hero.png" alt="RUNE — encrypted shared memory for AI agents" width="100%">
+    <img src=".github/assets/rune-hero.svg" alt="RUNE — encrypted shared memory for AI agents" width="100%">
   </a>
 </p>
 
