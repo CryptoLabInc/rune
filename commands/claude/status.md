@@ -22,8 +22,6 @@ Rune Status
 State      : <state>   (+ dormant_reason / dormant_since when dormant)
 Console    : ✓ healthy (<endpoint>) | ✗ <error>
 Keys       : ✓ key_id=<key_id> (custodian: console) | ✗ not loaded
-Scribe     : ✓ ready | ✗ not initialized
-Retriever  : ✓ ready | ✗ not initialized
 Embedder   : <see rules>  (model=<model>, dim=<vector_dim>, up=<uptime>, reqs=<n>)
              socket: <socket_path>
 ```
