@@ -14,8 +14,11 @@ Call `mcp__plugin_rune_rune__activate` and branch on `status`. Relay the tool's
 `hint` verbatim — it already names the exact next step; do not shell-probe
 (openssl/nc) to second-guess the classifier.
 
-- **`active`** — pipelines are up. Report "Rune is active. Organizational memory
-  is online."
+- **`active`** — pipelines are up. This includes the "already active" case (e.g.
+  right after `/rune:configure` brought them online, or a repeat `/rune:activate`
+  — activate is idempotent and does not re-boot when already active). Relay
+  `hint` if present, else report "Rune is active. Organizational memory is
+  online."
 - **`configure_required`** — no credentials. Relay `hint` and stop (points at
   `/rune:configure`).
 - **`install_pending`** — the runed daemon isn't reachable. Relay `hint`, run
