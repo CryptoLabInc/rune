@@ -1,5 +1,8 @@
 # v1.0.0-alpha ships the registration-string path used by commands/*/configure.md:
 # a rune-mcp whose configure tool accepts `registration_string` (3-stage bootstrap),
-# with the matching runed (centroid routing / SetCentroids).
+# with the matching runed (centroid routing / SetCentroids). The rune-mcp pinned
+# here also self-reports activation to the console (the member online gate) and
+# drops the vestigial scribe/retriever diagnostics fields. Versions are unchanged;
+# re-tagging regenerates manifest.json from the pinned releases' current checksums.
 rune_mcp_version: v1.0.0-alpha
 runed_version: v1.0.0-alpha
