@@ -172,6 +172,45 @@ jobs:
           [ "$fail" -eq 0 ] || exit 1
           echo "Both pinned releases are published."
 
+      - name: Verify pinned releases support registration_string
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # bin/rune resolves the CLI via /releases/latest, so whichever rune
+          # release is "Latest" hands new users the rune-mcp/runed its manifest
+          # pins. The console<->rune-mcp handshake in commands/*/configure.md
+          # needs a rune-mcp/runed whose configure tool accepts a
+          # registration_string (the 3-stage bootstrap). That path first ships
+          # in the 1.0 line; every 0.x release predates it. Publishing a rune
+          # release that pins a 0.x rune-mcp/runed would, once promoted to
+          # "Latest", make bin/rune hand new users a CLI that cannot configure.
+          # Fail here so an incompatible pin can never become "Latest".
+          MIN_MAJOR=1
+
+          RUNE_MCP_VERSION=$(awk '/^rune_mcp_version:/ {print $2}' .release-pins.yaml)
+          RUNED_VERSION=$(awk    '/^runed_version:/    {print $2}' .release-pins.yaml)
+
+          # Numeric major from a vMAJOR.MINOR.PATCH[-pre] tag (strip leading v).
+          major_of() { printf '%s' "$1" | sed -E 's/^v//; s/^([0-9]+).*/\1/'; }
+
+          fail=0
+          for pair in "rune-mcp:${RUNE_MCP_VERSION}" "runed:${RUNED_VERSION}"; do
+            name=${pair%%:*}; ver=${pair#*:}
+            major=$(major_of "$ver")
+            if ! printf '%s' "$major" | grep -qE '^[0-9]+$'; then
+              echo "::error::cannot parse a major version from ${name} pin '${ver}' in .release-pins.yaml" >&2
+              fail=1; continue
+            fi
+            if [ "$major" -lt "$MIN_MAJOR" ]; then
+              echo "::error::${name} ${ver} (pinned in .release-pins.yaml) predates the registration_string 3-stage bootstrap (needs >= v${MIN_MAJOR}.0.0). Bump the pin before tagging rune." >&2
+              fail=1
+            fi
+          done
+
+          [ "$fail" -eq 0 ] || exit 1
+          echo "Pinned releases support registration_string (rune-mcp=${RUNE_MCP_VERSION}, runed=${RUNED_VERSION})."
+
       - name: Generate manifest
         shell: bash
         env:

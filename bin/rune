@@ -180,12 +180,25 @@ if [ -x "$TARGET" ]; then
 fi
 
 # Lazy version evaluation
-# Priority: RUNE_VERSION > latest release (including pre-release for now)
-# TODO: switch to .../rune/releases/latest
+# Priority: RUNE_VERSION > newest published release marked "Latest".
+#
+# /releases/latest returns the release GitHub flags "Latest" and EXCLUDES
+# pre-releases. Preferred over releases?per_page=1 (created_at order), which
+# can surface an unintended tag after a re-tag/rebuild reshuffles creation
+# time. If no stable release exists yet the endpoint 404s, the body is empty,
+# and the "cannot determine the latest release" path below tells the caller to
+# pin RUNE_VERSION explicitly.
+#
+# Safety: whichever release is "Latest" hands new users the rune-mcp/runed its
+# manifest pins. Those must accept the configure registration_string (3-stage
+# bootstrap) or configure breaks. The release workflow enforces this — a rune
+# tag whose .release-pins.yaml points at pre-1.0 rune-mcp/runed fails to
+# publish (see .github/workflows/release-rune-cli.yml), so an incompatible pin
+# can never become "Latest".
 RUNE_VERSION="${RUNE_VERSION:-}"
 if [ -z "$RUNE_VERSION" ]; then
   echo "rune: resolving latest release..." >&2
-  api="https://api.github.com/repos/CryptoLabInc/rune/releases?per_page=1"
+  api="https://api.github.com/repos/CryptoLabInc/rune/releases/latest"
 
   # Use token if exist
   token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
