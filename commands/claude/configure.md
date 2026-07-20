@@ -1,7 +1,7 @@
 ---
 description: Configure Rune — take the registration string from the invite email; it bootstraps the credentials and brings Rune online. Prompts before overwriting an existing setup.
 argument-hint: <runev1_… registration string>
-allowed-tools: Read, mcp__plugin_rune_rune__configure, mcp__plugin_rune_rune__activate
+allowed-tools: Read, Bash(~/.rune/bin/rune install:*), Bash(${CLAUDE_PLUGIN_ROOT}/bin/rune install:*), mcp__plugin_rune_rune__configure, mcp__plugin_rune_rune__activate
 ---
 
 # /rune:configure — Setup & Reconfigure
@@ -49,6 +49,17 @@ is all that's needed (endpoint, token, and CA are derived from it).
      same string.
    - `state == "active"` — "Rune configured and activated. Organizational memory
      is online." Suggest `/rune:status` later.
+   - `state == "waiting_for_bootstrap"` — credentials are in effect and runed is
+     downloading its embedding model (one-time, after a fresh install). Relay
+     `next_step` — a background watcher completes activation on its own. Do NOT
+     poll or re-run anything.
+   - `next_step` names an agent-recovery `rune install` command — runed could
+     not be spawned because it is not installed yet. The invite is already
+     redeemed and the credentials are saved: run the named `rune install`
+     command via Bash, then call `mcp__plugin_rune_rune__activate` once and
+     branch on its result like `/rune:activate` does. The user never runs
+     `rune install` themselves. Do NOT retry `configure` — the registration
+     string is spent.
    - any other `state` (e.g. `waiting_for_console`) — the invite is already
      redeemed and the credentials are saved, so this is a connectivity/boot
      problem, never a spent-invite one. Relay `next_step` verbatim (it carries
