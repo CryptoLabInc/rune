@@ -15,6 +15,9 @@ Flip Rune from active to dormant. Credentials and connection stay in
    `capture` / `recall` immediately return `PIPELINE_NOT_READY` until
    reactivated.
 2. Render the result:
-   - `ok` with `state == "dormant"` → "Rune is now dormant. Organizational
-     memory is paused — `/rune:activate` to resume."
+   - `ok` with `already_dormant == true` → nothing changed; relay `hint` ("Rune
+     is already dormant. Organizational memory is paused — `/rune:activate` to
+     resume.").
+   - `ok` with `state == "dormant"` → relay `hint` ("Rune is now dormant.
+     Organizational memory is paused — `/rune:activate` to resume.").
    - any other `state` → relay it and suggest `/rune:status` to inspect.

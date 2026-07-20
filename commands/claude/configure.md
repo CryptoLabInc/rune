@@ -1,5 +1,5 @@
 ---
-description: Configure Rune — take the registration string from the invite email, then configure and activate. Prompts before overwriting an existing setup.
+description: Configure Rune — take the registration string from the invite email; it bootstraps the credentials and brings Rune online. Prompts before overwriting an existing setup.
 argument-hint: <runev1_… registration string>
 allowed-tools: Read, mcp__plugin_rune_rune__configure, mcp__plugin_rune_rune__activate
 ---
@@ -7,8 +7,9 @@ allowed-tools: Read, mcp__plugin_rune_rune__configure, mcp__plugin_rune_rune__ac
 # /rune:configure — Setup & Reconfigure
 
 Bring Rune online from the registration string in the user's invite email:
-collect it, call `mcp__plugin_rune_rune__configure`, then
-`mcp__plugin_rune_rune__activate`. TLS is always on — there is no plaintext mode.
+collect it and call `mcp__plugin_rune_rune__configure` — that one call bootstraps
+the credentials and brings the pipelines online. TLS is always on — there is no
+plaintext mode.
 
 ## 1. Existing setup? (reconfigure gate)
 
@@ -33,16 +34,24 @@ is all that's needed (endpoint, token, and CA are derived from it).
   `runev1_`)."
 - Treat it as a credential — never echo it back.
 
-## 3. Configure, then activate
+## 3. Configure (bootstraps + activates)
 
 1. Call `mcp__plugin_rune_rune__configure` with
    `{ "registration_string": "runev1_…" }`. The server runs the 3-stage
    bootstrap (decode → fetch + pin the Console CA → unwrap the one-time handle
-   into the real token), writes `~/.rune/config.json`, and probes.
-   - On `error.code == "REGISTRATION_CONSUMED"`: the one-time handle was spent
-     but the local write failed. Relay `error.recovery_hint`; the user needs a
-     fresh invite. Do NOT retry the same string.
-2. Then call `mcp__plugin_rune_rune__activate` to bring pipelines up. Relay its
-   result — it owns the recovery hints (`hint` / `last_boot_error.hint`);
-   surface them verbatim and do not shell-probe to second-guess the classifier.
-3. On success: "Rune configured and activated." Suggest `/rune:status` later.
+   into the real token), writes `~/.rune/config.json`, and then drives the boot
+   loop to bring the pipelines online — configure owns activation, so a separate
+   `/rune:activate` is not needed. It returns the real `state` and a `next_step`.
+2. Branch on the result:
+   - `error.code == "REGISTRATION_CONSUMED"` — the one-time handle was spent but
+     persisting the credentials failed (disk/permissions, or a locked keyring).
+     Relay `error.recovery_hint`; the user needs a fresh invite. Do NOT retry the
+     same string.
+   - `state == "active"` — "Rune configured and activated. Organizational memory
+     is online." Suggest `/rune:status` later.
+   - any other `state` (e.g. `waiting_for_console`) — the invite is already
+     redeemed and the credentials are saved, so this is a connectivity/boot
+     problem, never a spent-invite one. Relay `next_step` verbatim (it carries
+     the boot error hint) and suggest `/rune:activate` to retry or `/rune:status`
+     to inspect. Do NOT request a new invite. Do not shell-probe to second-guess
+     the classifier.
