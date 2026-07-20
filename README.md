@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="#get-started-in-three-commands"><img alt="Claude Code plugin" src=".github/assets/badge-claude-code.svg" width="178"></a>
-  <a href="https://github.com/CryptoLabInc/rune/releases"><img alt="Release v1.0.0-alpha" src=".github/assets/badge-release.svg" width="178"></a>
+  <a href="https://github.com/CryptoLabInc/rune/releases"><img alt="Release v1.0.0" src=".github/assets/badge-release.svg" width="178"></a>
   <a href="LICENSE"><img alt="Apache License 2.0" src=".github/assets/badge-license.svg" width="178"></a>
 </p>
 

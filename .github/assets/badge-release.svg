@@ -1,5 +1,5 @@
-<svg width="190" height="44" viewBox="0 0 190 44" fill="none" xmlns="http://www.w3.org/2000/svg" data-release-version="v1.0.0-alpha">
-  <title id="release-badge-title">Release v1.0.0-alpha</title>
+<svg width="190" height="44" viewBox="0 0 190 44" fill="none" xmlns="http://www.w3.org/2000/svg" data-release-version="v1.0.0">
+  <title id="release-badge-title">Release v1.0.0</title>
   <defs>
     <linearGradient id="badge-bg" x1="4" y1="2" x2="186" y2="42" gradientUnits="userSpaceOnUse">
       <stop stop-color="#13263b"/>
@@ -11,6 +11,6 @@
   <path d="M17 17H23.5L29 22.5L22.5 29L17 23.5V17Z" stroke="#72f5dc" stroke-width="1.6" stroke-linejoin="round"/>
   <circle cx="21" cy="21" r="1.5" fill="#72f5dc"/>
   <text x="43" y="16" fill="#7890a3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="8" font-weight="700" letter-spacing="1.35">RELEASE</text>
-  <text id="release-version" x="43" y="32" fill="#f3f8fb" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="700">v1.0.0-alpha</text>
+  <text id="release-version" x="43" y="32" fill="#f3f8fb" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="700">v1.0.0</text>
   <circle cx="173" cy="22" r="3" fill="#5cffd6"/>
 </svg>
