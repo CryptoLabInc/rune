@@ -1,0 +1,126 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example, v1.0.0-alpha.1)"
+        required: true
+        type: string
+      target_branch:
+        description: "Existing release/* branch to update"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prepare-release-${{ github.repository }}-${{ inputs.target_branch }}
+  cancel-in-progress: false
+
+jobs:
+  update-release-badge:
+    name: Update release badge
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+    steps:
+      - name: Validate target branch
+        shell: bash
+        run: |
+          if [[ "$TARGET_BRANCH" != release/* ]]; then
+            echo "target_branch must start with release/" >&2
+            exit 1
+          fi
+          git check-ref-format --branch "$TARGET_BRANCH"
+
+      - name: Check out release branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_branch }}
+          fetch-depth: 0
+
+      - name: Update release badge
+        id: badge
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const rawVersion = (process.env.RELEASE_VERSION || "").trim();
+          const version = rawVersion.startsWith("v") ? rawVersion : `v${rawVersion}`;
+          const semver = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
+          if (!semver.test(version) || version.length > 24) {
+            throw new Error(`Invalid release version: ${rawVersion}`);
+          }
+
+          const candidates = [
+            ".github/assets/badge-release.svg",
+            ".github/assets/repo-badges.svg",
+          ];
+          const assets = candidates.filter((path) =>
+            fs.existsSync(path) && fs.readFileSync(path, "utf8").includes("data-release-version=")
+          );
+          if (assets.length !== 1) {
+            throw new Error(`Expected one marked release badge, found ${assets.length}`);
+          }
+
+          const asset = assets[0];
+          let svg = fs.readFileSync(asset, "utf8");
+          const marker = /data-release-version="([^"]+)"/g;
+          const markers = [...svg.matchAll(marker)];
+          if (markers.length !== 1) {
+            throw new Error("Release badge must contain exactly one version marker");
+          }
+          const previous = markers[0][1];
+
+          const versionText = /(<text\b[^>]*\bid="release-version"[^>]*>)[^<]*(<\/text>)/g;
+          if ([...svg.matchAll(versionText)].length !== 1) {
+            throw new Error("Release badge must contain exactly one release-version text node");
+          }
+
+          const title = /<title\b[^>]*\bid="release-badge-title"[^>]*>([^<]*)<\/title>/g;
+          const titles = [...svg.matchAll(title)];
+          if (titles.length !== 1 || titles[0][1].split(previous).length !== 2) {
+            throw new Error("Release badge title must contain the marked version exactly once");
+          }
+
+          svg = svg
+            .replace(/data-release-version="[^"]+"/, `data-release-version="${version}"`)
+            .replace(versionText, `$1${version}$2`)
+            .replace(title, (match) => match.replace(previous, version));
+
+          const readmePath = "README.md";
+          let readme = fs.readFileSync(readmePath, "utf8");
+          const previousLabel = `Release ${previous}`;
+          const occurrences = readme.split(previousLabel).length - 1;
+          if (occurrences !== 1) {
+            throw new Error(`README must contain "${previousLabel}" exactly once`);
+          }
+          readme = readme.replace(previousLabel, `Release ${version}`);
+
+          fs.writeFileSync(asset, svg);
+          fs.writeFileSync(readmePath, readme);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `asset=${asset}\nversion=${version}\n`);
+          NODE
+
+      - name: Commit badge update
+        shell: bash
+        env:
+          BADGE_ASSET: ${{ steps.badge.outputs.asset }}
+          NORMALIZED_VERSION: ${{ steps.badge.outputs.version }}
+        run: |
+          git add -- README.md "$BADGE_ASSET"
+          if git diff --cached --quiet; then
+            echo "Release badge is already set to $NORMALIZED_VERSION"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs: prepare $NORMALIZED_VERSION release badge"
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+
