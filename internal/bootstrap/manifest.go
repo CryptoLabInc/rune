@@ -1,7 +1,6 @@
 package bootstrap
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,10 +20,12 @@ const defaultManifestFetchTimeout = 30 * time.Second
 //	  "version": 1,
 //	  "rune_mcp_version": "v0.1.0",
 //	  "runed_version":    "v0.1.0-alpha.1",
+//	  "cli_version":      "v1.0.0",
 //	  "platforms": {
 //	    "linux-amd64": {
 //	      "runed":    {"url": "...", "sha256": "...", "size": 8123456},
-//	      "rune_mcp": {"url": "...", "sha256": "...", "size": 16234567}
+//	      "rune_mcp": {"url": "...", "sha256": "...", "size": 16234567},
+//	      "rune_cli": {"url": "...", "sha256": "...", "size": 12345678}
 //	    },
 //	    "darwin-arm64": { ... }
 //	  }
@@ -37,6 +38,7 @@ type Manifest struct {
 
 	PluginVersion    string `json:"plugin_version,omitempty"`     // plugin package version; optional
 	MinPluginVersion string `json:"min_plugin_version,omitempty"` // hard floor for `rune update`; optional
+	CLIVersion       string `json:"cli_version,omitempty"`        // rune CLI release tag; optional
 
 	Platforms map[string]PlatformArtifacts `json:"platforms"`
 }
@@ -44,6 +46,7 @@ type Manifest struct {
 type PlatformArtifacts struct {
 	Runed   ArtifactSpec `json:"runed"`    // ~/.runed/bin
 	RuneMCP ArtifactSpec `json:"rune_mcp"` // ~/.rune/bin
+	RuneCLI ArtifactSpec `json:"rune_cli"` // ~/.rune/bin/rune; optional
 }
 
 type ArtifactSpec struct {
@@ -78,10 +81,9 @@ func FetchManifest(ctx context.Context, manifestURL string, logf func(string, ..
 		return nil, err
 	}
 
+	// No-op for unknown fields on older binaries rather than block update
 	var m Manifest
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&m); err != nil {
+	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, fmt.Errorf("manifest: parse JSON: %w", err)
 	}
 	if m.Version != ManifestVersion {

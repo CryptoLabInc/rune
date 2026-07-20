@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 func runVersion(w io.Writer) int {
@@ -22,6 +22,9 @@ func runVersion(w io.Writer) int {
 		fmt.Fprintf(w, "manifest: %s\n", manifest)
 	} else {
 		fmt.Fprintln(w, "manifest missing: supply --manifest-url or RUNE_MANIFEST")
+	}
+	if updateManifestURL != "" {
+		fmt.Fprintf(w, "update channel: %s\n", updateManifestURL)
 	}
 
 	// Show latest installed rune-mcp/runed (skip if not installed yet)

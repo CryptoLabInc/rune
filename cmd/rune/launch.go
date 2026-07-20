@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 const gracefulShutdownGrace = 5 * time.Second

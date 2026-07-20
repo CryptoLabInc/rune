@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 func TestRunMCPServer_InstallErrorFailFast(t *testing.T) {
@@ -166,6 +166,66 @@ func stubSpawn(t *testing.T) *int {
 	t.Cleanup(func() { spawnUpdateFn = prev })
 
 	return &n
+}
+
+// The background check is the only path that carries a CLI update to an
+// installed fleet unattended, so it must carry rune_cli - and ONLY rune_cli:
+// rune-mcp/runed swaps change what a live session is talking to and must stay
+// behind an explicit `rune update`.
+func TestDetachedUpdateArgs_CLIOnly(t *testing.T) {
+	args := detachedUpdateArgs("http://example.test/manifest.json")
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "update --only ") {
+		t.Fatalf("argv is not an `update --only` invocation: %q", joined)
+	}
+
+	var only string
+	for i, a := range args {
+		if a == "--only" && i+1 < len(args) {
+			only = args[i+1]
+		}
+	}
+	set, err := parseOnly(only)
+	if err != nil {
+		t.Fatalf("--only %q does not parse: %v", only, err)
+	}
+	if !set[bootstrap.StepRuneCLI] {
+		t.Errorf("--only %q must include %s (unattended CLI self-update)", only, bootstrap.StepRuneCLI)
+	}
+	for _, step := range []string{bootstrap.StepRuneMCP, bootstrap.StepRuned} {
+		if set[step] {
+			t.Errorf("--only %q must not include %s: swapping it disrupts a live session", only, step)
+		}
+	}
+	if !strings.Contains(joined, "--manifest-url http://example.test/manifest.json") {
+		t.Errorf("manifest URL not forwarded: %q", joined)
+	}
+}
+
+func TestResolvedManifest_PrefersChannelThenEnv(t *testing.T) {
+	savedPinned, savedChannel := manifestURL, updateManifestURL
+	t.Cleanup(func() { manifestURL, updateManifestURL = savedPinned, savedChannel })
+
+	manifestURL = "http://pinned.test/manifest.json"
+	updateManifestURL = "http://channel.test/manifest.json"
+
+	t.Setenv("RUNE_MANIFEST", "")
+	if got := resolvedManifest(); got != updateManifestURL {
+		t.Errorf("auto-check must poll the channel, not the pinned manifest: got %q", got)
+	}
+
+	t.Setenv("RUNE_MANIFEST", "http://env.test/manifest.json")
+	if got := resolvedManifest(); got != "http://env.test/manifest.json" {
+		t.Errorf("RUNE_MANIFEST must win: got %q", got)
+	}
+
+	// Dev build: no channel baked, fall back to the pinned manifest
+	t.Setenv("RUNE_MANIFEST", "")
+	updateManifestURL = ""
+	if got := resolvedManifest(); got != manifestURL {
+		t.Errorf("without a baked channel, fall back to pinned: got %q", got)
+	}
 }
 
 func TestTryAutoCheck_Due(t *testing.T) {

@@ -71,6 +71,7 @@ jobs:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
           MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/manifest.json
+          UPDATE_MANIFEST_URL: https://github.com/${{ github.repository }}/releases/latest/download/manifest.json
         run: |
           # EXT=""
           # if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
@@ -78,7 +79,7 @@ jobs:
           ASSET="rune-${{ matrix.os }}-${{ matrix.arch }}"
           mkdir -p dist
           go build -trimpath \
-            -ldflags "-s -w -X main.runeVersion=${VERSION} -X main.manifestURL=${MANIFEST_URL}" \
+            -ldflags "-s -w -X main.runeVersion=${VERSION} -X main.manifestURL=${MANIFEST_URL} -X main.updateManifestURL=${UPDATE_MANIFEST_URL}" \
             -o "dist/${ASSET}" \
             ./cmd/rune
           ls -lh "dist/${ASSET}"
@@ -227,6 +228,21 @@ jobs:
           fi
           echo "Pinning rune-mcp=${RUNE_MCP_VERSION}, runed=${RUNED_VERSION}"
 
+          PLUGIN_VERSION=$(jq -r '.version // empty' .claude-plugin/plugin.json)
+          MIN_PLUGIN_VERSION=$(awk '/^min_plugin_version:/ {print $2}' .release-pins.yaml)
+          if [ -z "${PLUGIN_VERSION:-}" ] || [ -z "${MIN_PLUGIN_VERSION:-}" ]; then
+            echo "::error::missing plugin version (plugin.json version=${PLUGIN_VERSION}, .release-pins.yaml min_plugin_version=${MIN_PLUGIN_VERSION})" >&2
+            exit 1
+          fi
+
+          if [[ "${MIN_PLUGIN_VERSION#v}" =~ ^[0-9]+(\.[0-9]+)*$ && "${PLUGIN_VERSION#v}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            if [ "$(printf '%s\n%s\n' "${MIN_PLUGIN_VERSION#v}" "${PLUGIN_VERSION#v}" | sort -V | head -1)" != "${MIN_PLUGIN_VERSION#v}" ]; then
+              echo "::error::min_plugin_version ${MIN_PLUGIN_VERSION} is above the shipped plugin version ${PLUGIN_VERSION}" >&2
+              exit 1
+            fi
+          fi
+          echo "Plugin: plugin_version=${PLUGIN_VERSION}, min_plugin_version=${MIN_PLUGIN_VERSION}"
+
           mkdir -p _downstream/runed _downstream/rune-mcp
 
           # runed
@@ -291,12 +307,30 @@ jobs:
           RUNED_BASE="https://github.com/CryptoLabInc/runed/releases/download/${RUNED_VERSION}"
           MCP_BASE="https://github.com/CryptoLabInc/rune-mcp/releases/download/${RUNE_MCP_VERSION}"
 
+          # rune CLI self-update artifacts
+          CLI_BASE="https://github.com/${{ github.repository }}/releases/download/${VERSION}"
+          cli_sha() {
+            local sha
+            sha=$(awk -v f="$1" '$2 == f {print $1}' dist/checksums.txt)
+            if [ -z "$sha" ]; then
+              echo "::error::no checksum for $1 in dist/checksums.txt" >&2
+              return 1
+            fi
+            echo "$sha"
+          }
+          CLI_DARWIN_ARM64_SHA=$(cli_sha rune-darwin-arm64)
+          CLI_LINUX_AMD64_SHA=$(cli_sha rune-linux-amd64)
+          CLI_LINUX_ARM64_SHA=$(cli_sha rune-linux-arm64)
+
           mkdir -p dist
           cat > dist/manifest.json <<EOF
           {
             "version": 1,
             "rune_mcp_version": "${RUNE_MCP_VERSION}",
             "runed_version": "${RUNED_VERSION}",
+            "plugin_version": "${PLUGIN_VERSION}",
+            "min_plugin_version": "${MIN_PLUGIN_VERSION}",
+            "cli_version": "${VERSION}",
             "platforms": {
               "darwin-arm64": {
                 "runed": {
@@ -307,6 +341,10 @@ jobs:
                 "rune_mcp": {
                   "url":    "${MCP_BASE}/${MCP_DARWIN_ARM64}",
                   "sha256": "${MCP_DARWIN_ARM64_SHA}"
+                },
+                "rune_cli": {
+                  "url":    "${CLI_BASE}/rune-darwin-arm64",
+                  "sha256": "${CLI_DARWIN_ARM64_SHA}"
                 }
               },
               "linux-amd64": {
@@ -318,6 +356,10 @@ jobs:
                 "rune_mcp": {
                   "url":    "${MCP_BASE}/${MCP_LINUX_AMD64}",
                   "sha256": "${MCP_LINUX_AMD64_SHA}"
+                },
+                "rune_cli": {
+                  "url":    "${CLI_BASE}/rune-linux-amd64",
+                  "sha256": "${CLI_LINUX_AMD64_SHA}"
                 }
               },
               "linux-arm64": {
@@ -329,6 +371,10 @@ jobs:
                 "rune_mcp": {
                   "url":    "${MCP_BASE}/${MCP_LINUX_ARM64}",
                   "sha256": "${MCP_LINUX_ARM64_SHA}"
+                },
+                "rune_cli": {
+                  "url":    "${CLI_BASE}/rune-linux-arm64",
+                  "sha256": "${CLI_LINUX_ARM64_SHA}"
                 }
               }
             }

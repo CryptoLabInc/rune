@@ -9,6 +9,8 @@
 #   mcp       - rune-mcp raw binary update test
 #   runed     - runed update test as real tar.gz with live supervisor
 #   plugin    - version outdated guard test
+#   cli       - CLI self-update test (swap, integrity, downgrade guard)
+#   wrapper   - plugin wrapper CLI floor / migration test
 #   autocheck - automatic update test
 #   noauto    - RUNE_NO_AUTO_UPDATE disable auto check
 #   lock      - concurrent install test
@@ -287,8 +289,102 @@ scenario_plugin() {
   assert_contains "$(cat "$RUNE_HOME/bin/rune-mcp")" "v0.3.0 ADVISORY" "advisory update swapped"
 }
 
+scenario_cli() {
+  echo "=== scenario: CLI self-update ==="
+  reset_home
+  raw_binary rune-mcp "rune-mcp v0.1.0"
+  raw_binary runed "runed v0.1.0"
+  MCP_URL="$BASE/rune-mcp" MCP_FILE="$WORK/release/rune-mcp" MCP_VER=v0.1.0 MCP_EXTRACT="" \
+    RUNED_URL="$BASE/runed" RUNED_FILE="$WORK/release/runed" RUNED_VER=v0.1.0 RUNED_EXTRACT="" \
+    write_manifest
+
+  run "$RUNE" install
+  assert_eq "$RC" 0 "seed install"
+
+  # New CLI release
+  raw_binary rune-cli-new "rune CLI v9.9.9 UPDATE TEST"
+  MCP_URL="$BASE/rune-mcp" MCP_FILE="$WORK/release/rune-mcp" MCP_VER=v0.1.0 MCP_EXTRACT="" \
+    RUNED_URL="$BASE/runed" RUNED_FILE="$WORK/release/runed" RUNED_VER=v0.1.0 RUNED_EXTRACT="" \
+    CLI_VER=v9.9.9 CLI_URL="$BASE/rune-cli-new" CLI_FILE="$WORK/release/rune-cli-new" \
+    write_manifest
+
+  run "$RUNE" update --check
+  assert_contains "$OUT" "rune_cli: v0.4.0-dev -> v9.9.9" "--check reports CLI outdated"
+
+  run "$RUNE" update --only rune_cli
+  assert_eq "$RC" 0 "update --only rune_cli exits 0"
+  assert_contains "$OUT" "updated rune_cli: v0.4.0-dev -> v9.9.9" "reports the apply"
+  assert_contains "$(cat "$RUNE_HOME/bin/rune")" "v9.9.9 UPDATE TEST" "canonical ~/.rune/bin/rune swapped"
+
+  # Integrity: corrupted CLI download ignored
+  raw_binary rune-cli-new "rune CLI v10.0.0 CORRUPTED"
+  MCP_URL="$BASE/rune-mcp" MCP_FILE="$WORK/release/rune-mcp" MCP_VER=v0.1.0 MCP_EXTRACT="" \
+    RUNED_URL="$BASE/runed" RUNED_FILE="$WORK/release/runed" RUNED_VER=v0.1.0 RUNED_EXTRACT="" \
+    CLI_VER=v10.0.0 CLI_URL="$BASE/rune-cli-new" CLI_FILE="$WORK/release/rune-cli-new" \
+    CLI_SHA_OVERRIDE="$(printf '0%.0s' {1..64})" write_manifest
+
+  run "$RUNE" update --only rune_cli
+  assert_eq "$RC" 1 "checksum mismatch fails the update"
+  assert_contains "$OUT" "checksum mismatch" "reports the mismatch"
+  assert_contains "$(cat "$RUNE_HOME/bin/rune")" "v9.9.9 UPDATE TEST" "bad download did NOT swap the CLI"
+
+  # Downgarde guard: older release than running binary is not updated
+  MCP_URL="$BASE/rune-mcp" MCP_FILE="$WORK/release/rune-mcp" MCP_VER=v0.1.0 MCP_EXTRACT="" \
+    RUNED_URL="$BASE/runed" RUNED_FILE="$WORK/release/runed" RUNED_VER=v0.1.0 RUNED_EXTRACT="" \
+    CLI_VER=v0.0.1 CLI_URL="$BASE/rune-cli-new" CLI_FILE="$WORK/release/rune-cli-new" \
+    write_manifest
+
+  run "$RUNE" update --check
+  assert_missing "$OUT" "rune_cli:" "--check does not offer a downgrade"
+  assert_contains "$OUT" "up to date" "downgrade counts as up to date"
+}
+
+scenario_wrapper() {
+  echo "=== scenario: wrapper CLI floor ==="
+  reset_home
+  mkdir -p "$RUNE_HOME/bin"
+  local wrapper="$REPO/bin/rune"
+
+  fake_cli() {
+    printf '#!/bin/sh\nif [ "$1" = version ]; then echo "rune %s"; exit 0; fi\necho "RAN(%s): $*"\n' "$1" "$1" >"$RUNE_HOME/bin/rune"
+    chmod +x "$RUNE_HOME/bin/rune"
+  }
+
+  # At/above the floor: no upgrade
+  fake_cli v1.0.0
+  run env RUNE_HOME="$RUNE_HOME" RUNE_CLI_MIN=v1.0.0 bash "$wrapper" mcp-server
+  assert_eq "$RC" 0 "at-floor CLI delegates"
+  assert_contains "$OUT" "RAN(v1.0.0): mcp-server" "at-floor CLI actually ran"
+  assert_missing "$OUT" "upgrading" "at-floor CLI is not upgraded"
+
+  # Below the floor without new release: keep it, do NOT re-download
+  fake_cli v0.4.1
+  run env RUNE_HOME="$RUNE_HOME" RUNE_CLI_MIN=v1.0.0 RUNE_VERSION=v0.4.1 bash "$wrapper" mcp-server
+  assert_eq "$RC" 0 "CLI under floor but still rune since there is no new release"
+  assert_contains "$OUT" "is older than this plugin needs" "floor gap is reported"
+  assert_contains "$OUT" "no new release after v0.4.1" "no re-download"
+  assert_contains "$OUT" "RAN(v0.4.1): mcp-server" "old CLI still serves the session"
+
+  # Non-bootstrap subcommand
+  fake_cli v0.4.1
+  run env RUNE_HOME="$RUNE_HOME" RUNE_CLI_MIN=v1.0.0 bash "$wrapper" verify
+  assert_eq "$RC" 0 "non-bootstrap subcommand delegates"
+  assert_contains "$OUT" "RAN(v0.4.1): verify" "old CLI handled it"
+  assert_missing "$OUT" "upgrading" "no upgrade attempt off the bootstrap path"
+
+  fake_cli v0.1.0
+  run env RUNE_HOME="$RUNE_HOME" RUNE_CLI_MIN= bash "$wrapper" mcp-server
+  assert_eq "$RC" 0 "empty floor disable check"
+  assert_contains "$OUT" "RAN(v0.1.0): mcp-server" "old CLI delegate when floor is off"
+
+  # Broken CLI regard as old
+  printf '#!/bin/sh\nexit 3\n' >"$RUNE_HOME/bin/rune"; chmod +x "$RUNE_HOME/bin/rune"
+  run env RUNE_HOME="$RUNE_HOME" RUNE_CLI_MIN=v1.0.0 RUNE_VERSION=v0.4.1 bash "$wrapper" mcp-server
+  assert_contains "$OUT" "is older than this plugin needs" "unparseable version treated as below floor"
+}
+
 scenario_autocheck() {
-  echo "=== scenario: auto-check ==="
+  echo "=== scenario: auto-check (CLI only) ==="
   need timeout
   reset_home
   raw_binary rune-mcp "rune-mcp v0.1.0"
@@ -300,10 +396,12 @@ scenario_autocheck() {
   run "$RUNE" install
   assert_eq "$RC" 0 "seed install v0.1.0"
 
-  # Publish new rune-mcp to trigger auto-check
+  # Publish new rune-mcp and CLI
   raw_binary rune-mcp "rune-mcp v0.2.0 AUTO"
+  raw_binary rune-cli-new "rune CLI v9.9.9 AUTO"
   MCP_URL="$BASE/rune-mcp" MCP_FILE="$WORK/release/rune-mcp" MCP_VER=v0.2.0 MCP_EXTRACT="" \
     RUNED_URL="$BASE/runed" RUNED_FILE="$WORK/release/runed" RUNED_VER=v0.1.0 RUNED_EXTRACT="" \
+    CLI_VER=v9.9.9 CLI_URL="$BASE/rune-cli-new" CLI_FILE="$WORK/release/rune-cli-new" \
     write_manifest
 
   # Run auto check
@@ -314,11 +412,13 @@ scenario_autocheck() {
   else
     fail "spawn did not run the auto-check (no stamp)"
   fi
-  if poll_contains "$RUNE_HOME/bin/rune-mcp" "v0.2.0 AUTO" 30 || poll_contains "$UPDATE_LOG" "rune_mcp" 5; then
-    pass "spawn fired a detached rune update (rune-mcp swapped to v0.2.0)"
+  if poll_contains "$RUNE_HOME/bin/rune" "v9.9.9 AUTO" 30; then
+    pass "spawn fired a detached rune update (CLI swapped to v9.9.9)"
   else
-    fail "spawn did not fire the detached rune update (no swap and no update.log within timeout)"
+    fail "spawn did not self-update the CLI (no swap within timeout)"
   fi
+  assert_contains "$(cat "$RUNE_HOME/bin/rune-mcp")" "v0.1.0" "auto-check do not update rune-mcp"
+  assert_missing "$(cat "$UPDATE_LOG" 2>/dev/null || true)" "updated rune_mcp" "auto-check did not apply rune_mcp"
   stop_mcp
 
   # Initial setup -> no auto check
@@ -415,9 +515,14 @@ if os.environ.get("PLUGIN_VER"):
     m["plugin_version"] = os.environ["PLUGIN_VER"]
 if os.environ.get("MIN_PLUGIN_VER"):
     m["min_plugin_version"] = os.environ["MIN_PLUGIN_VER"]
-# optional integrity-test override: advertise a wrong rune-mcp hash
+if os.environ.get("CLI_VER"):
+    m["cli_version"] = os.environ["CLI_VER"]
+    m["platforms"][tuple_]["rune_cli"] = art(os.environ["CLI_URL"], os.environ["CLI_FILE"], "")
+# optional integrity-test overrides: advertise a wrong hash
 if os.environ.get("MCP_SHA_OVERRIDE"):
     m["platforms"][tuple_]["rune_mcp"]["sha256"] = os.environ["MCP_SHA_OVERRIDE"]
+if os.environ.get("CLI_SHA_OVERRIDE"):
+    m["platforms"][tuple_]["rune_cli"]["sha256"] = os.environ["CLI_SHA_OVERRIDE"]
 json.dump(m, open(os.environ["OUT_MANIFEST"], "w"), indent=2)
 PY
 
@@ -436,11 +541,13 @@ case "$SCENARIO" in
   mcp) scenario_mcp ;;
   runed) scenario_runed ;;
   plugin) scenario_plugin ;;
+  cli) scenario_cli ;;
+  wrapper) scenario_wrapper ;;
   autocheck) scenario_autocheck ;;
   noauto) scenario_noauto ;;
   lock) scenario_lock ;;
-  all) scenario_mcp; echo; scenario_runed; echo; scenario_plugin; echo; scenario_autocheck; echo; scenario_noauto; echo; scenario_lock ;;
-  *) echo "unknown scenario: $SCENARIO (want: mcp|runed|plugin|autocheck|noauto|lock|all)" >&2; exit 2 ;;
+  all) scenario_mcp; echo; scenario_runed; echo; scenario_plugin; echo; scenario_cli; echo; scenario_wrapper; echo; scenario_autocheck; echo; scenario_noauto; echo; scenario_lock ;;
+  *) echo "unknown scenario: $SCENARIO (want: mcp|runed|plugin|cli|wrapper|autocheck|noauto|lock|all)" >&2; exit 2 ;;
 esac
 
 echo

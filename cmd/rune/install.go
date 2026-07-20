@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/CryptoLabInc/rune-cli/internal/bootstrap"
+	"github.com/CryptoLabInc/rune/internal/bootstrap"
 )
 
 func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) int {

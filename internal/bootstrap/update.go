@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -56,14 +57,15 @@ func normalizeVersion(v string) string {
 	return v
 }
 
-func planUpdate(installed *InstalledManifest, manifest *Manifest) UpdateList {
+func planUpdate(installed *InstalledManifest, manifest *Manifest, cliVersion string) UpdateList {
 	plan := UpdateList{}
 	if manifest == nil {
 		return plan // no updates
 	}
 
-	for _, step := range []string{StepRuned, StepRuneMCP} {
+	for _, step := range []string{StepRuned, StepRuneMCP, StepRuneCLI} {
 		var inst, avail string
+		var outdated bool
 
 		switch step {
 		case StepRuned:
@@ -71,24 +73,30 @@ func planUpdate(installed *InstalledManifest, manifest *Manifest) UpdateList {
 			if installed != nil {
 				inst = installed.RunedVersion
 			}
+			outdated = avail != "" && inst != "" && normalizeVersion(inst) != normalizeVersion(avail)
 		case StepRuneMCP:
 			avail = manifest.RuneMCPVersion
 			if installed != nil {
 				inst = installed.RuneMCPVersion
 			}
+			outdated = avail != "" && inst != "" && normalizeVersion(inst) != normalizeVersion(avail)
+		case StepRuneCLI:
+			avail = manifest.CLIVersion
+			inst = cliVersion
+			outdated = avail != "" && inst != "" && compareVersions(inst, avail) < 0
 		}
 
 		plan.Artifacts = append(plan.Artifacts, ArtifactVersion{
 			Step:      step,
 			Installed: inst,
 			Available: avail,
-			Outdated:  avail != "" && inst != "" && normalizeVersion(inst) != normalizeVersion(avail),
+			Outdated:  outdated,
 		})
 	}
 	return plan
 }
 
-func CheckUpdate(ctx context.Context, manifestURL string, logf func(format string, args ...any)) (*UpdateList, error) {
+func CheckUpdate(ctx context.Context, manifestURL, cliVersion string, logf func(format string, args ...any)) (*UpdateList, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -99,18 +107,18 @@ func CheckUpdate(ctx context.Context, manifestURL string, logf func(format strin
 		return nil, err
 	}
 
-	return PlanFromManifest(manifest)
+	return PlanFromManifest(manifest, cliVersion)
 }
 
-func PlanFromManifest(manifest *Manifest) (*UpdateList, error) {
+func PlanFromManifest(manifest *Manifest, cliVersion string) (*UpdateList, error) {
 	paths, err := Resolve()
 	if err != nil {
 		return nil, err
 	}
 
 	// Get local installed info
-	installed, _ := ReadInstalledManifest(paths) // nil: unknown version
-	plan := planUpdate(installed, manifest)      // build update plan
+	installed, _ := ReadInstalledManifest(paths)        // nil: unknown version
+	plan := planUpdate(installed, manifest, cliVersion) // build update plan
 
 	return &plan, nil
 }
@@ -207,4 +215,87 @@ func UpdateArtifact(ctx context.Context, manifestURL, step string, afterInstall 
 	rec.InstalledAt = time.Now().UTC().Format(time.RFC3339)
 
 	return version, writeManifest(paths, rec)
+}
+
+func ChannelBehind(m *Manifest, cliVersion string) bool {
+	if m == nil || cliVersion == "" {
+		return false // unknown running version: leave the plan alone
+	}
+	if m.CLIVersion == "" {
+		return true // predates self-update
+	}
+
+	return compareVersions(m.CLIVersion, cliVersion) < 0
+}
+
+var ErrCLIOutdated = errors.New("update: CLI is not newer than exsiting binary")
+
+// cliVersion is the running binary's own version. The strictly-newer gate is
+// re-checked here against the manifest actually being installed from: the
+// caller planned against an earlier fetch and the channel can move in
+// between, so trusting the plan alone would let a stale plan swap an older
+// binary over a newer one.
+func UpdateCLI(ctx context.Context, manifestURL, cliVersion string, logf func(format string, args ...any)) (string, error) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+
+	manifest, err := FetchManifest(ctx, manifestURL, logf)
+	if err != nil {
+		return "", err
+	}
+	if manifest.CLIVersion == "" {
+		return "", fmt.Errorf("update: manifest declares no cli_version")
+	}
+	if cliVersion != "" && compareVersions(cliVersion, manifest.CLIVersion) >= 0 {
+		return "", fmt.Errorf("%w: channel %s, running %s", ErrCLIOutdated, manifest.CLIVersion, cliVersion)
+	}
+
+	tuple := PlatformTuple()
+	arts, ok := manifest.Platforms[tuple]
+	if !ok {
+		return "", fmt.Errorf("%w: %s", ErrNoArtifactForPlatform, tuple)
+	}
+	spec := arts.RuneCLI
+	if spec.URL == "" || spec.SHA256 == "" {
+		return "", fmt.Errorf("manifest: rune_cli artifact for %s missing url or sha256", tuple)
+	}
+
+	paths, err := Resolve()
+	if err != nil {
+		return "", err
+	}
+	if err := paths.EnsureDirs(); err != nil {
+		return "", err
+	}
+
+	unlock, err := acquireInstallLock(ctx, paths.InstallLock, InstallLockTimeout)
+	if err != nil {
+		return "", fmt.Errorf("update: acquire lock: %w", err)
+	}
+	defer unlock()
+
+	if err := installArtifact(ctx, paths, spec, paths.RuneCLIBinary, nil, logf); err != nil {
+		return "", err
+	}
+
+	rec, _ := ReadInstalledManifest(paths)
+	if rec == nil {
+		rec = &InstalledManifest{ManifestVersion: manifest.Version, Platform: tuple}
+	}
+	if rec.Artifacts == nil {
+		rec.Artifacts = map[string]InstalledArtifact{}
+	}
+
+	entry := InstalledArtifact{URL: spec.URL, SHA256: spec.SHA256, DestSHA256: spec.SHA256, Path: paths.RuneCLIBinary, Size: spec.Size}
+	if info, statErr := os.Stat(paths.RuneCLIBinary); statErr == nil {
+		entry.Size = info.Size()
+	}
+	rec.Artifacts[StepRuneCLI] = entry
+
+	rec.ManifestURL = manifestURL
+	rec.ManifestVersion = manifest.Version
+	rec.InstalledAt = time.Now().UTC().Format(time.RFC3339)
+
+	return manifest.CLIVersion, writeManifest(paths, rec) // return new CLI version
 }

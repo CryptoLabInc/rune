@@ -1,5 +1,5 @@
-module github.com/CryptoLabInc/rune-cli
+module github.com/CryptoLabInc/rune
 
 go 1.26.2
 
-require golang.org/x/sys v0.45.0 // indirect
+require golang.org/x/sys v0.45.0

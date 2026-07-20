@@ -110,15 +110,20 @@ func TestFetchManifest_RejectsEmptyPlatforms(t *testing.T) {
 	}
 }
 
-func TestFetchManifest_RejectsUnknownFields(t *testing.T) {
+// Unknown fields must be tolerated: deployed binaries poll the shared
+// "latest" channel, whose manifest gains fields over time.
+func TestFetchManifest_ToleratesUnknownFields(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(fullManifestJSON(`, "extra": "field"`)))
+		_, _ = w.Write([]byte(fullManifestJSON(`, "future_field": "ignored"`)))
 	}))
 	defer srv.Close()
 
-	_, err := FetchManifest(context.Background(), srv.URL, nil)
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Errorf("want unknown-field rejection, got %v", err)
+	m, err := FetchManifest(context.Background(), srv.URL, nil)
+	if err != nil {
+		t.Fatalf("unknown fields must not fail the parse: %v", err)
+	}
+	if m.RuneMCPVersion != "v0.1.0" {
+		t.Errorf("known fields must still decode: %+v", m)
 	}
 }
 
