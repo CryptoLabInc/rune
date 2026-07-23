@@ -72,9 +72,7 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 			fmt.Fprintf(stderr, "install failed: %v\n", err)
 		} else {
 			fmt.Fprintln(stderr, "ready.")
-			fmt.Fprintln(stderr, "next:")
-			fmt.Fprintln(stderr, "  1. in Claude, run /rune:configure to set up Console credentials")
-			fmt.Fprintln(stderr, "  2. then /rune:activate")
+			printNextSteps(stderr)
 		}
 	}
 
@@ -82,6 +80,43 @@ func runInstall(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return 1
 	}
 	return 0
+}
+
+func printNextSteps(stderr io.Writer) {
+	if configuredEndpoint() != "" {
+		fmt.Fprintln(stderr, "next:")
+		fmt.Fprintln(stderr, "  Console credentials are configured - run /rune:activate to make Rune available")
+		fmt.Fprintln(stderr, "  (or /rune:status to check health)")
+		return
+	}
+
+	fmt.Fprintln(stderr, "next:")
+	fmt.Fprintln(stderr, "  1. in Claude, run /rune:configure to set up Console credentials")
+	fmt.Fprintln(stderr, "  2. then /rune:activate")
+}
+
+func configuredEndpoint() string {
+	paths, err := bootstrap.Resolve()
+	if err != nil {
+		return ""
+	}
+
+	data, err := os.ReadFile(paths.RuneConfig)
+	if err != nil {
+		return ""
+	}
+
+	var cfg struct {
+		Console struct {
+			Endpoint string `json:"endpoint"`
+		} `json:"console"`
+	}
+
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+
+	return cfg.Console.Endpoint
 }
 
 type jsonEvent struct {
