@@ -95,11 +95,10 @@ esac
 # Concurrency-safe CLI download
 mkdir -p "$RUNE_HOME"
 LOCK_DIR="$RUNE_HOME/bootstrap.lock.d"
-TMP=""
+CACHE_DIR="$RUNE_HOME/cache"
 SUMS=""
 OWNER_TOKEN=""
 cleanup() {
-  [ -n "$TMP" ] && rm -f "$TMP"
   [ -n "$SUMS" ] && rm -f "$SUMS"
   # Release lock after checking token is valid or not
   if [ -n "$OWNER_TOKEN" ] && [ "$(cat "$LOCK_DIR/owner" 2>/dev/null || true)" = "$OWNER_TOKEN" ]; then
@@ -112,14 +111,18 @@ cleanup() {
 # - `mcp-server`: MCP entrypoint run by Claude Code session with ~30s timeout.
 #                 SIGKILL after timeout skip cleanup which leave unreleased bootstrap lock;
 #                 so overall time should be less than 30s.
-#                 Worst case: API resolve up to 7s + binary download up to 13s + checksum up to 7s
-# - other: matched with each downloaded binaries' deadline
-if [ "${1:-}" = mcp-server ]; then
+#                 Worst case: API resolve up to 7s + checksum up to 6s + binary download up to 14s = 27s.
+# - other: budget sized for low-bandwidth links (~25 KB/s); background finisher run on this path.
+
+MODE="${1:-}"
+if [ "$MODE" = mcp-server ]; then
   NET_RETRY=3; NET_RETRY_DELAY=1; NET_RETRY_MAXTIME=3
-  NET_API_MAXTIME=4; NET_BIN_MAXTIME=10; NET_CHECKSUM_MAXTIME=4
+  NET_API_MAXTIME=4; NET_BIN_MAXTIME=14; NET_CHECKSUM_MAXTIME=3
+  NET_BIN_SPEED_FLOOR=20000; NET_BIN_SPEED_WINDOW=5
 else
   NET_RETRY=3; NET_RETRY_DELAY=2; NET_RETRY_MAXTIME=60
-  NET_API_MAXTIME=20; NET_BIN_MAXTIME=120; NET_CHECKSUM_MAXTIME=30
+  NET_API_MAXTIME=20; NET_BIN_MAXTIME=300; NET_CHECKSUM_MAXTIME=30
+  NET_BIN_SPEED_FLOOR=5000; NET_BIN_SPEED_WINDOW=30
 fi
 
 # retries fast transient errors such as Github CDN failures (504, timeouts) only;
@@ -131,13 +134,54 @@ fetch() {
        --retry-max-time "$NET_RETRY_MAXTIME" "$@"
 }
 
-# Lock waiting budget to exit before Claude code MCP spawn timeout (~30s)
-LOCK_WAIT_BUDGET="${RUNE_LOCK_WAIT_BUDGET:-20}"
-# Lock's wall-clock age to prevent alive but stuck holder
-# Worst case: NET_RETRY_MAXTIME + NET_{API|BIN|CHECKSUM}_MAXTIME (about 350s) when !mcp-server
-LOCK_STALE_AFTER="${RUNE_LOCK_STALE_AFTER:-360}"
+# Resumable download
+fetch_bin() {
+  curl --fail --silent --show-error --location --connect-timeout 5 \
+       --speed-limit "$NET_BIN_SPEED_FLOOR" --speed-time "$NET_BIN_SPEED_WINDOW" \
+       --max-time "$NET_BIN_MAXTIME" --continue-at - "$@"
+}
 
-# Atomically take stale lock and remove it
+# Detached background installer
+start_bg_finisher() {
+  [ "${RUNE_BOOTSTRAP_BG:-}" = "1" ] && return 0  # finisher
+  [ "$MODE" = mcp-server ] || return 0            # other paths have real budgets
+
+  bg_pidfile="$CACHE_DIR/bootstrap-bg.pid"
+  mkdir -p "$CACHE_DIR" "$RUNE_HOME/logs"
+  bgpid="$(cat "$bg_pidfile" 2>/dev/null || true)"
+  if [ -n "$bgpid" ] && kill -0 "$bgpid" 2>/dev/null; then
+    echo "rune: a background installer is already running (pid $bgpid)." >&2
+    return 0
+  fi
+
+  if command -v setsid >/dev/null 2>&1; then
+    RUNE_BOOTSTRAP_BG=1 setsid nohup bash "$0" install \
+      >>"$RUNE_HOME/logs/bootstrap-bg.log" 2>&1 </dev/null &
+  else
+    RUNE_BOOTSTRAP_BG=1 nohup bash "$0" install \
+      >>"$RUNE_HOME/logs/bootstrap-bg.log" 2>&1 </dev/null &
+  fi
+
+  echo "$!" > "$bg_pidfile"
+  echo "rune: started a background installer (log: $RUNE_HOME/logs/bootstrap-bg.log)." >&2
+  echo "      When it finishes, reconnect via /mcp (or start a new session)." >&2
+}
+
+fail_download() {
+  echo "rune: could not download $1 ($RUNE_VERSION)." >&2
+  echo "      Network may be slow or release endpoint unavailable; partial" >&2
+  echo "      progress is kept under $CACHE_DIR and the next attempt resumes it." >&2
+
+  start_bg_finisher
+
+  echo "      Manual recovery: bash -c \"\${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install\" then reconnect /mcp." >&2
+  exit 1
+}
+
+LOCK_WAIT_BUDGET="${RUNE_LOCK_WAIT_BUDGET:-20}"
+# Worst case (!mcp-server): API 20 + 60 retry + checksums 30+60 + binary 300 ≈ 470s
+LOCK_STALE_AFTER="${RUNE_LOCK_STALE_AFTER:-600}"
+
 clear_stale_lock() {
   if mv "$LOCK_DIR" "$LOCK_DIR.reclaim.$$" 2>/dev/null; then
     rm -rf "$LOCK_DIR.reclaim.$$" 2>/dev/null || true
@@ -148,11 +192,12 @@ clear_stale_lock() {
 waited=0
 wait_count=0
 while true; do
-  # Claim lock atomically
+  # Lock atomically
   if mkdir "$LOCK_DIR" 2>/dev/null; then
     OWNER_TOKEN="$$ $(date +%s)" # "<pid> <timestamp>"
     if ( set -C; printf '%s\n' "$OWNER_TOKEN" > "$LOCK_DIR/owner" ) 2>/dev/null; then
       trap cleanup EXIT INT TERM
+
       # Double-check if mkdir -> write gap affect lock
       if [ "$(cat "$LOCK_DIR/owner" 2>/dev/null || true)" = "$OWNER_TOKEN" ]; then
         break
@@ -164,7 +209,7 @@ while true; do
 
     OWNER_TOKEN=""
     if [ ! -d "$LOCK_DIR" ]; then
-      continue   # lock is cleared, retry claim
+      continue   # lock is cleared, retry
     fi
 
     # Real write error (disk full, permission, or others)
@@ -174,7 +219,7 @@ while true; do
     fi
   fi
 
-  # Wait for another process as we failed to claim lock
+  # Wait for another process
   if target_ready; then
     exec "$TARGET" "$@"   # bootstrap finished
   fi
@@ -188,7 +233,6 @@ while true; do
   esac
 
   if [ -z "$owner" ]; then
-    # Dir is created but no owner yet; holder in the middle of claim or died
     wait_count=$((wait_count + 1))
     if [ "$wait_count" -ge 5 ]; then
       echo "rune: bootstrap lock not claimed for ${wait_count}s; reclaiming" >&2
@@ -197,7 +241,7 @@ while true; do
   else
     wait_count=0
     if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-      # Holder process not found; lock is leaked
+      # Holder process not found (leaked lock)
       echo "rune: bootstrap lock holder (pid $pid) is not found; reclaiming" >&2
       clear_stale_lock; continue
     fi
@@ -214,8 +258,8 @@ while true; do
     fi
 
     if [ "$waited" -ge "$LOCK_WAIT_BUDGET" ]; then
-      echo "rune: another rune bootstrap is in progress over MCP spawn budget." >&2
-      echo "      Retry in a moment, or run it out-of-band:" >&2
+      echo "rune: another rune bootstrap is in progress." >&2
+      echo "      Retry in a moment:" >&2
       echo "        bash -c \"\${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install\"" >&2
       exit 1
     fi
@@ -225,7 +269,7 @@ while true; do
   waited=$((waited + 1))
 done
 
-# Double-check: install is completed right before we won the lock
+# Double-check: install is completed already
 if target_ready; then
   cleanup
   trap - EXIT INT TERM
@@ -251,7 +295,7 @@ fi
 RUNE_VERSION="${RUNE_VERSION:-}"
 if [ -z "$RUNE_VERSION" ]; then
   echo "rune: resolving latest release..." >&2
-  api="https://api.github.com/repos/CryptoLabInc/rune/releases/latest"
+  api="${RUNE_GH_API_BASE:-https://api.github.com}/repos/CryptoLabInc/rune/releases/latest"
 
   # Use token if exist
   token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
@@ -270,7 +314,8 @@ fi
 
 if [ -z "$RUNE_VERSION" ]; then
   echo "rune: cannot determine the latest release" >&2
-  echo "      Pin it explicitly, e.g.: RUNE_VERSION=v0.4.0 ${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install" >&2
+  echo "      Pin it explicitly, e.g.: RUNE_VERSION=v1.0.0 ${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install" >&2
+  start_bg_finisher   # retry resolution
   exit 1
 fi
 
@@ -298,26 +343,20 @@ esac
 
 echo "rune: bootstrapping CLI ($ASSET $RUNE_VERSION) to $TARGET" >&2
 
-RELEASE_BASE="https://github.com/CryptoLabInc/rune/releases/download/$RUNE_VERSION"
-mkdir -p "$(dirname "$TARGET")"
+RELEASE_BASE="${RUNE_GH_DL_BASE:-https://github.com}/CryptoLabInc/rune/releases/download/$RUNE_VERSION"
+mkdir -p "$(dirname "$TARGET")" "$CACHE_DIR"
 
-# Leave TMP on the same filesystem as TARGET
-TMP="$(mktemp "$(dirname "$TARGET")/.rune-bootstrap-XXXXXX")"
+# Resumable partial download
+PARTIAL="$CACHE_DIR/$ASSET-$RUNE_VERSION.partial"
+for f in "$CACHE_DIR"/*.partial; do
+  [ -e "$f" ] || continue
+  [ "$f" = "$PARTIAL" ] || rm -f "$f"
+done
 SUMS="$(mktemp -t rune-bootstrap-sums-XXXXXX)"
 
-if ! fetch --max-time "$NET_BIN_MAXTIME" "$RELEASE_BASE/$ASSET" -o "$TMP"; then
-  echo "rune: could not download $ASSET ($RUNE_VERSION) after retries." >&2
-  echo "      The release endpoint may be slow or temporarily unavailable (e.g. HTTP 504)." >&2
-  echo "      Recover out-of-band, then reconnect /mcp:" >&2
-  echo "        bash -c \"\${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install\"" >&2
-  exit 1
-fi
+# Checksum
 if ! fetch --max-time "$NET_CHECKSUM_MAXTIME" "$RELEASE_BASE/checksums.txt" -o "$SUMS"; then
-  echo "rune: could not download checksums.txt ($RUNE_VERSION) after retries." >&2
-  echo "      The release endpoint may be slow or temporarily unavailable (e.g. HTTP 504)." >&2
-  echo "      Recover out-of-band, then reconnect /mcp:" >&2
-  echo "        bash -c \"\${CLAUDE_PLUGIN_ROOT:-.}/bin/rune install\"" >&2
-  exit 1
+  fail_download "checksums.txt"
 fi
 
 EXPECTED="$(grep " $ASSET\$" "$SUMS" | cut -d' ' -f1 || true)"
@@ -326,23 +365,35 @@ if [ -z "$EXPECTED" ]; then
   exit 1
 fi
 
+bin_rc=0
+fetch_bin "$RELEASE_BASE/$ASSET" -o "$PARTIAL" || bin_rc=$?
+if [ "$bin_rc" -ne 0 ]; then
+  case "$bin_rc" in
+    22|33) [ -s "$PARTIAL" ] || fail_download "$ASSET" ;; # maybe already complete
+    *)     fail_download "$ASSET" ;;
+  esac
+fi
+
 if command -v sha256sum >/dev/null 2>&1; then
-  ACTUAL="$(sha256sum "$TMP" | cut -d' ' -f1)"
+  ACTUAL="$(sha256sum "$PARTIAL" | cut -d' ' -f1)"
 else
-  ACTUAL="$(shasum -a 256 "$TMP" | cut -d' ' -f1)"
+  ACTUAL="$(shasum -a 256 "$PARTIAL" | cut -d' ' -f1)"
 fi
 
 if [ "$ACTUAL" != "$EXPECTED" ]; then
   echo "rune: checksum mismatch for $ASSET" >&2
   echo "      expected: $EXPECTED" >&2
   echo "      actual:   $ACTUAL" >&2
+  rm -f "$PARTIAL"   # a corrupt/stale partial must not poison the next attempt
+  if [ "$bin_rc" -ne 0 ]; then
+    fail_download "$ASSET"   # resume said "complete" but the content is wrong
+  fi
   exit 1
 fi
 
 # Atomic publish
-chmod +x "$TMP"
-mv -f "$TMP" "$TARGET"
-TMP=""
+chmod +x "$PARTIAL"
+mv -f "$PARTIAL" "$TARGET"
 
 # Delegate to the freshly-installed Go binary
 cleanup
