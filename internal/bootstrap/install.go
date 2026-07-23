@@ -14,6 +14,21 @@ import (
 
 var ErrInstallInProgress = errors.New("install: another install in progress")
 
+func humanReadableBytes(n int64) string {
+	const unit = 1000
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "kMGTPE"[exp])
+}
+
 type InstallOptions struct {
 	ManifestURL string
 	Force       bool     // `rune install --force` to force re-download
@@ -135,7 +150,12 @@ func Install(ctx context.Context, opts InstallOptions) (*Result, error) {
 			// Corrupted or staled binary (SHA mismatch / unverifiable): re-install
 		}
 
-		logf("[%d/%d] %s (%d bytes): downloading...", stepNum, total, in.step, in.spec.Size)
+		// Show spec.Size (optional) only when it known
+		if in.spec.Size > 0 {
+			logf("[%d/%d] %s (%s): downloading...", stepNum, total, in.step, humanReadableBytes(in.spec.Size))
+		} else {
+			logf("[%d/%d] %s: downloading...", stepNum, total, in.step)
+		}
 		if err := installArtifact(ctx, paths, in.spec, in.dest, opts.Progress, logf); err != nil {
 			r.Failed[in.step] = err.Error()
 			r.Status = "partial"
