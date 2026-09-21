@@ -1,5 +1,5 @@
 ---
-description: Search RUNE organizational memory for relevant past decisions and context
+description: Search the team's shared RUNE memory for past decisions, fixes, and context. Use before a design choice or debugging session a teammate may have already solved
 argument-hint: <question or topic>
 allowed-tools: mcp__plugin_rune_rune__recall
 ---

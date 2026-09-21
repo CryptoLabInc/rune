@@ -8,5 +8,5 @@ cfg="$HOME/.rune/config.json"
 grep -q '"state"[[:space:]]*:[[:space:]]*"active"' "$cfg" || exit 0
 
 cat <<'EOF'
-RUNE organizational memory is active. Proactively run /rune:capture when you would save something to your own memory, or when the work produces a decision worth sharing with the team, a troubleshooting resolution, or context worth preserving for teammates. The capture command guides you to compose a concise insight plus a fuller context.
+RUNE team memory is active. This is the TEAM's shared memory, separate from your own memory: call mcp__plugin_rune_rune__capture proactively, without being asked, whenever the work produces a decision and its rationale, a root cause and fix, a rejected alternative, or context a teammate would search for later. Near-duplicates are dropped server-side, so capture when in doubt. Before a design choice or a debugging session, call mcp__plugin_rune_rune__recall to check whether a teammate already solved it.
 EOF

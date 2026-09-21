@@ -1,5 +1,5 @@
 ---
-description: Capture a decision, insight, or context into RUNE organizational memory
+description: Save a decision, fix, or context to the team's shared RUNE memory. Use proactively after any decision, root-cause fix, or discovery — without being asked
 argument-hint: <what to remember>
 allowed-tools: mcp__plugin_rune_rune__capture
 ---

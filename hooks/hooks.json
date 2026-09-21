@@ -1,5 +1,5 @@
 {
-  "description": "RUNE proactive-capture reminder injected at session start",
+  "description": "RUNE proactive-capture nudges: a SessionStart reminder plus a gated end-of-turn checkpoint",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,17 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/rune-capture-hint.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/rune-stop-capture-gate.sh",
             "timeout": 5
           }
         ]
