@@ -14,9 +14,9 @@
   <g transform="translate(430 116)">
     <text x="0" y="29" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="28" font-weight="800">02</text>
     <text x="48" y="25" fill="#7890a3" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="800" letter-spacing="2">BLIND SEARCH</text>
-    <text x="0" y="75" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="700">Search without exposing plaintext.</text>
-    <text x="0" y="109" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">RuneSpace evaluates encrypted vectors while</text>
-    <text x="0" y="133" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">the storage layer stays blind.</text>
+    <text x="0" y="75" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20" font-weight="700">Search encrypted stored vectors.</text>
+    <text x="0" y="109" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">RuneSpace searches encrypted stored vectors.</text>
+    <text x="0" y="133" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="15">Recall query vectors are plaintext.</text>
   </g>
 
   <g transform="translate(820 116)">

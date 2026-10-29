@@ -23,8 +23,11 @@ Pass two fields:
 Use `$ARGUMENTS` as the subject when given; otherwise capture the most
 significant decision or insight from the current conversation.
 
+Capture does not run a similarity search to suppress duplicates. Submit each
+decision once; separate capture calls can store duplicate records.
+
 Result handling:
 - `captured: true` → confirm briefly, citing `record_id`.
-- `captured: false` → it was a near-duplicate of `novelty.related`; say so and
-  do not retry.
+- `captured: false` → relay the returned reason without assuming that a
+  similarity check was performed. Do not retry automatically.
 - `ok: false` → relay the error.

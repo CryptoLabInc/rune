@@ -299,6 +299,14 @@ func TestWatcher_ControlSocketReload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- runWatcher(ctx, cfg) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("watcher did not exit after cancel")
+		}
+	})
 
 	// Wait until the control socket response
 	deadline := time.Now().Add(2 * time.Second)
@@ -308,6 +316,20 @@ func TestWatcher_ControlSocketReload(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("control socket not up within 2s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// The socket can answer before the child reaches TestMain. Wait for the
+	// first invocation so reload cannot stop it before it records startup.
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		data, _ := os.ReadFile(countFile)
+		if strings.Count(string(data), "\n") >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("first child did not start within 2s; invocations=%q", data)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -334,13 +356,6 @@ func TestWatcher_ControlSocketReload(t *testing.T) {
 
 	if st, err := SupervisorRequest(cfg.SocketPath, Request{Cmd: "status"}); err != nil || !st.OK {
 		t.Errorf("supervisor should still alive after reload: resp=%+v err=%v", st, err)
-	}
-
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("watcher did not exit after cancel")
 	}
 }
 
