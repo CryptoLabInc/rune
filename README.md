@@ -85,7 +85,9 @@ Claude Code is available today. Dashed integrations—Codex, Antigravity, and MC
 3. RuneSpace evaluates similarity over encrypted vectors and returns encrypted results.
 4. The Console, which holds the team's secret key, opens authorized results and returns the relevant memories to the agent.
 
-RuneSpace stores neither plaintext documents nor plaintext embeddings. Team keys and access policy remain in the Console trust boundary.
+RuneSpace stores encrypted memory payloads and encrypted item vectors. Recall query vectors are plaintext to Console and RuneSpace. Console holds HE secret keys and payload keys, opens authorized content, and remains trusted together with its host administrator; this does not provide end-to-end privacy from Console or root, or prove correct computation by a malicious server.
+
+Authenticated metadata v2 and removal of capture novelty search are pending source changes. Existing tags and installer downloads do not establish delivery of these changes. Review the matching security and coordinated-upgrade notes in the [Console repository](https://github.com/CryptoLabInc/rune-console) before adopting the changes; compatible releases, runtime pins, clean-install checks, and live HE evidence remain pending.
 
 ## Repository map
 
