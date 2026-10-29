@@ -28,7 +28,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/rune-pillars-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset=".github/assets/rune-pillars-light.svg">
-    <img src=".github/assets/rune-pillars-light.svg" alt="Capture team decisions, recall relevant context, and search encrypted vectors without exposing plaintext" width="100%">
+    <img src=".github/assets/rune-pillars-light.svg" alt="Capture team decisions, recall context, and search encrypted stored vectors with plaintext query vectors" width="100%">
   </picture>
 </p>
 
