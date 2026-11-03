@@ -15,8 +15,17 @@ context, score }`. Synthesize them into a short, direct answer:
 
 - Lead with what organizational memory says, grounded in the `insight` fields;
   draw on `context` for detail.
-- Cite sources by `record_id`; attribute to `author` when who decided it matters.
+- Cite sources by `record_id`. The optional `author` field is client-supplied
+  metadata and may be empty; do not treat it as verified human attribution or
+  infer who made a decision from it alone.
 - Empty results → say no relevant records were found and answer from general
   knowledge only, marked as such. If the conversation is producing a decision
   worth saving, suggest `/rune:capture`.
-- `ok: false` → relay the error.
+- `ok: false` → relay the error and its hint. For `CONSOLE_DECRYPTION_ERROR`
+  or `DataLoss`, explain that stored metadata could not be validated and ask
+  the Console administrator to investigate integrity and legacy migration
+  status. Do not retry or suggest enabling legacy reads, disabling validation,
+  or downgrading.
+
+Recall sends its query vector in plaintext to Console and RuneSpace over TLS.
+Do not call it with a prospective capture insight merely to check for duplicates.

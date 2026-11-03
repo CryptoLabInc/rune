@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "rune",
-      "description": "FHE-encrypted organizational memory for teams. Capture and retrieve institutional knowledge with zero-knowledge privacy.",
+      "description": "FHE-encrypted organizational memory for teams. Stored memory payloads and item vectors are encrypted at RuneSpace; query vectors are plaintext to your Console and RuneSpace over TLS.",
       "version": "1.0.0",
       "source": "./",
       "author": {

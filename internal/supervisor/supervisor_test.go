@@ -89,6 +89,10 @@ func fakeRuned(behavior string) {
 
 func testWatcherConfig(t *testing.T) Config {
 	t.Helper()
+	// Child test binaries inherit race instrumentation. Its default 1s exit
+	// delay exceeds our shutdown grace and would turn graceful exits into
+	// SIGKILLs, so remove only that delay while keeping race detection enabled.
+	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	return Config{
 		RunedBinary:     os.Args[0],
 		BackoffSchedule: []time.Duration{time.Millisecond},
@@ -218,8 +222,20 @@ func TestWatcher_ForwardSignalToChild(t *testing.T) {
 	cfg := testWatcherConfig(t)
 	cfg.ShutdownGrace = 2 * time.Second
 
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runWatcher(context.Background(), cfg) }()
+	go func() {
+		done <- runWatcher(ctx, cfg)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("watcher did not exit after cancel")
+		}
+	})
 
 	time.Sleep(400 * time.Millisecond)
 
@@ -250,7 +266,18 @@ func TestWatcher_ControlStatus(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runWatcher(ctx, cfg) }()
+	go func() {
+		done <- runWatcher(ctx, cfg)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("watcher did not exit after cancel")
+		}
+	})
 
 	var resp Response
 	deadline := time.Now().Add(2 * time.Second)
@@ -261,7 +288,7 @@ func TestWatcher_ControlStatus(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("control socket did not answer within deadlien: %v", err)
+			t.Fatalf("control socket did not answer within deadline: %v", err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -299,6 +326,14 @@ func TestWatcher_ControlSocketReload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- runWatcher(ctx, cfg) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("watcher did not exit after cancel")
+		}
+	})
 
 	// Wait until the control socket response
 	deadline := time.Now().Add(2 * time.Second)
@@ -308,6 +343,20 @@ func TestWatcher_ControlSocketReload(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("control socket not up within 2s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// The socket can answer before the child reaches TestMain. Wait for the
+	// first invocation so reload cannot stop it before it records startup.
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		data, _ := os.ReadFile(countFile)
+		if strings.Count(string(data), "\n") >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("first child did not start within 2s; invocations=%q", data)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -334,13 +383,6 @@ func TestWatcher_ControlSocketReload(t *testing.T) {
 
 	if st, err := SupervisorRequest(cfg.SocketPath, Request{Cmd: "status"}); err != nil || !st.OK {
 		t.Errorf("supervisor should still alive after reload: resp=%+v err=%v", st, err)
-	}
-
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("watcher did not exit after cancel")
 	}
 }
 

@@ -37,7 +37,7 @@
     <rect width="820" height="480" fill="url(#core-glow)"/>
 
     <text x="42" y="52" fill="#f4f9fc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="26" font-weight="750">How RUNE moves memory</text>
-    <text x="42" y="78" fill="#8fa5b5" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14">One encrypted path from the agent to the team's shared context.</text>
+    <text x="42" y="78" fill="#8fa5b5" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14">Encrypted stored memory, plaintext query vectors, and a trusted team Console.</text>
 
     <line x1="918" y1="51" x2="954" y2="51" stroke="#55e8ca" stroke-width="2"/>
     <text x="966" y="56" fill="#b7c7d2" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1">AVAILABLE</text>
@@ -51,7 +51,7 @@
     <text x="654" y="179" fill="#6f8798" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.5">TEAM TRUST BOUNDARY</text>
 
     <rect x="910" y="154" width="262" height="176" rx="20" fill="#0a1928" fill-opacity="0.58" stroke="#284356"/>
-    <text x="934" y="179" fill="#6f8798" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.5">BLIND STORAGE</text>
+    <text x="934" y="179" fill="#6f8798" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.5">ENCRYPTED STORAGE</text>
 
     <path d="M240 169C286 169 286 220 330 220" stroke="#55e8ca" stroke-width="2" marker-end="url(#arrow)"/>
     <path d="M240 235C286 235 290 239 330 239" stroke="#638294" stroke-width="1.6" stroke-dasharray="6 7" marker-end="url(#arrow-planned)" opacity="0.72"/>
@@ -61,11 +61,18 @@
     <path d="M455 312V338" stroke="#55e8ca" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
     <text x="470" y="329" fill="#6f8798" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1">EMBED</text>
 
-    <path d="M582 252H644" stroke="#55e8ca" stroke-width="2.2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <text x="575" y="238" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1">SEALED + FHE</text>
+    <path d="M582 244H644" stroke="#55e8ca" stroke-width="2.2" marker-end="url(#arrow)"/>
+    <path d="M582 264H644" stroke="#8fa5b5" stroke-width="2.2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="602" y="230" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1">TLS</text>
 
-    <path d="M878 252H924" stroke="#55e8ca" stroke-width="2.2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <text x="872" y="238" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1">ENCRYPTED</text>
+    <path d="M878 244H924" stroke="#55e8ca" stroke-width="2.2" marker-end="url(#arrow)"/>
+    <path d="M878 264H924" stroke="#8fa5b5" stroke-width="2.2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="890" y="230" fill="#72f5dc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9" font-weight="700" letter-spacing="1">TLS</text>
+
+    <text x="642" y="358" fill="#72f5dc" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11">Capture insert → sealed metadata + FHE item vectors (TLS).</text>
+    <text x="642" y="380" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11">Recall query → plaintext vectors to Console and RuneSpace (TLS).</text>
+    <text x="642" y="402" fill="#a8bac8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11">Recall result ← encrypted to Console; plaintext to the agent (TLS).</text>
+    <text x="642" y="424" fill="#8fa5b5" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="11">MCP v1.0.0 also sends capture embeddings as plaintext queries.</text>
 
     <g transform="translate(52 141)">
       <rect width="180" height="56" rx="13" fill="url(#active-card)" stroke="#4fd9bd"/>

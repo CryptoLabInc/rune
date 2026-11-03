@@ -28,7 +28,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/assets/rune-pillars-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset=".github/assets/rune-pillars-light.svg">
-    <img src=".github/assets/rune-pillars-light.svg" alt="Capture team decisions, recall relevant context, and search encrypted vectors without exposing plaintext" width="100%">
+    <img src=".github/assets/rune-pillars-light.svg" alt="Capture team decisions, recall context, and search encrypted stored vectors with plaintext query vectors" width="100%">
   </picture>
 </p>
 
@@ -81,11 +81,13 @@ RUNE's memory layer is built on MCP, so it is not intended to stay tied to a sin
 Claude Code is available today. Dashed integrations—Codex, Antigravity, and MCP-capable local agent runtimes, including Qwen 3.6-based setups—are planned.
 
 1. `runed` creates the embedding on your device.
-2. The plugin encrypts the vector with FHE and seals the memory payload before sending it through your team's Console.
-3. RuneSpace evaluates similarity over encrypted vectors and returns encrypted results.
-4. The Console, which holds the team's secret key, opens authorized results and returns the relevant memories to the agent.
+2. For a capture insert, the runtime encrypts the item vector with FHE and seals the memory payload before sending them through your team's Console to RuneSpace.
+3. For recall, the query vector is sent in plaintext to Console and RuneSpace over TLS. RuneSpace evaluates similarity over encrypted stored vectors and returns encrypted scores and sealed memory payloads to Console.
+4. Console holds the HE secret keys and payload keys, decrypts scores, opens the returned memory payloads, and sends plaintext memories to the agent over TLS.
 
-RuneSpace stores neither plaintext documents nor plaintext embeddings. Team keys and access policy remain in the Console trust boundary.
+RuneSpace stores encrypted memory payloads and encrypted item vectors. Query vectors are plaintext to Console and RuneSpace. Releases before removal of capture novelty search, including the rune-mcp v1.0.0 pinned in [`.release-pins.yaml`](.release-pins.yaml), also send capture insight embeddings as plaintext similarity queries. Console and its host administrator remain trusted; this does not provide end-to-end privacy from Console or root, verify the human author of a memory, or prove correct computation by a malicious server.
+
+Behavior depends on the installed runtime and Console versions. A documentation or plugin update alone does not change an installed runtime's behavior.
 
 ## Repository map
 
